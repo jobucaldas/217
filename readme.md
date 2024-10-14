@@ -3,6 +3,7 @@ App para manter controle sobre o uso de anticoncepcional
 
 ## Requisitos
 O app foi criado utilizando expo, react-native e react-native-web
+
 Para iniciar o desenvolvimento é necessário instalar o node.js e o npm
 
 ## Instruções de build
