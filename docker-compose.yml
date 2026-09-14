@@ -1,0 +1,64 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: docker.io/postgres:16-alpine
+    environment:
+      POSTGRES_DB: app_217
+      POSTGRES_USER: app_217
+      POSTGRES_PASSWORD: app_217
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app_217 -d app_217"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: "postgres://app_217:app_217@postgres:5432/app_217?sslmode=disable"
+      BACKEND_ADDR: ":3000"
+      VAPID_PUBLIC_KEY: "${VAPID_PUBLIC_KEY:-}"
+      VAPID_PRIVATE_KEY: "${VAPID_PRIVATE_KEY:-}"
+      VAPID_SUBJECT: "${VAPID_SUBJECT:-}"
+      GOOGLE_CLIENT_ID: "${GOOGLE_CLIENT_ID:-}"
+      GOOGLE_CLIENT_SECRET: "${GOOGLE_CLIENT_SECRET:-}"
+      APP_BASE_URL: "${APP_BASE_URL:-http://localhost:8080}"
+    depends_on:
+      - postgres
+    volumes:
+      - ./backend:/app:Z
+    working_dir: /app
+    restart: unless-stopped
+    command: >
+      sh -c '
+        echo "Waiting for postgres..." &&
+        for i in $(seq 1 30); do
+          pg_isready -h postgres -U app_217 -d app_217 2>/dev/null && break;
+          echo "attempt $i...";
+          sleep 1;
+        done &&
+        echo "Starting backend..." &&
+        go run ./cmd/server -addr "$BACKEND_ADDR" -db "$DATABASE_URL"
+      '
+
+  caddy:
+    image: docker.io/caddy:alpine
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./frontend/dist:/srv/frontend:Z
+      - ./Caddyfile:/etc/caddy/Caddyfile:Z
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  pgdata:
