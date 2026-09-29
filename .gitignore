@@ -15,6 +15,7 @@ backend/server
 .env*.local
 
 # generated validation artifacts
+artifacts/
 artifacts/screenshots/
 artifacts/test-results/
 artifacts/run-recovery/
