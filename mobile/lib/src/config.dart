@@ -1,11 +1,11 @@
 class AppConfig {
-  const AppConfig({
-    required this.apiBaseUrl,
+  AppConfig({
+    required String apiBaseUrl,
     required this.workosClientId,
     required this.redirectUri,
-  });
+  }) : apiBaseUrl = apiBaseUrl.replaceAll(RegExp(r'/+$'), '');
 
-  final String apiBaseUrl;
+  String apiBaseUrl;
   final String workosClientId;
   final String redirectUri;
 
@@ -23,7 +23,7 @@ class AppConfig {
       'WORKOS_REDIRECT_URI',
       defaultValue: 'com.jobucaldas.a217://auth/callback',
     );
-    return const AppConfig(
+    return AppConfig(
       apiBaseUrl: apiBaseUrl,
       workosClientId: workosClientId,
       redirectUri: redirectUri,

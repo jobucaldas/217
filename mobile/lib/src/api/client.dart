@@ -19,6 +19,27 @@ class ApiClient {
   final FlutterSecureStorage _storage;
 
   static const _sessionKey = 'session_token';
+  static const _apiBaseKey = 'api_base_url';
+
+  Future<void> loadPersistedApiBase() async {
+    final saved = await _storage.read(key: _apiBaseKey);
+    if (saved != null && saved.trim().isNotEmpty) {
+      config.apiBaseUrl = saved.trim().replaceAll(RegExp(r'/+$'), '');
+    }
+  }
+
+  Future<void> setApiBaseUrl(String value) async {
+    final normalized = value.trim().replaceAll(RegExp(r'/+$'), '');
+    if (normalized.isEmpty) {
+      throw ArgumentError('API base URL is required');
+    }
+    final uri = Uri.tryParse(normalized);
+    if (uri == null || !uri.hasScheme || uri.host.isEmpty) {
+      throw ArgumentError('API base URL must include scheme and host');
+    }
+    config.apiBaseUrl = normalized;
+    await _storage.write(key: _apiBaseKey, value: normalized);
+  }
 
   Future<String?> readSessionToken() => _storage.read(key: _sessionKey);
 
@@ -46,10 +67,21 @@ class ApiClient {
       }
     }
     final request = http.Request(method, uri)
-      ..headers.addAll(headers)
-      ..body = body == null ? '' : jsonEncode(body);
-    final streamed = await _http.send(request);
+      ..headers.addAll(headers);
+    if (body != null) {
+      request.body = jsonEncode(body);
+    }
+    final streamed = await _http.send(request).timeout(const Duration(seconds: 20));
     return http.Response.fromStream(streamed);
+  }
+
+  Future<bool> ping() async {
+    try {
+      final response = await _send('GET', _uri('/api/auth/session'), auth: false);
+      return response.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
   }
 
   Future<User?> currentUser() async {

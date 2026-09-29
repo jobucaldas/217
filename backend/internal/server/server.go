@@ -91,16 +91,20 @@ func StartWithPush(addr, databaseURL, appBaseURL string, push PushConfig, workos
 
 	if len(workosConfigs) > 0 {
 		cfg := workosConfigs[0]
-		if cfg.APIKey != "" && cfg.ClientID != "" && cfg.AppBaseURL != "" {
+		if cfg.ClientID != "" && cfg.AppBaseURL != "" {
 			provider, providerErr := auth.NewWorkOSOAuth(cfg.APIKey, cfg.ClientID, cfg.AppBaseURL)
 			if providerErr != nil {
 				log.Printf("workos oauth disabled: %v", providerErr)
 			} else {
 				h.SetOAuthProvider(provider)
-				log.Println("workos oauth enabled")
+				if cfg.APIKey == "" {
+					log.Println("workos oauth enabled (PKCE public exchange; WORKOS_API_KEY unset)")
+				} else {
+					log.Println("workos oauth enabled")
+				}
 			}
 		} else {
-			log.Println("workos oauth disabled: missing WORKOS_API_KEY, WORKOS_CLIENT_ID, or APP_BASE_URL")
+			log.Println("workos oauth disabled: missing WORKOS_CLIENT_ID or APP_BASE_URL")
 		}
 	} else {
 		log.Println("workos oauth disabled: missing configuration")

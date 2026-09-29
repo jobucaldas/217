@@ -29,7 +29,7 @@ services:
       VAPID_PRIVATE_KEY: "${VAPID_PRIVATE_KEY:-}"
       VAPID_SUBJECT: "${VAPID_SUBJECT:-}"
       WORKOS_API_KEY: "${WORKOS_API_KEY:-}"
-      WORKOS_CLIENT_ID: "${WORKOS_CLIENT_ID:-}"
+      WORKOS_CLIENT_ID: "${WORKOS_CLIENT_ID:-client_01M3QCMK75B35RPC8EAJA5GREP}"
       APP_BASE_URL: "${APP_BASE_URL:-http://localhost:8080}"
     depends_on:
       - postgres
@@ -37,17 +37,18 @@ services:
       - ./backend:/app:Z
     working_dir: /app
     restart: unless-stopped
-    command: >
-      sh -c '
-        echo "Waiting for postgres..." &&
-        for i in $(seq 1 30); do
-          pg_isready -h postgres -U app_217 -d app_217 2>/dev/null && break;
-          echo "attempt $i...";
-          sleep 1;
-        done &&
-        echo "Starting backend..." &&
-        go run ./cmd/server -addr "$BACKEND_ADDR" -db "$DATABASE_URL"
-      '
+    command:
+      - sh
+      - -c
+      - |
+        echo "Waiting for postgres..."
+        for i in $$(seq 1 30); do
+          pg_isready -h postgres -U app_217 -d app_217 2>/dev/null && break
+          echo "attempt $$i..."
+          sleep 1
+        done
+        echo "Starting backend..."
+        go run ./cmd/server -addr "$$BACKEND_ADDR" -db "$$DATABASE_URL"
 
   caddy:
     image: docker.io/caddy:alpine

@@ -6,13 +6,17 @@ class AuthScreen extends StatelessWidget {
   const AuthScreen({
     super.key,
     required this.strings,
+    required this.apiBaseUrl,
     required this.onSignIn,
     required this.onToggleLanguage,
+    required this.onOpenSettings,
   });
 
   final Strings strings;
+  final String apiBaseUrl;
   final Future<void> Function() onSignIn;
   final VoidCallback onToggleLanguage;
+  final VoidCallback onOpenSettings;
 
   @override
   Widget build(BuildContext context) {
@@ -37,12 +41,19 @@ class AuthScreen extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: TextButton(
-                    onPressed: onToggleLanguage,
-                    child: Text(strings.pt ? 'English' : 'Português'),
-                  ),
+                Row(
+                  children: [
+                    IconButton(
+                      tooltip: strings.settings,
+                      onPressed: onOpenSettings,
+                      icon: const Icon(Icons.settings_outlined),
+                    ),
+                    const Spacer(),
+                    TextButton(
+                      onPressed: onToggleLanguage,
+                      child: Text(strings.pt ? 'English' : 'Português'),
+                    ),
+                  ],
                 ),
                 const Spacer(),
                 Text(
@@ -59,6 +70,14 @@ class AuthScreen extends StatelessWidget {
                   strings.signInSubtitle,
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.bodyLarge,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  apiBaseUrl,
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
                 ),
                 const SizedBox(height: 28),
                 FilledButton(

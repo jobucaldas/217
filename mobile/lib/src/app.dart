@@ -19,6 +19,7 @@ class App217 extends StatefulWidget {
 class _App217State extends State<App217> {
   late final ApiClient _api = ApiClient(widget.config);
   final GlobalKey<NavigatorState> _navKey = GlobalKey<NavigatorState>();
+  final GlobalKey<ScaffoldMessengerState> _messengerKey = GlobalKey<ScaffoldMessengerState>();
   User? _user;
   bool _loading = true;
   bool _portuguese = true;
@@ -34,6 +35,7 @@ class _App217State extends State<App217> {
 
   Future<void> _bootstrap() async {
     try {
+      await _api.loadPersistedApiBase();
       final user = await _api.currentUser();
       if (!mounted) return;
       setState(() {
@@ -58,11 +60,11 @@ class _App217State extends State<App217> {
         _user = user;
         _loading = false;
       });
-    } catch (_) {
+    } catch (err) {
       if (!mounted) return;
       setState(() => _loading = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(_strings.signInError)),
+      _messengerKey.currentState?.showSnackBar(
+        SnackBar(content: Text('${_strings.signInError}\n$err')),
       );
     }
   }
@@ -71,6 +73,25 @@ class _App217State extends State<App217> {
     await _api.logout();
     if (!mounted) return;
     setState(() => _user = null);
+  }
+
+  void _openSettings() {
+    _navKey.currentState?.push(
+      MaterialPageRoute(
+        builder: (_) => SettingsPage(
+          api: _api,
+          strings: _strings,
+          portuguese: _portuguese,
+          themeMode: _themeMode,
+          onToggleLanguage: () => setState(() => _portuguese = !_portuguese),
+          onToggleTheme: () => setState(() {
+            _themeMode = _themeMode == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark;
+          }),
+          onLogout: _user == null ? null : _logout,
+          onApiBaseChanged: () => setState(() {}),
+        ),
+      ),
+    );
   }
 
   @override
@@ -82,9 +103,14 @@ class _App217State extends State<App217> {
     return MaterialApp(
       title: '217',
       navigatorKey: _navKey,
+      scaffoldMessengerKey: _messengerKey,
       debugShowCheckedModeBanner: false,
       themeMode: _themeMode,
-      theme: ThemeData(colorScheme: colorScheme, useMaterial3: true),
+      theme: ThemeData(
+        colorScheme: colorScheme,
+        useMaterial3: true,
+        fontFamily: 'sans-serif',
+      ),
       darkTheme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
           seedColor: const Color(0xFF1F6F5B),
@@ -97,78 +123,140 @@ class _App217State extends State<App217> {
           : _user == null
               ? AuthScreen(
                   strings: _strings,
+                  apiBaseUrl: _api.config.apiBaseUrl,
                   onSignIn: _signIn,
                   onToggleLanguage: () => setState(() => _portuguese = !_portuguese),
+                  onOpenSettings: _openSettings,
                 )
               : CalendarScreen(
                   api: _api,
                   user: _user!,
                   strings: _strings,
                   onLogout: _logout,
-                  onOpenSettings: () {
-                    _navKey.currentState?.push(
-                      MaterialPageRoute(
-                        builder: (_) => SettingsPage(
-                          strings: _strings,
-                          portuguese: _portuguese,
-                          themeMode: _themeMode,
-                          onToggleLanguage: () => setState(() => _portuguese = !_portuguese),
-                          onToggleTheme: () => setState(() {
-                            _themeMode = _themeMode == ThemeMode.dark
-                                ? ThemeMode.light
-                                : ThemeMode.dark;
-                          }),
-                          onLogout: _logout,
-                        ),
-                      ),
-                    );
-                  },
+                  onOpenSettings: _openSettings,
                 ),
     );
   }
 }
 
-class SettingsPage extends StatelessWidget {
+class SettingsPage extends StatefulWidget {
   const SettingsPage({
     super.key,
+    required this.api,
     required this.strings,
     required this.portuguese,
     required this.themeMode,
     required this.onToggleLanguage,
     required this.onToggleTheme,
-    required this.onLogout,
+    required this.onApiBaseChanged,
+    this.onLogout,
   });
 
+  final ApiClient api;
   final Strings strings;
   final bool portuguese;
   final ThemeMode themeMode;
   final VoidCallback onToggleLanguage;
   final VoidCallback onToggleTheme;
-  final Future<void> Function() onLogout;
+  final VoidCallback onApiBaseChanged;
+  final Future<void> Function()? onLogout;
+
+  @override
+  State<SettingsPage> createState() => _SettingsPageState();
+}
+
+class _SettingsPageState extends State<SettingsPage> {
+  late final TextEditingController _apiBase =
+      TextEditingController(text: widget.api.config.apiBaseUrl);
+  bool _testing = false;
+
+  @override
+  void dispose() {
+    _apiBase.dispose();
+    super.dispose();
+  }
+
+  Future<void> _saveApiBase() async {
+    try {
+      await widget.api.setApiBaseUrl(_apiBase.text);
+      widget.onApiBaseChanged();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(widget.strings.save)),
+      );
+    } catch (err) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$err')),
+      );
+    }
+  }
+
+  Future<void> _testConnection() async {
+    setState(() => _testing = true);
+    try {
+      await widget.api.setApiBaseUrl(_apiBase.text);
+      widget.onApiBaseChanged();
+      final ok = await widget.api.ping();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(ok ? widget.strings.connectionOk : widget.strings.connectionFail)),
+      );
+    } finally {
+      if (mounted) setState(() => _testing = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(strings.settings)),
+      appBar: AppBar(title: Text(widget.strings.settings)),
       body: ListView(
+        padding: const EdgeInsets.all(16),
         children: [
+          Text(widget.strings.apiBaseUrl, style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _apiBase,
+            keyboardType: TextInputType.url,
+            decoration: InputDecoration(
+              border: const OutlineInputBorder(),
+              helperText: widget.strings.apiBaseHint,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              FilledButton(onPressed: _saveApiBase, child: Text(widget.strings.save)),
+              const SizedBox(width: 8),
+              OutlinedButton(
+                onPressed: _testing ? null : _testConnection,
+                child: Text(widget.strings.testConnection),
+              ),
+            ],
+          ),
+          const Divider(height: 32),
           ListTile(
-            title: Text(strings.language),
-            subtitle: Text(portuguese ? 'Português' : 'English'),
-            onTap: onToggleLanguage,
+            contentPadding: EdgeInsets.zero,
+            title: Text(widget.strings.language),
+            subtitle: Text(widget.portuguese ? 'Português' : 'English'),
+            onTap: widget.onToggleLanguage,
           ),
           SwitchListTile(
-            title: Text(themeMode == ThemeMode.dark ? 'Dark' : 'Light'),
-            value: themeMode == ThemeMode.dark,
-            onChanged: (_) => onToggleTheme(),
+            contentPadding: EdgeInsets.zero,
+            title: Text(widget.strings.darkMode),
+            value: widget.themeMode == ThemeMode.dark,
+            onChanged: (_) => widget.onToggleTheme(),
           ),
-          ListTile(
-            title: Text(strings.logout),
-            onTap: () async {
-              await onLogout();
-              if (context.mounted) Navigator.of(context).pop();
-            },
-          ),
+          if (widget.onLogout != null)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(widget.strings.logout),
+              onTap: () async {
+                await widget.onLogout!();
+                if (context.mounted) Navigator.of(context).pop();
+              },
+            ),
         ],
       ),
     );
