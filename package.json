@@ -1,0 +1,5 @@
+{
+  "name": "217",
+  "private": true,
+  "description": "Tooling for 217 lives in containers (Podman). See Makefile."
+}

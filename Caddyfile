@@ -1,4 +1,4 @@
-# 217 — local development proxy. Use a trusted HTTPS hostname for physical Android Push testing.
+# 217 — local development proxy for the Go API used by the Flutter Android client.
 :8080 {
     encode gzip
 
@@ -6,14 +6,8 @@
         reverse_proxy backend:3000
     }
 
-    handle /service-worker.js {
-        root * /srv/frontend
-        header Cache-Control "no-cache, no-store, must-revalidate"
-        file_server
-    }
-
     handle {
-        root * /srv/frontend
+        root * /srv/web
         try_files {path} /index.html
         file_server
     }

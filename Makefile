@@ -1,26 +1,25 @@
 DEV_IMAGE ?= localhost/217-dev
+FLUTTER_IMAGE ?= ghcr.io/cirruslabs/flutter:stable
 PODMAN_RUN = podman run --rm -v "$(CURDIR):/workspace:Z" -w /workspace $(DEV_IMAGE)
+FLUTTER_RUN = podman run --rm -v "$(CURDIR):/workspace:Z" -w /workspace/mobile $(FLUTTER_IMAGE) bash -lc
 COMPOSE_ENV = $(if $(wildcard .env.reminders.local),--env-file .env.reminders.local,) $(if $(wildcard .env.local),--env-file .env.local,)
 
-.PHONY: dev-image frontend-dist test-backend test-frontend test validate dev-up dev-down dev-logs vapid-keys
+.PHONY: dev-image test-backend test-mobile test validate dev-up dev-down dev-logs vapid-keys mobile-apk
 
 dev-image:
 	podman build -t $(DEV_IMAGE) -f .devcontainer/Dockerfile .
 
-frontend-dist: dev-image
-	$(PODMAN_RUN) sh -c 'cd frontend && ./build.sh'
-
 test-backend: dev-image
 	$(PODMAN_RUN) sh -c 'cd backend && test -z "$$(gofmt -l .)" && go test -mod=readonly ./... -v && go vet -mod=readonly ./... && go build -mod=readonly ./...'
 
-test-frontend: dev-image
-	$(PODMAN_RUN) sh -c 'cd frontend && cargo fmt -- --check && cargo test --locked && cargo clippy --locked --all-targets -- -D warnings'
+test-mobile:
+	$(FLUTTER_RUN) 'git config --global --add safe.directory /sdks/flutter >/dev/null 2>&1 || true; flutter pub get && flutter analyze && flutter test'
 
-test: test-backend test-frontend
+test: test-backend test-mobile
 
-validate: test frontend-dist
+validate: test
 
-dev-up: frontend-dist
+dev-up: dev-image
 	podman-compose $(COMPOSE_ENV) up -d --build
 
 dev-down:
@@ -31,3 +30,6 @@ dev-logs:
 
 vapid-keys: dev-image
 	$(PODMAN_RUN) sh -c 'cd backend && go run ./cmd/vapid'
+
+mobile-apk:
+	$(FLUTTER_RUN) 'git config --global --add safe.directory /sdks/flutter >/dev/null 2>&1 || true; flutter pub get && flutter build apk --debug --dart-define=API_BASE_URL=$${API_BASE_URL:-http://10.0.2.2:8080} --dart-define=WORKOS_CLIENT_ID=$${WORKOS_CLIENT_ID:-client_01M3QCMK75B35RPC8EAJA5GREP}'

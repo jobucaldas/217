@@ -7,8 +7,6 @@ node_modules/
 # Build output
 backend/bin/
 backend/server
-frontend/target/
-frontend/dist/
 
 # macOS
 .DS_Store
@@ -24,3 +22,22 @@ artifacts/android/
 
 # Workspace-local Nix development tools
 .dev-tools/
+
+# Flutter / mobile
+mobile/.dart_tool/
+mobile/.flutter-plugins
+mobile/.flutter-plugins-dependencies
+mobile/.packages
+mobile/build/
+mobile/.pub-cache/
+mobile/**/GeneratedPluginRegistrant.*
+
+# Local Go module caches used by containers
+.gomodcache/
+.gocache/
+
+# Legacy Expo tree (not part of this rewrite)
+217/
+
+# web static notice
+# (tracked)
