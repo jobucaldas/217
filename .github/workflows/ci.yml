@@ -1,0 +1,62 @@
+name: 217 CI
+
+on:
+  pull_request:
+
+jobs:
+  nix:
+    name: Nix flake check and fmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+      - name: Check nix formatting
+        run: nix run nixpkgs#nixfmt -- --check flake.nix
+      - name: Validate flake
+        run: nix flake check
+  backend:
+    name: Go fmt, test, vet and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+      - name: Go fmt check
+        run: nix develop --command bash -lc 'cd backend && test -z "$(gofmt -l .)"'
+      - name: Go test
+        run: nix develop --command bash -lc 'cd backend && go test -mod=readonly ./...'
+      - name: Go vet
+        run: nix develop --command bash -lc 'cd backend && go vet -mod=readonly ./...'
+      - name: Go build
+        run: nix develop --command bash -lc 'cd backend && go build -mod=readonly ./...'
+  frontend:
+    name: Rust fmt, clippy, test and WASM build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+      - name: Rust fmt check
+        run: nix develop --command bash -lc 'cd frontend && cargo fmt -- --check'
+      - name: Rust tests
+        run: nix develop --command bash -lc 'cd frontend && cargo test --locked'
+      - name: Clippy
+        run: nix develop --command bash -lc 'cd frontend && cargo clippy --locked --all-targets -- -D warnings'
+      - name: Setup wasm-bindgen
+        run: nix develop --command bash -lc 'sh dev/nix-setup.sh'
+      - name: WASM build
+        run: nix develop --command bash -lc 'cd frontend && ./build.sh'
+  e2e:
+    name: e2e install check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+      - name: Install e2e dependencies
+        run: nix develop --command bash -lc 'npm --prefix e2e ci --ignore-scripts'
