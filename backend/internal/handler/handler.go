@@ -8,11 +8,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"html"
 	"log"
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -27,63 +27,6 @@ type contextKey string
 const userIDKey contextKey = "userID"
 
 const oauthBindingCookie = "217_oauth_binding"
-
-// #region agent log
-func agentDebugLog(hypothesisId, location, message string, data map[string]interface{}) {
-	payload := map[string]interface{}{
-		"hypothesisId": hypothesisId,
-		"location":     location,
-		"message":      message,
-		"data":         data,
-		"timestamp":    time.Now().UnixMilli(),
-	}
-	b, err := json.Marshal(payload)
-	if err != nil {
-		return
-	}
-	f, err := os.OpenFile("/opt/cursor/logs/debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return
-	}
-	_, _ = f.Write(append(b, '\n'))
-	_ = f.Close()
-}
-
-func hashPrefix(value string) string {
-	if value == "" {
-		return ""
-	}
-	sum := sha256.Sum256([]byte(value))
-	return hex.EncodeToString(sum[:4])
-}
-
-func requestHostMeta(r *http.Request, appBaseURL string) map[string]interface{} {
-	refererHost := ""
-	if ref := r.Header.Get("Referer"); ref != "" {
-		if u, err := url.Parse(ref); err == nil {
-			refererHost = u.Host
-		}
-	}
-	originHost := ""
-	if origin := r.Header.Get("Origin"); origin != "" {
-		if u, err := url.Parse(origin); err == nil {
-			originHost = u.Host
-		}
-	}
-	appHost := ""
-	if u, err := url.Parse(appBaseURL); err == nil {
-		appHost = u.Host
-	}
-	return map[string]interface{}{
-		"reqHost":     r.Host,
-		"xForwarded":  r.Header.Get("X-Forwarded-Host"),
-		"refererHost": refererHost,
-		"originHost":  originHost,
-		"appHost":     appHost,
-	}
-}
-
-// #endregion
 
 type Handler struct {
 	store           store.Store
@@ -284,39 +227,43 @@ func (h *Handler) StartWorkOSOAuth(w http.ResponseWriter, r *http.Request) {
 	expires := time.Now().UTC().Add(5 * time.Minute)
 	if err := h.store.CreateOAuthAttempt(state, binding, verifier, nonce, expires); err != nil {
 		log.Printf("create oauth attempt failed: %v", err)
-		// #region agent log
-		agentDebugLog("C", "handler.go:StartWorkOSOAuth", "create_oauth_attempt_failed", map[string]interface{}{"err": err.Error()})
-		// #endregion
 		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
 		return
 	}
-	cookie := h.oauthBindingCookieValue(binding, expires)
-	http.SetCookie(w, cookie)
+	http.SetCookie(w, h.oauthBindingCookieValue(binding, expires))
 	authURL := h.oauthProvider.AuthCodeURL(state, pkceChallengeS256(verifier), nonce)
-	// #region agent log
-	hostMeta := requestHostMeta(r, h.appBaseURL)
-	hostMeta["stateHash8"] = hashPrefix(state)
-	hostMeta["bindingHash8"] = hashPrefix(binding)
-	hostMeta["cookiePath"] = cookie.Path
-	hostMeta["cookieSecure"] = cookie.Secure
-	hostMeta["cookieSameSite"] = int(cookie.SameSite)
-	hostMeta["cookieMaxAge"] = cookie.MaxAge
-	hostMeta["authURLHost"] = ""
-	if u, err := url.Parse(authURL); err == nil {
-		hostMeta["authURLHost"] = u.Host
-		hostMeta["redirectURISet"] = u.Query().Get("redirect_uri") != ""
-		if ru, err := url.Parse(u.Query().Get("redirect_uri")); err == nil {
-			hostMeta["redirectURIHost"] = ru.Host
-			hostMeta["redirectURIPath"] = ru.Path
-		}
-	}
-	agentDebugLog("A", "handler.go:StartWorkOSOAuth", "oauth_start_ok", hostMeta)
-	// #endregion
 	if authURL == "" {
 		http.Error(w, `{"error":"cannot build authorization url"}`, http.StatusInternalServerError)
 		return
 	}
-	http.Redirect(w, r, authURL, http.StatusFound)
+	// Serve a same-origin HTML document (not a 302 bounce) so Chromium keeps the
+	// HttpOnly binding cookie across the subsequent navigation to AuthKit.
+	writeOAuthContinuePage(w, authURL)
+}
+
+func writeOAuthContinuePage(w http.ResponseWriter, authURL string) {
+	jsURL, err := json.Marshal(authURL)
+	if err != nil {
+		http.Error(w, `{"error":"cannot build authorization url"}`, http.StatusInternalServerError)
+		return
+	}
+	href := html.EscapeString(authURL)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	_, _ = fmt.Fprintf(w, `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Continuing sign-in</title>
+<meta http-equiv="refresh" content="0;url=%s">
+</head>
+<body>
+<p>Continuing to WorkOS…</p>
+<p><a id="continue" href="%s">Continue</a></p>
+<script>location.replace(%s)</script>
+</body>
+</html>`, href, href, jsURL)
 }
 
 func (h *Handler) createSessionForUser(w http.ResponseWriter, r *http.Request, user *model.User) (string, error) {
@@ -355,62 +302,20 @@ func (h *Handler) WorkOSOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	code := q.Get("code")
 	state := q.Get("state")
-	// #region agent log
-	cbMeta := requestHostMeta(r, h.appBaseURL)
-	cbMeta["hasCode"] = code != ""
-	cbMeta["hasState"] = state != ""
-	cbMeta["stateHash8"] = hashPrefix(state)
-	cbMeta["stateLen"] = len(state)
-	cbMeta["cookieHeaderPresent"] = strings.Contains(r.Header.Get("Cookie"), oauthBindingCookie)
-	cbMeta["reqPath"] = r.URL.Path
-	agentDebugLog("A", "handler.go:WorkOSOAuthCallback", "callback_enter", cbMeta)
-	// #endregion
 	if code == "" || state == "" {
 		http.Error(w, `{"error":"missing code or state"}`, http.StatusBadRequest)
 		return
 	}
 	bindingCookie, cookieErr := r.Cookie(oauthBindingCookie)
 	if cookieErr != nil || bindingCookie.Value == "" {
-		// #region agent log
-		errStr := ""
-		if cookieErr != nil {
-			errStr = cookieErr.Error()
-		}
-		agentDebugLog("A", "handler.go:WorkOSOAuthCallback", "binding_cookie_missing", map[string]interface{}{
-			"cookieErr": errStr,
-			"emptyVal":  cookieErr == nil && bindingCookie != nil && bindingCookie.Value == "",
-			"reqHost":   r.Host,
-			"appHost":   requestHostMeta(r, h.appBaseURL)["appHost"],
-		})
-		// #endregion
 		http.Error(w, `{"error":"invalid or expired state"}`, http.StatusBadRequest)
 		return
 	}
-	// #region agent log
-	agentDebugLog("B", "handler.go:WorkOSOAuthCallback", "binding_cookie_ok", map[string]interface{}{
-		"bindingHash8": hashPrefix(bindingCookie.Value),
-		"bindingLen":   len(bindingCookie.Value),
-		"stateHash8":   hashPrefix(state),
-	})
-	// #endregion
 	attempt, err := h.store.ConsumeOAuthAttempt(state, bindingCookie.Value)
 	if err != nil {
-		// #region agent log
-		agentDebugLog("C", "handler.go:WorkOSOAuthCallback", "consume_failed", map[string]interface{}{
-			"err":          err.Error(),
-			"stateHash8":   hashPrefix(state),
-			"bindingHash8": hashPrefix(bindingCookie.Value),
-		})
-		// #endregion
 		http.Error(w, `{"error":"invalid or expired state"}`, http.StatusBadRequest)
 		return
 	}
-	// #region agent log
-	agentDebugLog("D", "handler.go:WorkOSOAuthCallback", "consume_ok", map[string]interface{}{
-		"hasVerifier": attempt.CodeVerifier != "",
-		"hasNonce":    attempt.Nonce != "",
-	})
-	// #endregion
 	userInfo, err := h.oauthProvider.Exchange(r.Context(), code, attempt.CodeVerifier, attempt.Nonce)
 	if err != nil {
 		log.Printf("oauth exchange error: %v", err)

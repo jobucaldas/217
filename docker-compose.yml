@@ -35,8 +35,6 @@ services:
       - postgres
     volumes:
       - ./backend:/app:Z
-      # Debug-mode NDJSON sink (host /opt/cursor/logs)
-      - /opt/cursor/logs:/opt/cursor/logs:Z
     working_dir: /app
     restart: unless-stopped
     command:

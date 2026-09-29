@@ -5,9 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -87,19 +90,25 @@ func TestWorkOSOAuthStartAndCallback(t *testing.T) {
 	startReq := httptest.NewRequest(http.MethodGet, "/api/auth/workos", nil)
 	startW := httptest.NewRecorder()
 	h.StartWorkOSOAuth(startW, startReq)
-	if startW.Code != http.StatusFound {
-		t.Fatalf("expected redirect, got %d: %s", startW.Code, startW.Body.String())
+	if startW.Code != http.StatusOK {
+		t.Fatalf("expected interstitial HTML (not bounce 302), got %d: %s", startW.Code, startW.Body.String())
 	}
-	location := startW.Header().Get("Location")
-	parsed, err := url.Parse(location)
+	if ct := startW.Header().Get("Content-Type"); !strings.Contains(ct, "text/html") {
+		t.Fatalf("expected HTML interstitial, content-type=%q", ct)
+	}
+	if startW.Header().Get("Location") != "" {
+		t.Fatal("start must not 302 bounce; binding cookie must be set on a document response")
+	}
+	authURL := mustAuthURLFromStart(t, startW)
+	parsed, err := url.Parse(authURL)
 	if err != nil {
-		t.Fatalf("parse redirect url: %v", err)
+		t.Fatalf("parse auth url: %v", err)
 	}
 	state := parsed.Query().Get("state")
 	bindingCookie := cookieNamed(t, startW.Result().Cookies(), "217_oauth_binding")
 	challenge := parsed.Query().Get("code_challenge")
 	if state == "" || challenge == "" {
-		t.Fatalf("missing state or challenge in redirect: %s", location)
+		t.Fatalf("missing state or challenge in auth url: %s", authURL)
 	}
 	if parsed.Query().Get("code_challenge_method") != "S256" {
 		t.Fatalf("expected S256 PKCE, got %s", parsed.RawQuery)
@@ -195,7 +204,7 @@ func TestWorkOSOAuthCallbackRejectsUnverifiedEmail(t *testing.T) {
 	startReq := httptest.NewRequest(http.MethodGet, "/api/auth/workos", nil)
 	startW := httptest.NewRecorder()
 	h.StartWorkOSOAuth(startW, startReq)
-	state := mustStateFromLocation(t, startW.Header().Get("Location"))
+	state := mustStateFromAuthURL(t, mustAuthURLFromStart(t, startW))
 	bindingCookie := cookieNamed(t, startW.Result().Cookies(), "217_oauth_binding")
 
 	cbReq := httptest.NewRequest(http.MethodGet, "/api/auth/workos/callback?code=auth-code&state="+url.QueryEscape(state), nil)
@@ -350,7 +359,10 @@ func startOAuth(t *testing.T, h *handler.Handler) (string, *http.Cookie) {
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/workos", nil)
 	w := httptest.NewRecorder()
 	h.StartWorkOSOAuth(w, req)
-	return mustStateFromLocation(t, w.Header().Get("Location")), cookieNamed(t, w.Result().Cookies(), "217_oauth_binding")
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected interstitial start, got %d: %s", w.Code, w.Body.String())
+	}
+	return mustStateFromAuthURL(t, mustAuthURLFromStart(t, w)), cookieNamed(t, w.Result().Cookies(), "217_oauth_binding")
 }
 
 func cookieNamed(t *testing.T, cookies []*http.Cookie, name string) *http.Cookie {
@@ -364,17 +376,60 @@ func cookieNamed(t *testing.T, cookies []*http.Cookie, name string) *http.Cookie
 	return nil
 }
 
-func mustStateFromLocation(t *testing.T, location string) string {
+var continueHrefRE = regexp.MustCompile(`id="continue"\s+href="([^"]+)"`)
+
+func mustAuthURLFromStart(t *testing.T, w *httptest.ResponseRecorder) string {
 	t.Helper()
-	parsed, err := url.Parse(location)
+	if loc := w.Header().Get("Location"); loc != "" {
+		return loc
+	}
+	m := continueHrefRE.FindStringSubmatch(w.Body.String())
+	if m == nil {
+		t.Fatalf("missing #continue auth link in start HTML: %s", w.Body.String())
+	}
+	return html.UnescapeString(m[1])
+}
+
+func mustStateFromAuthURL(t *testing.T, authURL string) string {
+	t.Helper()
+	parsed, err := url.Parse(authURL)
 	if err != nil {
 		t.Fatal(err)
 	}
 	state := parsed.Query().Get("state")
 	if state == "" {
-		t.Fatalf("missing state in redirect: %s", location)
+		t.Fatalf("missing state in auth url: %s", authURL)
 	}
 	return state
+}
+
+func mustStateFromLocation(t *testing.T, location string) string {
+	t.Helper()
+	return mustStateFromAuthURL(t, location)
+}
+
+func TestWorkOSOAuthStartUsesInterstitialNotBounceRedirect(t *testing.T) {
+	h, _ := newTestHandler(t)
+	h.SetOAuthProvider(&fakeOAuthProvider{userInfo: &auth.OAuthUserInfo{Subject: "s", Email: "u@example.com", EmailVerified: true}})
+	w := httptest.NewRecorder()
+	h.StartWorkOSOAuth(w, httptest.NewRequest(http.MethodGet, "/api/auth/workos", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("bounce 302 loses binding cookie in Chromium; want 200 interstitial, got %d", w.Code)
+	}
+	if w.Header().Get("Location") != "" {
+		t.Fatal("Location on start causes bounce-tracking to drop 217_oauth_binding")
+	}
+	binding := cookieNamed(t, w.Result().Cookies(), "217_oauth_binding")
+	if binding.Path != "/api/auth/workos/callback" || !binding.HttpOnly {
+		t.Fatalf("unexpected binding cookie: %#v", binding)
+	}
+	authURL := mustAuthURLFromStart(t, w)
+	if !strings.Contains(authURL, "state=") || !strings.Contains(w.Body.String(), "location.replace(") {
+		t.Fatalf("interstitial must auto-continue to AuthKit: url=%s body=%s", authURL, w.Body.String())
+	}
+	if w.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("interstitial must be uncached, got %q", w.Header().Get("Cache-Control"))
+	}
 }
 
 func TestProtectedRoutesStillTrackEntriesWithCookieAuth(t *testing.T) {
