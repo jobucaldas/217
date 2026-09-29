@@ -1,6 +1,6 @@
 # 217
 
-Private bilingual (Português/English) anticonceptional intake tracker. The **Flutter Android** client records taken/missed status and notes. The Go API stores each account's data in PostgreSQL and authenticates users with **WorkOS AuthKit** (PKCE). Opaque, revocable server sessions are returned to the app as bearer tokens (and optionally cookies for browser callbacks).
+Private bilingual (Português/English) anticonceptional intake tracker. The **Flutter** client (web + Android) records taken/missed status and notes. The Go API stores each account's data in PostgreSQL and authenticates users with **WorkOS AuthKit** (PKCE). Opaque, revocable server sessions are returned as bearer tokens (Android) or `HttpOnly` cookies (browser).
 
 ## Requirements
 
@@ -17,9 +17,10 @@ Missing WorkOS configuration is non-fatal at startup; auth endpoints return HTTP
 
 ```sh
 make dev-up
+make mobile-web
 ```
 
-API: <http://localhost:8080/api/*>. Static notice page: <http://localhost:8080/>.
+Open <http://localhost:8080/> for the Flutter web UI (same origin as `/api/*`). Sign-in uses the browser cookie AuthKit path (`GET /api/auth/workos` → callback → session cookie).
 
 Stop with `make dev-down`.
 
@@ -57,12 +58,13 @@ Authentication is WorkOS AuthKit only. The verified WorkOS user id (`user_…`) 
 ```sh
 make test-backend
 make test-mobile
+make mobile-web
 make mobile-apk
 ```
 
 ## Not verified in this change
 
-- Live WorkOS sign-in against a real AuthKit user in an emulator/device
+- Live WorkOS sign-in against a real AuthKit user in a browser/emulator (manual tryout at :8080)
 - Authenticated calendar flow end-to-end with a real session from WorkOS
 - Native Android local notifications / FCM replacement for former Web Push reminders
 

@@ -55,7 +55,8 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - ./web:/srv/web:Z
+      # Flutter web release build (`make mobile-web`). Falls back to ./web notice if missing.
+      - ./mobile/build/web:/srv/web:Z
       - ./Caddyfile:/etc/caddy/Caddyfile:Z
     depends_on:
       - backend

@@ -20,8 +20,8 @@
   <body>
     <main>
       <h1>217</h1>
-      <p>Native Android client is under <code>mobile/</code>. This host only exposes the WorkOS-backed Go API at <code>/api/*</code>.</p>
-      <p>Build with <code>make mobile-apk</code> (Flutter tooling runs in a container).</p>
+      <p>Build the Flutter web UI with <code>make mobile-web</code>, then open <code>http://localhost:8080/</code> (Caddy serves <code>mobile/build/web</code> + <code>/api/*</code>).</p>
+      <p>Android: <code>make mobile-apk</code>. API only is also available at <code>/api/*</code>.</p>
     </main>
   </body>
 </html>

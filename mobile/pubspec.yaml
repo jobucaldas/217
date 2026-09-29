@@ -1,5 +1,5 @@
 name: a217
-description: Native Android client for 217 anticonceptional intake tracking with WorkOS AuthKit.
+description: Flutter client (Android + web) for 217 anticonceptional intake tracking with WorkOS AuthKit.
 publish_to: "none"
 version: 1.0.0+1
 

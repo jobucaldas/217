@@ -1,4 +1,4 @@
-# 217 — local development proxy for the Go API used by the Flutter Android client.
+# 217 — local development proxy: Flutter web UI + Go API (same origin for cookie AuthKit).
 :8080 {
     encode gzip
 
@@ -6,6 +6,7 @@
         reverse_proxy backend:3000
     }
 
+    # SPA fallback so deep links / refresh serve the Flutter shell.
     handle {
         root * /srv/web
         try_files {path} /index.html

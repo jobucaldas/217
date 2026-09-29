@@ -8,10 +8,11 @@ import 'package:http/http.dart' as http;
 
 import '../config.dart';
 import '../models.dart';
+import 'platform_http.dart';
 
 class ApiClient {
   ApiClient(this.config, {http.Client? httpClient, FlutterSecureStorage? storage})
-      : _http = httpClient ?? http.Client(),
+      : _http = httpClient ?? createPlatformHttpClient(),
         _storage = storage ?? const FlutterSecureStorage();
 
   final AppConfig config;
@@ -31,7 +32,10 @@ class ApiClient {
   Future<void> setApiBaseUrl(String value) async {
     final normalized = value.trim().replaceAll(RegExp(r'/+$'), '');
     if (normalized.isEmpty) {
-      throw ArgumentError('API base URL is required');
+      // Empty means same-origin (web).
+      config.apiBaseUrl = '';
+      await _storage.write(key: _apiBaseKey, value: '');
+      return;
     }
     final uri = Uri.tryParse(normalized);
     if (uri == null || !uri.hasScheme || uri.host.isEmpty) {
@@ -50,7 +54,11 @@ class ApiClient {
 
   Uri _uri(String path, [Map<String, String>? query]) {
     final base = config.apiBaseUrl.replaceAll(RegExp(r'/+$'), '');
-    return Uri.parse('$base$path').replace(queryParameters: query);
+    final uri = base.isEmpty ? Uri.parse(path) : Uri.parse('$base$path');
+    if (query == null || query.isEmpty) {
+      return uri;
+    }
+    return uri.replace(queryParameters: query);
   }
 
   Future<http.Response> _send(
@@ -66,8 +74,7 @@ class ApiClient {
         headers['Authorization'] = 'Bearer $token';
       }
     }
-    final request = http.Request(method, uri)
-      ..headers.addAll(headers);
+    final request = http.Request(method, uri)..headers.addAll(headers);
     if (body != null) {
       request.body = jsonEncode(body);
     }
@@ -85,10 +92,6 @@ class ApiClient {
   }
 
   Future<User?> currentUser() async {
-    final token = await readSessionToken();
-    if (token == null || token.isEmpty) {
-      return null;
-    }
     final response = await _send('GET', _uri('/api/auth/session'));
     if (response.statusCode != 200) {
       return null;

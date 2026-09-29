@@ -6,17 +6,18 @@ Cross-platform application for tracking anticonceptional intake.
 Android-first Flutter app for tracking anticonceptional intake via a calendar UI. Multi-user support with WorkOS AuthKit authentication, dark mode, and bilingual (Pt/En) UI.
 
 ## Tech Stack
-- Mobile: Flutter (Android first)
+- Client: Flutter (Android + web)
 - Backend: Go — REST API
 - Auth: WorkOS AuthKit (PKCE; API key server-side only)
 - Database: PostgreSQL 16 — containerized via Podman
-- Reverse Proxy: Caddy — proxies `/api/*`
+- Reverse Proxy: Caddy — Flutter web UI + `/api/*`
 
 ## Development Environment
 Fully containerized with Podman. DO NOT install project SDKs on the host. Go tooling runs in `localhost/217-dev`; Flutter tooling runs in `ghcr.io/cirruslabs/flutter:stable`.
 
 ```sh
 make dev-up          # postgres + backend + caddy
+make mobile-web      # Flutter web → mobile/build/web (served at :8080)
 make test-backend    # gofmt/test/vet/build in container
 make test-mobile     # flutter analyze + test in container
 make mobile-apk      # debug APK in container
@@ -24,12 +25,19 @@ make mobile-apk      # debug APK in container
 
 ## Architecture
 ```
-┌──────────────┐   AuthKit+PKCE   ┌─────────┐
-│ Flutter app  │ ───────────────> │ WorkOS  │
-│ (Android)    │ <── code ─────── │ AuthKit │
-└──────┬───────┘                  └─────────┘
-       │ POST /api/auth/workos/exchange
-       │ Bearer session
+Browser (same origin) cookie flow:
+  / → Flutter web → GET /api/auth/workos → AuthKit → /api/auth/workos/callback → cookie → /
+
+Android deep-link PKCE:
+  Flutter → AuthKit → com.jobucaldas.a217://… → POST /api/auth/workos/exchange → Bearer
+```
+
+```
+┌──────────────┐                 ┌─────────┐
+│ Flutter web  │  cookie AuthKit │ WorkOS  │
+│ or Android   │ ──────────────> │ AuthKit │
+└──────┬───────┘                 └─────────┘
+       │ /api/* (cookie or Bearer)
        v
 ┌──────────────┐   /api/*   ┌──────────┐   SQL   ┌────────────┐
 │ Caddy :8080  │ ─────────> │ Go API   │ ──────> │ PostgreSQL │
@@ -53,6 +61,7 @@ make mobile-apk      # debug APK in container
 ## Testing expectations
 - Backend: `make test-backend`
 - Mobile: `make test-mobile`
+- Web tryout: `make mobile-web` then open http://localhost:8080/
 - APK: `make mobile-apk`
 
 ## Remaining gaps

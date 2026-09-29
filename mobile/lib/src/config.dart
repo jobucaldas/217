@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 class AppConfig {
   AppConfig({
     required String apiBaseUrl,
@@ -11,10 +13,11 @@ class AppConfig {
 
   /// Public client ID only — never pass WORKOS_API_KEY into the Flutter binary.
   factory AppConfig.fromEnvironment() {
-    const apiBaseUrl = String.fromEnvironment(
-      'API_BASE_URL',
-      defaultValue: 'http://10.0.2.2:8080',
-    );
+    // Web defaults to same-origin (empty). Android emulator defaults to 10.0.2.2.
+    const configured = String.fromEnvironment('API_BASE_URL');
+    final apiBaseUrl = configured.isNotEmpty
+        ? configured
+        : (kIsWeb ? '' : 'http://10.0.2.2:8080');
     const workosClientId = String.fromEnvironment(
       'WORKOS_CLIENT_ID',
       defaultValue: 'client_01M3QCMK75B35RPC8EAJA5GREP',

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'api/client.dart';
+import 'auth/sign_in.dart';
 import 'config.dart';
 import 'i18n.dart';
 import 'models.dart';
@@ -54,12 +55,15 @@ class _App217State extends State<App217> {
   Future<void> _signIn() async {
     setState(() => _loading = true);
     try {
-      final user = await _api.signInWithWorkOS();
+      final user = await beginWorkOSSignIn(_api);
       if (!mounted) return;
-      setState(() {
-        _user = user;
-        _loading = false;
-      });
+      // Web cookie flow navigates away; mobile returns a user here.
+      if (user != null) {
+        setState(() {
+          _user = user;
+          _loading = false;
+        });
+      }
     } catch (err) {
       if (!mounted) return;
       setState(() => _loading = false);
@@ -123,7 +127,9 @@ class _App217State extends State<App217> {
           : _user == null
               ? AuthScreen(
                   strings: _strings,
-                  apiBaseUrl: _api.config.apiBaseUrl,
+                  apiBaseUrl: _api.config.apiBaseUrl.isEmpty
+                      ? 'same-origin / localhost:8080'
+                      : _api.config.apiBaseUrl,
                   onSignIn: _signIn,
                   onToggleLanguage: () => setState(() => _portuguese = !_portuguese),
                   onOpenSettings: _openSettings,
