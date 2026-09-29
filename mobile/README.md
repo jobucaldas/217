@@ -10,7 +10,7 @@ With the stack up (`make dev-up` from the repo root):
 make mobile-web
 ```
 
-Open <http://localhost:8787/>. Sign-in navigates to `GET /api/auth/workos` (same origin). WorkOS redirects to `/api/auth/workos/callback`, which sets the session cookie and returns you to the app.
+Open <http://localhost:8787/>. Sign-in hits `GET /api/auth/workos` (same origin), shows a **Continue to WorkOS** page (click required so Chromium keeps the binding cookie), then AuthKit, then `/api/auth/workos/callback` which sets the session cookie and returns you to the app.
 
 Web defaults to an empty `API_BASE_URL` (same origin). Browser HTTP uses credentials so the session cookie is sent.
 

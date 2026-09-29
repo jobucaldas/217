@@ -20,7 +20,7 @@ make dev-up
 make mobile-web
 ```
 
-Open <http://localhost:8787/> for the Flutter web UI (same origin as `/api/*`). Sign-in uses the browser cookie AuthKit path (`GET /api/auth/workos` → callback → session cookie). Host bind defaults to **8787** (not 8080) so common local/port-forward clashes are avoided; override with `HTTP_PORT=…` and matching `APP_BASE_URL`.
+Open <http://localhost:8787/> for the Flutter web UI (same origin as `/api/*`). Sign-in uses the browser cookie AuthKit path: Continuar com WorkOS → same-origin **Continue** page (keeps the CSRF cookie; Chromium drops it on automatic redirects) → AuthKit → callback → session cookie. Host bind defaults to **8787** (not 8080) so common local/port-forward clashes are avoided; override with `HTTP_PORT=…` and matching `APP_BASE_URL`.
 
 Stop with `make dev-down`.
 
