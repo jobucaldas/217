@@ -10,7 +10,7 @@ Only Podman and podman-compose are required on the host. Go and Flutter tooling 
 
 Copy `.env.example` to ignored `.env.local`. Set `WORKOS_API_KEY` from the WorkOS Dashboard (server-only). `WORKOS_CLIENT_ID` is public. In WorkOS, register redirect URIs:
 
-- `http://localhost:8080/api/auth/workos/callback` (browser cookie flow)
+- `http://localhost:8787/api/auth/workos/callback` (browser cookie flow)
 - `com.jobucaldas.a217://auth/callback` (Flutter Android deep link)
 
 Missing WorkOS configuration is non-fatal at startup; auth endpoints return HTTP 503 until configured.
@@ -20,7 +20,7 @@ make dev-up
 make mobile-web
 ```
 
-Open <http://localhost:8080/> for the Flutter web UI (same origin as `/api/*`). Sign-in uses the browser cookie AuthKit path (`GET /api/auth/workos` → callback → session cookie).
+Open <http://localhost:8787/> for the Flutter web UI (same origin as `/api/*`). Sign-in uses the browser cookie AuthKit path (`GET /api/auth/workos` → callback → session cookie). Host bind defaults to **8787** (not 8080) so common local/port-forward clashes are avoided; override with `HTTP_PORT=…` and matching `APP_BASE_URL`.
 
 Stop with `make dev-down`.
 
@@ -31,7 +31,7 @@ make test-mobile
 make mobile-apk
 ```
 
-Install `mobile/build/app/outputs/flutter-apk/app-debug.apk` on an emulator/device. Emulator default API base is `http://10.0.2.2:8080` (override with `--dart-define=API_BASE_URL=...`).
+Install `mobile/build/app/outputs/flutter-apk/app-debug.apk` on an emulator/device. Emulator default API base is `http://10.0.2.2:8787` (override with `--dart-define=API_BASE_URL=...`).
 
 Sign-in opens WorkOS AuthKit in a Chrome Custom Tab, receives the custom-scheme redirect, and exchanges `code` + `code_verifier` with `POST /api/auth/workos/exchange`. The API key never ships in the APK.
 
@@ -64,7 +64,7 @@ make mobile-apk
 
 ## Not verified in this change
 
-- Live WorkOS sign-in against a real AuthKit user in a browser/emulator (manual tryout at :8080)
+- Live WorkOS sign-in against a real AuthKit user in a browser/emulator (manual tryout at :8787)
 - Authenticated calendar flow end-to-end with a real session from WorkOS
 - Native Android local notifications / FCM replacement for former Web Push reminders
 

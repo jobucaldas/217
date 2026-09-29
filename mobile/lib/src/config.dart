@@ -17,7 +17,7 @@ class AppConfig {
     const configured = String.fromEnvironment('API_BASE_URL');
     final apiBaseUrl = configured.isNotEmpty
         ? configured
-        : (kIsWeb ? '' : 'http://10.0.2.2:8080');
+        : (kIsWeb ? '' : 'http://10.0.2.2:8787');
     const workosClientId = String.fromEnvironment(
       'WORKOS_CLIENT_ID',
       defaultValue: 'client_01M3QCMK75B35RPC8EAJA5GREP',

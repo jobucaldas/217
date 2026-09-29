@@ -30,7 +30,7 @@ services:
       VAPID_SUBJECT: "${VAPID_SUBJECT:-}"
       WORKOS_API_KEY: "${WORKOS_API_KEY:-}"
       WORKOS_CLIENT_ID: "${WORKOS_CLIENT_ID:-client_01M3QCMK75B35RPC8EAJA5GREP}"
-      APP_BASE_URL: "${APP_BASE_URL:-http://localhost:8080}"
+      APP_BASE_URL: "${APP_BASE_URL:-http://localhost:8787}"
     depends_on:
       - postgres
     volumes:
@@ -53,7 +53,8 @@ services:
   caddy:
     image: docker.io/caddy:alpine
     ports:
-      - "8080:8080"
+      # Override with HTTP_PORT=... if 8787 is taken on the host.
+      - "${HTTP_PORT:-8787}:8787"
     volumes:
       # Flutter web release build (`make mobile-web`). Falls back to ./web notice if missing.
       - ./mobile/build/web:/srv/web:Z

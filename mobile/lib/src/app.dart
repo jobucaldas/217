@@ -128,7 +128,7 @@ class _App217State extends State<App217> {
               ? AuthScreen(
                   strings: _strings,
                   apiBaseUrl: _api.config.apiBaseUrl.isEmpty
-                      ? 'same-origin / localhost:8080'
+                      ? 'same-origin / localhost:8787'
                       : _api.config.apiBaseUrl,
                   onSignIn: _signIn,
                   onToggleLanguage: () => setState(() => _portuguese = !_portuguese),

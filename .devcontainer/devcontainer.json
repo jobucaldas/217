@@ -5,7 +5,7 @@
     "context": ".."
   },
   "workspaceFolder": "/workspace",
-  "forwardPorts": [8080, 5432],
+  "forwardPorts": [8787, 5432],
   "customizations": {
     "vscode": {
       "extensions": [
@@ -15,5 +15,5 @@
       ]
     }
   },
-  "postCreateCommand": "echo 'Dev container ready. Run: cd backend && go run ./cmd/server -addr :8080'"
+  "postCreateCommand": "echo 'Dev container ready. Prefer: make dev-up (Caddy :8787). Direct API: cd backend && go run ./cmd/server -addr :3000'"
 }

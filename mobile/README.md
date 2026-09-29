@@ -10,9 +10,11 @@ With the stack up (`make dev-up` from the repo root):
 make mobile-web
 ```
 
-Open <http://localhost:8080/>. Sign-in navigates to `GET /api/auth/workos` (same origin). WorkOS redirects to `/api/auth/workos/callback`, which sets the session cookie and returns you to the app.
+Open <http://localhost:8787/>. Sign-in navigates to `GET /api/auth/workos` (same origin). WorkOS redirects to `/api/auth/workos/callback`, which sets the session cookie and returns you to the app.
 
 Web defaults to an empty `API_BASE_URL` (same origin). Browser HTTP uses credentials so the session cookie is sent.
+
+Caddy binds host **8787** by default (avoids :8080 clashes). Override with `HTTP_PORT=…` and a matching `APP_BASE_URL` / WorkOS redirect URI.
 
 ## Android
 
@@ -27,7 +29,7 @@ Do not install Flutter on the host.
 
 | Define | Default | Notes |
 |---|---|---|
-| `API_BASE_URL` | web: same-origin; Android: `http://10.0.2.2:8080` | Emulator → host Caddy |
+| `API_BASE_URL` | web: same-origin; Android: `http://10.0.2.2:8787` | Emulator → host Caddy |
 | `WORKOS_CLIENT_ID` | staging public client id | Public OAuth client id |
 | `WORKOS_REDIRECT_URI` | `com.jobucaldas.a217://auth/callback` | Android deep link only |
 

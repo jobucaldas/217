@@ -23,8 +23,8 @@ class Strings {
       pt ? 'Falha ao entrar. Tente novamente.' : 'Sign-in failed. Try again.';
   String get apiBaseUrl => pt ? 'URL da API' : 'API base URL';
   String get apiBaseHint => pt
-      ? 'Emulador: http://10.0.2.2:8080 — aparelho: http://SEU_IP:8080'
-      : 'Emulator: http://10.0.2.2:8080 — device: http://YOUR_LAN_IP:8080';
+      ? 'Emulador: http://10.0.2.2:8787 — aparelho: http://SEU_IP:8787'
+      : 'Emulator: http://10.0.2.2:8787 — device: http://YOUR_LAN_IP:8787';
   String get testConnection => pt ? 'Testar conexão' : 'Test connection';
   String get connectionOk => pt ? 'API acessível' : 'API reachable';
   String get connectionFail => pt ? 'API inacessível' : 'API unreachable';

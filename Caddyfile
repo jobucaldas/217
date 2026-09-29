@@ -1,5 +1,6 @@
 # 217 — local development proxy: Flutter web UI + Go API (same origin for cookie AuthKit).
-:8080 {
+# Host port defaults to 8787 (avoids common :8080 conflicts / port-forward clashes).
+:8787 {
     encode gzip
 
     handle /api/* {

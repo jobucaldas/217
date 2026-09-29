@@ -32,9 +32,9 @@ vapid-keys: dev-image
 	$(PODMAN_RUN) sh -c 'cd backend && go run ./cmd/vapid'
 
 mobile-apk:
-	$(FLUTTER_RUN) 'git config --global --add safe.directory /sdks/flutter >/dev/null 2>&1 || true; flutter pub get && flutter build apk --debug --dart-define=API_BASE_URL=$${API_BASE_URL:-http://10.0.2.2:8080} --dart-define=WORKOS_CLIENT_ID=$${WORKOS_CLIENT_ID:-client_01M3QCMK75B35RPC8EAJA5GREP}'
+	$(FLUTTER_RUN) 'git config --global --add safe.directory /sdks/flutter >/dev/null 2>&1 || true; flutter pub get && flutter build apk --debug --dart-define=API_BASE_URL=$${API_BASE_URL:-http://10.0.2.2:8787} --dart-define=WORKOS_CLIENT_ID=$${WORKOS_CLIENT_ID:-client_01M3QCMK75B35RPC8EAJA5GREP}'
 
-# Browser tryout: same-origin cookie AuthKit via Caddy at http://localhost:8080/
+# Browser tryout: same-origin cookie AuthKit via Caddy at http://localhost:8787/
 mobile-web:
 	mkdir -p mobile/build/web
 	$(FLUTTER_RUN) 'git config --global --add safe.directory /sdks/flutter >/dev/null 2>&1 || true; flutter pub get && flutter build web --release --base-href=/ --dart-define=WORKOS_CLIENT_ID=$${WORKOS_CLIENT_ID:-client_01M3QCMK75B35RPC8EAJA5GREP}'

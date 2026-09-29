@@ -17,7 +17,7 @@ Fully containerized with Podman. DO NOT install project SDKs on the host. Go too
 
 ```sh
 make dev-up          # postgres + backend + caddy
-make mobile-web      # Flutter web → mobile/build/web (served at :8080)
+make mobile-web      # Flutter web → mobile/build/web (served at :8787)
 make test-backend    # gofmt/test/vet/build in container
 make test-mobile     # flutter analyze + test in container
 make mobile-apk      # debug APK in container
@@ -40,7 +40,7 @@ Android deep-link PKCE:
        │ /api/* (cookie or Bearer)
        v
 ┌──────────────┐   /api/*   ┌──────────┐   SQL   ┌────────────┐
-│ Caddy :8080  │ ─────────> │ Go API   │ ──────> │ PostgreSQL │
+│ Caddy :8787  │ ─────────> │ Go API   │ ──────> │ PostgreSQL │
 └──────────────┘            └──────────┘         └────────────┘
 ```
 
@@ -61,7 +61,7 @@ Android deep-link PKCE:
 ## Testing expectations
 - Backend: `make test-backend`
 - Mobile: `make test-mobile`
-- Web tryout: `make mobile-web` then open http://localhost:8080/
+- Web tryout: `make mobile-web` then open http://localhost:8787/
 - APK: `make mobile-apk`
 
 ## Remaining gaps

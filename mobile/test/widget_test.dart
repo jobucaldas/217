@@ -11,7 +11,7 @@ void main() {
       MaterialApp(
         home: AuthScreen(
           strings: const Strings(true),
-          apiBaseUrl: 'http://10.0.2.2:8080',
+          apiBaseUrl: 'http://10.0.2.2:8787',
           onSignIn: () async {},
           onToggleLanguage: () {},
           onOpenSettings: () {},
@@ -20,7 +20,7 @@ void main() {
     );
     expect(find.text('217'), findsOneWidget);
     expect(find.text('Continuar com WorkOS'), findsOneWidget);
-    expect(find.text('http://10.0.2.2:8080'), findsOneWidget);
+    expect(find.text('http://10.0.2.2:8787'), findsOneWidget);
     expect(find.byIcon(Icons.settings_outlined), findsOneWidget);
   });
 
