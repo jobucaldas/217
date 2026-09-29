@@ -424,8 +424,12 @@ func TestWorkOSOAuthStartUsesInterstitialNotBounceRedirect(t *testing.T) {
 		t.Fatalf("unexpected binding cookie: %#v", binding)
 	}
 	authURL := mustAuthURLFromStart(t, w)
-	if !strings.Contains(authURL, "state=") || !strings.Contains(w.Body.String(), "location.replace(") {
-		t.Fatalf("interstitial must auto-continue to AuthKit: url=%s body=%s", authURL, w.Body.String())
+	body := w.Body.String()
+	if !strings.Contains(authURL, "state=") || !strings.Contains(body, `id="continue"`) || !strings.Contains(body, "__WORKOS_AUTH_URL__") {
+		t.Fatalf("interstitial must expose click-through Continue to AuthKit: url=%s body=%s", authURL, body)
+	}
+	if strings.Contains(body, "location.replace") || strings.Contains(body, "http-equiv=\"refresh\"") {
+		t.Fatal("auto-navigation reintroduces Chromium bounce-tracking cookie loss")
 	}
 	if w.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("interstitial must be uncached, got %q", w.Header().Get("Cache-Control"))

@@ -251,19 +251,38 @@ func writeOAuthContinuePage(w http.ResponseWriter, authURL string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
+	// Require a same-origin click before leaving for AuthKit. Chromium bounce
+	// tracking drops cookies set on automatic cross-site hops (302, meta-refresh,
+	// or short setTimeout redirects); a user gesture keeps 217_oauth_binding.
 	_, _ = fmt.Fprintf(w, `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Continuing sign-in</title>
-<meta http-equiv="refresh" content="0;url=%s">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Continue sign-in</title>
+<style>
+  :root { color-scheme: dark; font-family: system-ui, sans-serif; }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center;
+    background: #121212; color: #f4f7f5; }
+  main { text-align: center; padding: 2rem; max-width: 22rem; }
+  h1 { font-size: 1.25rem; margin: 0 0 0.75rem; }
+  p { opacity: 0.85; line-height: 1.45; margin: 0 0 1.25rem; }
+  a.continue { display: inline-block; padding: 0.75rem 1.25rem; border-radius: 0.5rem;
+    background: #7dceb2; color: #10241c; font-weight: 600; text-decoration: none; }
+</style>
 </head>
 <body>
-<p>Continuing to WorkOS…</p>
-<p><a id="continue" href="%s">Continue</a></p>
-<script>location.replace(%s)</script>
+<main>
+  <h1>Continue to WorkOS</h1>
+  <p>Click continue to finish sign-in. This keeps your secure browser session for the callback.</p>
+  <p><a class="continue" id="continue" href="%s" rel="noopener">Continue</a></p>
+</main>
+<script>
+// Expose URL for tests; navigation is click-driven only.
+window.__WORKOS_AUTH_URL__ = %s;
+</script>
 </body>
-</html>`, href, href, jsURL)
+</html>`, href, jsURL)
 }
 
 func (h *Handler) createSessionForUser(w http.ResponseWriter, r *http.Request, user *model.User) (string, error) {
