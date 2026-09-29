@@ -39,7 +39,7 @@ type MemoryStore struct {
 	preferences    map[string]*model.ReminderPreference
 	subscriptions  map[string]*model.PushSubscription
 	deliveries     map[string]memoryDelivery
-	googleSubjects map[string]string // subject -> userID
+	workosSubjects map[string]string // subject -> userID
 	oauthAttempts  map[string]memoryOAuthAttempt
 	sessions       map[string]memorySession // keyed by hashed session id (sha256 hex)
 }
@@ -51,7 +51,7 @@ func NewMemoryStore() *MemoryStore {
 		preferences:    make(map[string]*model.ReminderPreference),
 		subscriptions:  make(map[string]*model.PushSubscription),
 		deliveries:     make(map[string]memoryDelivery),
-		googleSubjects: make(map[string]string),
+		workosSubjects: make(map[string]string),
 		oauthAttempts:  make(map[string]memoryOAuthAttempt),
 		sessions:       make(map[string]memorySession),
 	}
@@ -244,18 +244,18 @@ func (s *MemoryStore) ChangePassword(userID, oldPassword, newPassword string) er
 	return fmt.Errorf("user not found")
 }
 
-func (s *MemoryStore) LinkGoogleIdentity(subject, verifiedEmail, name string, authoritative bool) (*model.User, error) {
+func (s *MemoryStore) LinkWorkOSIdentity(subject, verifiedEmail, name string, authoritative bool) (*model.User, error) {
 	normalizedEmail := normalizeEmail(verifiedEmail)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if userID, ok := s.googleSubjects[subject]; ok {
+	if userID, ok := s.workosSubjects[subject]; ok {
 		for _, user := range s.users {
 			if user.ID == userID {
 				return sanitizeUser(user), nil
 			}
 		}
-		delete(s.googleSubjects, subject)
+		delete(s.workosSubjects, subject)
 	}
 
 	var matchingUser *model.User
@@ -273,12 +273,12 @@ func (s *MemoryStore) LinkGoogleIdentity(subject, verifiedEmail, name string, au
 		if !authoritative {
 			return nil, fmt.Errorf("legacy account requires independent ownership proof")
 		}
-		for _, userID := range s.googleSubjects {
+		for _, userID := range s.workosSubjects {
 			if userID == matchingUser.ID {
-				return nil, fmt.Errorf("account already linked to another google subject")
+				return nil, fmt.Errorf("account already linked to another workos subject")
 			}
 		}
-		s.googleSubjects[subject] = matchingUser.ID
+		s.workosSubjects[subject] = matchingUser.ID
 		return sanitizeUser(matchingUser), nil
 	}
 
@@ -295,7 +295,7 @@ func (s *MemoryStore) LinkGoogleIdentity(subject, verifiedEmail, name string, au
 		UpdatedAt: now,
 	}
 	s.users[user.APIKey] = user
-	s.googleSubjects[subject] = user.ID
+	s.workosSubjects[subject] = user.ID
 	return sanitizeUser(user), nil
 }
 

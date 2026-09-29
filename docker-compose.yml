@@ -28,8 +28,8 @@ services:
       VAPID_PUBLIC_KEY: "${VAPID_PUBLIC_KEY:-}"
       VAPID_PRIVATE_KEY: "${VAPID_PRIVATE_KEY:-}"
       VAPID_SUBJECT: "${VAPID_SUBJECT:-}"
-      GOOGLE_CLIENT_ID: "${GOOGLE_CLIENT_ID:-}"
-      GOOGLE_CLIENT_SECRET: "${GOOGLE_CLIENT_SECRET:-}"
+      WORKOS_API_KEY: "${WORKOS_API_KEY:-}"
+      WORKOS_CLIENT_ID: "${WORKOS_CLIENT_ID:-}"
       APP_BASE_URL: "${APP_BASE_URL:-http://localhost:8080}"
     depends_on:
       - postgres
@@ -54,7 +54,7 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - ./frontend/dist:/srv/frontend:Z
+      - ./web:/srv/web:Z
       - ./Caddyfile:/etc/caddy/Caddyfile:Z
     depends_on:
       - backend

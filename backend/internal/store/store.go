@@ -9,7 +9,7 @@ import (
 type Store interface {
 	CreateUser(email, name, password string) (*model.User, error)
 	GetUserByEmail(email string) (*model.User, error)
-	LinkGoogleIdentity(subject, verifiedEmail, name string, authoritative bool) (*model.User, error)
+	LinkWorkOSIdentity(subject, verifiedEmail, name string, authoritative bool) (*model.User, error)
 
 	GetEntry(userID, date string) (*model.Entry, error)
 	ListEntries(userID string, year, month int) ([]*model.Entry, error)

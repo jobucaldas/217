@@ -45,14 +45,14 @@ func main() {
 	if _, err := server.ValidatePushConfig(push); err != nil {
 		log.Fatalf("invalid Web Push configuration: %v", err)
 	}
-	google := server.GoogleConfig{
-		ClientID:     os.Getenv("GOOGLE_CLIENT_ID"),
-		ClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
-		AppBaseURL:   os.Getenv("APP_BASE_URL"),
+	workos := server.WorkOSConfig{
+		APIKey:     os.Getenv("WORKOS_API_KEY"),
+		ClientID:   os.Getenv("WORKOS_CLIENT_ID"),
+		AppBaseURL: os.Getenv("APP_BASE_URL"),
 	}
-	appBaseURL := google.AppBaseURL
+	appBaseURL := workos.AppBaseURL
 	if appBaseURL == "" {
 		appBaseURL = os.Getenv("APP_BASE_URL")
 	}
-	log.Fatal(server.StartWithPush(*addr, dsn, appBaseURL, push, google))
+	log.Fatal(server.StartWithPush(*addr, dsn, appBaseURL, push, workos))
 }
