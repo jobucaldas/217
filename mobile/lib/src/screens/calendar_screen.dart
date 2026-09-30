@@ -5,6 +5,7 @@ import '../api/client.dart';
 import '../i18n.dart';
 import '../models.dart';
 import '../theme/app_theme.dart';
+import 'reminder_settings_screen.dart';
 
 class CalendarScreen extends StatefulWidget {
   const CalendarScreen({
@@ -165,11 +166,27 @@ class _CalendarScreenState extends State<CalendarScreen> {
                   ],
                 ),
                 const SizedBox(height: 6),
-                Text(
-                  _reminderSummary.isEmpty
-                      ? widget.strings.reminderNotReady
-                      : _reminderSummary,
-                  style: text.bodyMedium,
+                InkWell(
+                  onTap: () async {
+                    await Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => ReminderSettingsScreen(
+                          api: widget.api,
+                          strings: widget.strings,
+                        ),
+                      ),
+                    );
+                    if (mounted) await _load();
+                  },
+                  child: Text(
+                    _reminderSummary.isEmpty
+                        ? widget.strings.reminderNotReady
+                        : _reminderSummary,
+                    style: text.bodyMedium?.copyWith(
+                      decoration: TextDecoration.underline,
+                      decorationColor: scheme.onSurfaceVariant.withValues(alpha: 0.4),
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 14),
                 FilledButton(
@@ -237,6 +254,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
               entries: _entries,
               onDayTap: _openDay,
               todayLabel: widget.strings.today,
+              portuguese: widget.strings.pt,
             ),
           ),
         ],
@@ -284,6 +302,7 @@ class _MonthGrid extends StatelessWidget {
     required this.entries,
     required this.onDayTap,
     required this.todayLabel,
+    required this.portuguese,
   });
 
   final DateTime month;
@@ -291,14 +310,18 @@ class _MonthGrid extends StatelessWidget {
   final Map<String, Entry> entries;
   final Future<void> Function(DateTime day) onDayTap;
   final String todayLabel;
+  final bool portuguese;
 
   @override
   Widget build(BuildContext context) {
     final first = DateTime(month.year, month.month, 1);
     final daysInMonth = DateTime(month.year, month.month + 1, 0).day;
     final leading = first.weekday % 7; // Sunday-first
+    final weekdayLabels = portuguese
+        ? const ['D', 'S', 'T', 'Q', 'Q', 'S', 'S']
+        : const ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
     final cells = <Widget>[
-      for (final label in ['S', 'M', 'T', 'W', 'T', 'F', 'S'])
+      for (final label in weekdayLabels)
         Center(
           child: Text(
             label,

@@ -46,3 +46,4 @@ mobile/**/GeneratedPluginRegistrant.*
 frontend/dist/
 frontend/target/
 pi-session-*.html
+*.apk

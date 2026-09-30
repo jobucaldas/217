@@ -7,6 +7,7 @@ import 'i18n.dart';
 import 'models.dart';
 import 'screens/auth_screen.dart';
 import 'screens/calendar_screen.dart';
+import 'screens/reminder_settings_screen.dart';
 import 'theme/app_theme.dart';
 
 class App217 extends StatefulWidget {
@@ -214,6 +215,38 @@ class _SettingsPageState extends State<SettingsPage> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          if (widget.onLogout != null) ...[
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(widget.strings.reminders),
+              subtitle: Text(widget.strings.reminderEnable),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => ReminderSettingsScreen(
+                      api: widget.api,
+                      strings: widget.strings,
+                    ),
+                  ),
+                );
+              },
+            ),
+            const Divider(height: 28),
+          ],
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text(widget.strings.language),
+            subtitle: Text(widget.portuguese ? 'Português' : 'English'),
+            onTap: widget.onToggleLanguage,
+          ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text(widget.strings.darkMode),
+            value: widget.themeMode == ThemeMode.dark,
+            onChanged: (_) => widget.onToggleTheme(),
+          ),
+          const Divider(height: 28),
           Text(widget.strings.apiBaseUrl, style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 8),
           TextField(
@@ -235,20 +268,8 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
             ],
           ),
-          const Divider(height: 32),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            title: Text(widget.strings.language),
-            subtitle: Text(widget.portuguese ? 'Português' : 'English'),
-            onTap: widget.onToggleLanguage,
-          ),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: Text(widget.strings.darkMode),
-            value: widget.themeMode == ThemeMode.dark,
-            onChanged: (_) => widget.onToggleTheme(),
-          ),
-          if (widget.onLogout != null)
+          if (widget.onLogout != null) ...[
+            const Divider(height: 32),
             ListTile(
               contentPadding: EdgeInsets.zero,
               title: Text(widget.strings.logout),
@@ -257,6 +278,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 if (context.mounted) Navigator.of(context).pop();
               },
             ),
+          ],
         ],
       ),
     );

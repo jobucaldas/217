@@ -43,4 +43,13 @@ class Strings {
   String get missedLabel => pt ? 'Perdi' : 'Missed';
   String get pickStatus =>
       pt ? 'Como foi a tomada?' : 'How did intake go?';
+  String get reminders => pt ? 'Lembrete' : 'Reminder';
+  String get reminderTime => pt ? 'Horário' : 'Time';
+  String get reminderEnable => pt ? 'Lembrar todo dia' : 'Remind me daily';
+  String get reminderSaved => pt ? 'Salvo' : 'Saved';
+  String get reminderNeedsPush =>
+      pt ? 'Ative notificações neste aparelho.' : 'Enable notifications on this device.';
+  String get reminderUnavailable =>
+      pt ? 'Lembretes indisponíveis aqui.' : 'Reminders unavailable here.';
+  String get reminderReady => pt ? 'Lembrete ativo' : 'Reminder on';
 }

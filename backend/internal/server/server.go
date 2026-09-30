@@ -6,7 +6,9 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
+	"time"
 
 	"217/backend/internal/auth"
 	"217/backend/internal/handler"
@@ -88,6 +90,9 @@ func StartWithPush(addr, databaseURL, appBaseURL string, push PushConfig, workos
 
 	h := handler.NewWithVAPID(s, push.PublicKey)
 	h.SetAppBaseURL(appBaseURL)
+	if ttl := parseSessionTTL(); ttl > 0 {
+		h.SetSessionDuration(ttl)
+	}
 
 	if len(workosConfigs) > 0 {
 		cfg := workosConfigs[0]
@@ -133,8 +138,11 @@ func StartWithPush(addr, databaseURL, appBaseURL string, push PushConfig, workos
 		_, _ = w.Write([]byte("ok"))
 	})
 
+	mux.HandleFunc("GET /api/auth/config", h.AuthConfig)
 	mux.HandleFunc("GET /api/auth/session", h.CurrentSession)
 	mux.HandleFunc("POST /api/auth/logout", h.Logout)
+	mux.HandleFunc("POST /api/auth/register", h.Register)
+	mux.HandleFunc("POST /api/auth/login", h.Login)
 	mux.HandleFunc("GET /api/auth/workos", h.StartWorkOSOAuth)
 	mux.HandleFunc("GET /api/auth/workos/callback", h.WorkOSOAuthCallback)
 	mux.HandleFunc("POST /api/auth/workos/exchange", h.ExchangeWorkOS)
@@ -180,4 +188,18 @@ func originFromBaseURL(appBaseURL string) string {
 		return ""
 	}
 	return u.Scheme + "://" + u.Host
+}
+
+// parseSessionTTL reads SESSION_TTL (Go duration, e.g. 24h). Empty → default.
+func parseSessionTTL() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("SESSION_TTL"))
+	if raw == "" {
+		return 0
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		log.Printf("ignoring invalid SESSION_TTL %q: %v", raw, err)
+		return 0
+	}
+	return d
 }
