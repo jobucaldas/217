@@ -31,7 +31,7 @@ const oauthBindingCookie = "217_oauth_binding"
 const (
 	maxSessionDuration = 7 * 24 * time.Hour
 	minSessionDuration = 15 * time.Minute
-	defaultAuthLimit  = 30
+	defaultAuthLimit   = 30
 )
 
 type Handler struct {
