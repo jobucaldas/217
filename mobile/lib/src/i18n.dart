@@ -14,6 +14,7 @@ class Strings {
   String get language => pt ? 'Idioma' : 'Language';
   String get taken => pt ? 'Tomado' : 'Taken';
   String get missed => pt ? 'Não tomado' : 'Missed';
+  String get unrecorded => pt ? 'Não registrado' : 'Not recorded';
   String get notes => pt ? 'Notas' : 'Notes';
   String get save => pt ? 'Salvar' : 'Save';
   String get cancel => pt ? 'Cancelar' : 'Cancel';
@@ -29,4 +30,16 @@ class Strings {
   String get connectionOk => pt ? 'API acessível' : 'API reachable';
   String get connectionFail => pt ? 'API inacessível' : 'API unreachable';
   String get darkMode => pt ? 'Tema escuro' : 'Dark theme';
+  String get today => pt ? 'Hoje' : 'Today';
+  String get todayStatus => pt ? 'Status de hoje' : "Today's status";
+  String get remindersOn => pt ? 'Lembrete ativado' : 'Reminder on';
+  String get remindersOff => pt ? 'Lembrete desativado' : 'Reminder off';
+  String get reminderNotReady =>
+      pt ? 'Lembretes não configurados neste dispositivo.' : 'Reminders not configured on this device.';
+  String get legend => pt ? 'Legenda de status' : 'Status legend';
+  String get legendTaken => pt ? 'Tomado' : 'Taken';
+  String get legendMissed => pt ? 'Não tomado' : 'Missed';
+  String get legendUnrecorded => pt ? 'Não registrado' : 'Not recorded';
+  String get takenLabel => pt ? '✓ Tomei' : '✓ Taken';
+  String get missedLabel => pt ? '✗ Não tomei' : '✗ Missed';
 }

@@ -7,6 +7,7 @@ import 'i18n.dart';
 import 'models.dart';
 import 'screens/auth_screen.dart';
 import 'screens/calendar_screen.dart';
+import 'theme/app_theme.dart';
 
 class App217 extends StatefulWidget {
   const App217({super.key, required this.config});
@@ -100,35 +101,28 @@ class _App217State extends State<App217> {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = ColorScheme.fromSeed(
-      seedColor: const Color(0xFF1F6F5B),
-      brightness: _themeMode == ThemeMode.dark ? Brightness.dark : Brightness.light,
-    );
     return MaterialApp(
       title: '217',
       navigatorKey: _navKey,
       scaffoldMessengerKey: _messengerKey,
       debugShowCheckedModeBanner: false,
       themeMode: _themeMode,
-      theme: ThemeData(
-        colorScheme: colorScheme,
-        useMaterial3: true,
-        fontFamily: 'sans-serif',
-      ),
-      darkTheme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF1F6F5B),
-          brightness: Brightness.dark,
-        ),
-        useMaterial3: true,
-      ),
+      theme: buildApp217Theme(brightness: Brightness.light),
+      darkTheme: buildApp217Theme(brightness: Brightness.dark),
       home: _loading
-          ? Scaffold(body: Center(child: Text(_strings.loading)))
+          ? Scaffold(
+              body: Center(
+                child: Text(
+                  _strings.loading,
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+              ),
+            )
           : _user == null
               ? AuthScreen(
                   strings: _strings,
                   apiBaseUrl: _api.config.apiBaseUrl.isEmpty
-                      ? 'same-origin / localhost:8787'
+                      ? 'same-origin'
                       : _api.config.apiBaseUrl,
                   onSignIn: _signIn,
                   onToggleLanguage: () => setState(() => _portuguese = !_portuguese),

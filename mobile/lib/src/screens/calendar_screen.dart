@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../api/client.dart';
 import '../i18n.dart';
 import '../models.dart';
+import '../theme/app_theme.dart';
 
 class CalendarScreen extends StatefulWidget {
   const CalendarScreen({
@@ -30,6 +31,12 @@ class _CalendarScreenState extends State<CalendarScreen> {
   Map<String, Entry> _entries = {};
   bool _loading = true;
   String? _error;
+  String _reminderSummary = '';
+
+  DateTime get _today {
+    final now = DateTime.now();
+    return DateTime(now.year, now.month, now.day);
+  }
 
   @override
   void initState() {
@@ -46,9 +53,23 @@ class _CalendarScreenState extends State<CalendarScreen> {
     });
     try {
       final entries = await widget.api.listEntries(_month.year, _month.month);
+      String reminder = widget.strings.reminderNotReady;
+      try {
+        final pref = await widget.api.getReminderPreference();
+        if (pref != null) {
+          reminder = pref.enabled
+              ? (pref.deliverable
+                  ? '${widget.strings.remindersOn} · ${pref.time}'
+                  : widget.strings.reminderNotReady)
+              : widget.strings.remindersOff;
+        }
+      } catch (_) {
+        // Reminders are optional; calendar still works.
+      }
       if (!mounted) return;
       setState(() {
         _entries = {for (final e in entries) e.date: e};
+        _reminderSummary = reminder;
         _loading = false;
       });
     } catch (err) {
@@ -69,7 +90,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
       builder: (context) => _DayEditor(
         strings: widget.strings,
         date: key,
-        initialTaken: existing?.taken ?? true,
+        initialTaken: existing?.taken,
         initialNotes: existing?.notes ?? '',
       ),
     );
@@ -81,6 +102,16 @@ class _CalendarScreenState extends State<CalendarScreen> {
   @override
   Widget build(BuildContext context) {
     final label = DateFormat.yMMMM(widget.strings.pt ? 'pt_BR' : 'en_US').format(_month);
+    final todayKey = DateFormat('yyyy-MM-dd').format(_today);
+    final todayEntry = _entries[todayKey];
+    final scheme = Theme.of(context).colorScheme;
+    final todayStatus = todayEntry == null
+        ? widget.strings.unrecorded
+        : (todayEntry.taken ? widget.strings.taken : widget.strings.missed);
+    final todayColor = todayEntry == null
+        ? scheme.onSurfaceVariant
+        : (todayEntry.taken ? App217Colors.taken : App217Colors.missed);
+
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.strings.brand),
@@ -100,6 +131,88 @@ class _CalendarScreenState extends State<CalendarScreen> {
       body: Column(
         children: [
           Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+            child: Card(
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            '${widget.strings.today} · $todayKey',
+                            style: Theme.of(context).textTheme.titleLarge,
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: todayColor.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            todayStatus,
+                            style: TextStyle(
+                              color: todayColor,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      _reminderSummary.isEmpty
+                          ? widget.strings.reminderNotReady
+                          : _reminderSummary,
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () => _openDay(_today),
+                            child: Text(widget.strings.todayStatus),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: FilledButton(
+                            onPressed: () {
+                              setState(() => _month = DateTime(_today.year, _today.month));
+                              _load();
+                            },
+                            child: Text(widget.strings.today),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+            child: Wrap(
+              spacing: 12,
+              runSpacing: 6,
+              children: [
+                _LegendChip(color: App217Colors.taken, label: widget.strings.legendTaken),
+                _LegendChip(color: App217Colors.missed, label: widget.strings.legendMissed),
+                _LegendChip(
+                  color: scheme.outline,
+                  label: widget.strings.legendUnrecorded,
+                  outlined: true,
+                ),
+              ],
+            ),
+          ),
+          Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             child: Row(
               children: [
@@ -111,7 +224,11 @@ class _CalendarScreenState extends State<CalendarScreen> {
                   icon: const Icon(Icons.chevron_left),
                 ),
                 Expanded(
-                  child: Text(label, textAlign: TextAlign.center, style: Theme.of(context).textTheme.titleLarge),
+                  child: Text(
+                    label,
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
                 ),
                 IconButton(
                   onPressed: () {
@@ -129,9 +246,49 @@ class _CalendarScreenState extends State<CalendarScreen> {
               padding: const EdgeInsets.all(12),
               child: Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
             ),
-          Expanded(child: _MonthGrid(month: _month, entries: _entries, onDayTap: _openDay)),
+          Expanded(
+            child: _MonthGrid(
+              month: _month,
+              today: _today,
+              entries: _entries,
+              onDayTap: _openDay,
+              todayLabel: widget.strings.today,
+            ),
+          ),
         ],
       ),
+    );
+  }
+}
+
+class _LegendChip extends StatelessWidget {
+  const _LegendChip({
+    required this.color,
+    required this.label,
+    this.outlined = false,
+  });
+
+  final Color color;
+  final String label;
+  final bool outlined;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 16,
+          height: 16,
+          decoration: BoxDecoration(
+            color: outlined ? Colors.transparent : color,
+            borderRadius: BorderRadius.circular(4),
+            border: Border.all(color: color),
+          ),
+        ),
+        const SizedBox(width: 6),
+        Text(label, style: Theme.of(context).textTheme.bodySmall),
+      ],
     );
   }
 }
@@ -139,13 +296,17 @@ class _CalendarScreenState extends State<CalendarScreen> {
 class _MonthGrid extends StatelessWidget {
   const _MonthGrid({
     required this.month,
+    required this.today,
     required this.entries,
     required this.onDayTap,
+    required this.todayLabel,
   });
 
   final DateTime month;
+  final DateTime today;
   final Map<String, Entry> entries;
   final Future<void> Function(DateTime day) onDayTap;
+  final String todayLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -159,6 +320,8 @@ class _MonthGrid extends StatelessWidget {
       for (var day = 1; day <= daysInMonth; day++)
         _DayCell(
           day: DateTime(month.year, month.month, day),
+          today: today,
+          todayLabel: todayLabel,
           entry: entries[DateFormat('yyyy-MM-dd').format(DateTime(month.year, month.month, day))],
           onTap: onDayTap,
         ),
@@ -172,9 +335,17 @@ class _MonthGrid extends StatelessWidget {
 }
 
 class _DayCell extends StatelessWidget {
-  const _DayCell({required this.day, required this.entry, required this.onTap});
+  const _DayCell({
+    required this.day,
+    required this.today,
+    required this.todayLabel,
+    required this.entry,
+    required this.onTap,
+  });
 
   final DateTime day;
+  final DateTime today;
+  final String todayLabel;
   final Entry? entry;
   final Future<void> Function(DateTime day) onTap;
 
@@ -183,27 +354,43 @@ class _DayCell extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     Color? bg;
     if (entry != null) {
-      bg = entry!.taken ? const Color(0xFF1F6F5B) : scheme.error;
+      bg = entry!.taken ? App217Colors.taken : App217Colors.missed;
     }
-    final today = DateTime.now();
     final isToday = day.year == today.year && day.month == today.month && day.day == today.day;
+    final isFuture = day.isAfter(today);
     return InkWell(
-      onTap: () => onTap(day),
+      onTap: isFuture ? null : () => onTap(day),
+      borderRadius: BorderRadius.circular(12),
       child: Container(
-        margin: const EdgeInsets.all(2),
+        margin: const EdgeInsets.all(3),
         decoration: BoxDecoration(
-          color: bg,
-          borderRadius: BorderRadius.circular(8),
-          border: isToday ? Border.all(color: scheme.primary, width: 2) : null,
-        ),
-        child: Center(
-          child: Text(
-            '${day.day}',
-            style: TextStyle(
-              color: bg == null ? null : Colors.white,
-              fontWeight: isToday ? FontWeight.bold : FontWeight.normal,
-            ),
+          color: bg ?? scheme.surface.withValues(alpha: isFuture ? 0.25 : 0.55),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isToday ? const Color(0xFFE67E22) : scheme.outline.withValues(alpha: 0.35),
+            width: isToday ? 2 : 1,
           ),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              '${day.day}',
+              style: TextStyle(
+                color: bg == null ? scheme.onSurface : Colors.white,
+                fontWeight: isToday ? FontWeight.w700 : FontWeight.w500,
+              ),
+            ),
+            if (isToday)
+              Text(
+                todayLabel,
+                style: const TextStyle(
+                  fontSize: 9,
+                  fontWeight: FontWeight.w800,
+                  color: Color(0xFFE67E22),
+                ),
+              ),
+          ],
         ),
       ),
     );
@@ -226,7 +413,7 @@ class _DayEditor extends StatefulWidget {
 
   final Strings strings;
   final String date;
-  final bool initialTaken;
+  final bool? initialTaken;
   final String initialNotes;
 
   @override
@@ -234,7 +421,7 @@ class _DayEditor extends StatefulWidget {
 }
 
 class _DayEditorState extends State<_DayEditor> {
-  late bool _taken = widget.initialTaken;
+  late bool? _taken = widget.initialTaken;
   late final TextEditingController _notes = TextEditingController(text: widget.initialNotes);
 
   @override
@@ -259,12 +446,13 @@ class _DayEditorState extends State<_DayEditor> {
           Text(widget.date, style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 12),
           SegmentedButton<bool>(
+            emptySelectionAllowed: true,
             segments: [
-              ButtonSegment(value: true, label: Text(widget.strings.taken)),
-              ButtonSegment(value: false, label: Text(widget.strings.missed)),
+              ButtonSegment(value: true, label: Text(widget.strings.takenLabel)),
+              ButtonSegment(value: false, label: Text(widget.strings.missedLabel)),
             ],
-            selected: {_taken},
-            onSelectionChanged: (value) => setState(() => _taken = value.first),
+            selected: {if (_taken != null) _taken!},
+            onSelectionChanged: (value) => setState(() => _taken = value.isEmpty ? null : value.first),
           ),
           const SizedBox(height: 12),
           TextField(
@@ -284,10 +472,12 @@ class _DayEditorState extends State<_DayEditor> {
               ),
               const Spacer(),
               FilledButton(
-                onPressed: () => Navigator.pop(
-                  context,
-                  _DayEditResult(taken: _taken, notes: _notes.text.trim()),
-                ),
+                onPressed: _taken == null
+                    ? null
+                    : () => Navigator.pop(
+                          context,
+                          _DayEditResult(taken: _taken!, notes: _notes.text.trim()),
+                        ),
                 child: Text(widget.strings.save),
               ),
             ],

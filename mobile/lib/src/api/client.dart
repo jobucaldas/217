@@ -191,6 +191,15 @@ class ApiClient {
     }
     return Entry.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
   }
+
+  Future<ReminderPreference?> getReminderPreference() async {
+    final response = await _send('GET', _uri('/api/reminders/preferences'));
+    if (response.statusCode == 404) return null;
+    if (response.statusCode != 200) {
+      throw StateError('reminder preference failed: ${response.body}');
+    }
+    return ReminderPreference.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+  }
 }
 
 class _Pkce {

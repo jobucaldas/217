@@ -1,0 +1,31 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: app-217-dev
+
+resources:
+  - ../../base
+  - namespace.yaml
+  - ingress.yaml
+
+images:
+  - name: app-217-backend
+    newName: ghcr.io/jobucaldas/app-217-backend
+    newTag: dev
+  - name: app-217-frontend
+    newName: ghcr.io/jobucaldas/app-217-frontend
+    newTag: dev
+
+patches:
+  - path: node-selector.yaml
+    target:
+      kind: Deployment
+
+configMapGenerator:
+  - name: app-217-backend-config
+    literals:
+      - APP_ENV=development
+      - APP_BASE_URL=https://encom.tailbe71e1.ts.net:8443
+
+generatorOptions:
+  disableNameSuffixHash: true

@@ -21,6 +21,7 @@ class AuthScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final text = Theme.of(context).textTheme;
     return Scaffold(
       body: Container(
         width: double.infinity,
@@ -30,14 +31,14 @@ class AuthScreen extends StatelessWidget {
             end: Alignment.bottomRight,
             colors: [
               scheme.surface,
-              scheme.primaryContainer.withValues(alpha: 0.55),
+              scheme.primaryContainer.withValues(alpha: 0.72),
               scheme.surface,
             ],
           ),
         ),
         child: SafeArea(
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -59,33 +60,24 @@ class AuthScreen extends StatelessWidget {
                 Text(
                   strings.brand,
                   textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.displayLarge?.copyWith(
-                        color: scheme.primary,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: -1.5,
-                      ),
+                  style: text.displayLarge?.copyWith(color: scheme.primary),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 14),
                 Text(
                   strings.signInSubtitle,
                   textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.bodyLarge,
+                  style: text.bodyLarge,
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 32),
+                FilledButton(
+                  onPressed: onSignIn,
+                  child: Text(strings.continueWorkOS),
+                ),
+                const SizedBox(height: 16),
                 Text(
                   apiBaseUrl,
                   textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: scheme.onSurfaceVariant,
-                      ),
-                ),
-                const SizedBox(height: 28),
-                FilledButton(
-                  onPressed: onSignIn,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    child: Text(strings.continueWorkOS),
-                  ),
+                  style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
                 ),
                 const Spacer(flex: 2),
               ],

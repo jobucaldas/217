@@ -124,6 +124,15 @@ func StartWithPush(addr, databaseURL, appBaseURL string, push PushConfig, workos
 
 	mux := http.NewServeMux()
 
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+
 	mux.HandleFunc("GET /api/auth/session", h.CurrentSession)
 	mux.HandleFunc("POST /api/auth/logout", h.Logout)
 	mux.HandleFunc("GET /api/auth/workos", h.StartWorkOSOAuth)

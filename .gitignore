@@ -42,3 +42,7 @@ mobile/**/GeneratedPluginRegistrant.*
 
 # web static notice
 # (tracked)
+.env
+frontend/dist/
+frontend/target/
+pi-session-*.html
