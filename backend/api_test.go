@@ -530,3 +530,22 @@ func TestWorkOSExchangeReturnsBearerSession(t *testing.T) {
 		t.Fatalf("bearer session restore failed: %d %s", authW.Code, authW.Body.String())
 	}
 }
+
+func TestWorkOSExchangeRejectsUnregisteredRedirect(t *testing.T) {
+	h, _ := newTestHandler(t)
+	provider := &fakeOAuthProvider{userInfo: &auth.OAuthUserInfo{
+		Subject: "workos-mobile-1", Email: "mobile@example.com", EmailVerified: true, Name: "Mobile",
+	}}
+	h.SetOAuthProvider(provider)
+	body := []byte(`{"code":"auth-code","code_verifier":"verifier","redirect_uri":"https://evil.example/callback"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/workos/exchange", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.ExchangeWorkOS(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected invalid redirect to be rejected, got %d: %s", w.Code, w.Body.String())
+	}
+	if provider.exchangeCode != "" {
+		t.Fatal("exchange must not run for an unregistered redirect")
+	}
+}
