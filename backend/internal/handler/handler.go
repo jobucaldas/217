@@ -373,6 +373,10 @@ func (h *Handler) ExchangeWorkOS(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
 		return
 	}
+	if body.RedirectURI != auth.NativeAuthRedirectURI {
+		http.Error(w, `{"error":"invalid redirect uri"}`, http.StatusBadRequest)
+		return
+	}
 	var (
 		userInfo *auth.OAuthUserInfo
 		err      error

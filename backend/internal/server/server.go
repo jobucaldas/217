@@ -98,9 +98,9 @@ func StartWithPush(addr, databaseURL, appBaseURL string, push PushConfig, workos
 			} else {
 				h.SetOAuthProvider(provider)
 				if cfg.APIKey == "" {
-					log.Println("workos oauth enabled (PKCE public exchange; WORKOS_API_KEY unset)")
+					log.Println("workos oauth enabled (PKCE public exchange)")
 				} else {
-					log.Println("workos oauth enabled")
+					log.Println("workos oauth enabled (PKCE public exchange; API key is not sent on code exchange)")
 				}
 			}
 		} else {
