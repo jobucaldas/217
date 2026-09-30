@@ -191,6 +191,58 @@ class ApiClient {
     }
     return Entry.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
   }
+
+  Future<ReminderPreference?> getReminderPreference() async {
+    final response = await _send('GET', _uri('/api/reminders/preferences'));
+    if (response.statusCode == 404) return null;
+    if (response.statusCode != 200) {
+      throw StateError('reminder preference failed: ${response.body}');
+    }
+    return ReminderPreference.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
+  Future<ReminderPreference> upsertReminderPreference({
+    required bool enabled,
+    required String time,
+    required String timezone,
+  }) async {
+    final response = await _send(
+      'PUT',
+      _uri('/api/reminders/preferences'),
+      body: {
+        'enabled': enabled,
+        'time': time,
+        'timezone': timezone,
+      },
+    );
+    if (response.statusCode == 409) {
+      throw StateError('needs_push');
+    }
+    if (response.statusCode != 200) {
+      throw StateError('save reminder failed: ${response.body}');
+    }
+    return ReminderPreference.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
+  Future<({bool configured, String publicKey})> vapidConfig() async {
+    final response = await _send('GET', _uri('/api/reminders/vapid-public-key'));
+    if (response.statusCode != 200) {
+      return (configured: false, publicKey: '');
+    }
+    final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+    return (
+      configured: decoded['configured'] as bool? ?? false,
+      publicKey: (decoded['public_key'] as String?) ?? '',
+    );
+  }
+
+  Future<AuthConfig> authConfig() async {
+    final response = await _send('GET', _uri('/api/auth/config'), auth: false);
+    if (response.statusCode != 200) {
+      return const AuthConfig(authkit: false, password: false);
+    }
+    return AuthConfig.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+  }
 }
 
 class _Pkce {

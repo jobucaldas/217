@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Debug/tryout build: allow cleartext to local API hosts. -->
+<!-- Referenced only by debug and profile manifests. Release builds do not opt in. -->
 <network-security-config>
     <base-config cleartextTrafficPermitted="true" />
 </network-security-config>

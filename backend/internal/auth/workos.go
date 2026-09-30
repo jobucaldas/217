@@ -15,6 +15,10 @@ import (
 
 const workosAPIDefault = "https://api.workos.com"
 
+// NativeAuthRedirectURI is the Android AuthKit callback registered for this app.
+// Custom schemes are not exclusive across apps, so this allowlist is not a substitute for PKCE.
+const NativeAuthRedirectURI = "com.jobucaldas.a217://auth/callback"
+
 // WorkOSOAuth is an AuthKit authorization-code client using PKCE.
 // Native exchange uses the public client_id + code_verifier path (no API key required).
 type WorkOSOAuth struct {
@@ -83,10 +87,15 @@ func (w *WorkOSOAuth) ExchangeWithRedirect(ctx context.Context, code, codeVerifi
 	if code == "" || codeVerifier == "" {
 		return nil, fmt.Errorf("missing oauth code or verifier")
 	}
-	_ = redirectURI
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
+	if redirectURI != w.redirectURI && redirectURI != NativeAuthRedirectURI {
+		return nil, fmt.Errorf("redirect uri is not registered")
+	}
+	// Public PKCE client: code_verifier is the only client authenticator.
+	// WorkOS treats code_verifier as optional once a client secret is present, so the
+	// API key must not be sent here (neither Authorization nor client_secret).
 	payload := map[string]string{
 		"grant_type":    "authorization_code",
 		"client_id":     w.clientID,
@@ -102,9 +111,6 @@ func (w *WorkOSOAuth) ExchangeWithRedirect(ctx context.Context, code, codeVerifi
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if w.apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+w.apiKey)
-	}
 
 	resp, err := w.httpClient.Do(req)
 	if err != nil {

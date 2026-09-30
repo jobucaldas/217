@@ -28,6 +28,12 @@ const userIDKey contextKey = "userID"
 
 const oauthBindingCookie = "217_oauth_binding"
 
+const (
+	maxSessionDuration = 7 * 24 * time.Hour
+	minSessionDuration = 15 * time.Minute
+	defaultAuthLimit   = 30
+)
+
 type Handler struct {
 	store           store.Store
 	vapidPublicKey  string
@@ -35,14 +41,22 @@ type Handler struct {
 	sessionDuration time.Duration
 	oauthProvider   auth.OAuthProvider
 	appBaseURL      string
+	authLimiter     *ipRateLimiter
 }
 
 func New(s store.Store) *Handler {
-	return &Handler{store: s, sessionCookie: "217_session", sessionDuration: 7 * 24 * time.Hour}
+	return &Handler{
+		store:           s,
+		sessionCookie:   "217_session",
+		sessionDuration: maxSessionDuration,
+		authLimiter:     newIPRateLimiter(defaultAuthLimit, time.Minute),
+	}
 }
 
 func NewWithVAPID(s store.Store, publicKey string) *Handler {
-	return &Handler{store: s, vapidPublicKey: publicKey, sessionCookie: "217_session", sessionDuration: 7 * 24 * time.Hour}
+	h := New(s)
+	h.vapidPublicKey = publicKey
+	return h
 }
 
 func (h *Handler) SetSessionCookieName(name string) {
@@ -51,12 +65,49 @@ func (h *Handler) SetSessionCookieName(name string) {
 	}
 }
 func (h *Handler) SetSessionDuration(d time.Duration) {
-	if d > 0 {
-		h.sessionDuration = d
+	if d < minSessionDuration {
+		d = minSessionDuration
 	}
+	if d > maxSessionDuration {
+		d = maxSessionDuration
+	}
+	h.sessionDuration = d
+}
+func (h *Handler) SetRateLimit(limit int) {
+	h.authLimiter = newIPRateLimiter(limit, time.Minute)
 }
 func (h *Handler) SetOAuthProvider(p auth.OAuthProvider) { h.oauthProvider = p }
 func (h *Handler) SetAppBaseURL(u string)                { h.appBaseURL = u }
+
+func (h *Handler) authkitEnabled() bool { return h.oauthProvider != nil }
+
+// AuthConfig reports which sign-in modes the API exposes.
+func (h *Handler) AuthConfig(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"authkit":  h.authkitEnabled(),
+		"password": false, // password register/login stay disabled for AuthKit deployments
+	})
+}
+
+// Register is disabled when AuthKit is the product auth path.
+func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
+	h.rejectPasswordAuth(w)
+}
+
+// Login is disabled when AuthKit is the product auth path.
+func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
+	if !h.authLimiter.allow("login:" + clientIP(r)) {
+		http.Error(w, `{"error":"rate limited"}`, http.StatusTooManyRequests)
+		return
+	}
+	h.rejectPasswordAuth(w)
+}
+
+func (h *Handler) rejectPasswordAuth(w http.ResponseWriter) {
+	writeJSON(w, http.StatusForbidden, map[string]string{
+		"error": "password authentication is disabled; use WorkOS AuthKit",
+	})
+}
 
 func (h *Handler) sessionCookieSecure() bool {
 	u, err := url.Parse(h.appBaseURL)
@@ -200,6 +251,10 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) StartWorkOSOAuth(w http.ResponseWriter, r *http.Request) {
+	if !h.authLimiter.allow("workos:" + clientIP(r)) {
+		http.Error(w, `{"error":"rate limited"}`, http.StatusTooManyRequests)
+		return
+	}
 	if h.oauthProvider == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "oauth not configured"})
 		return
@@ -371,6 +426,10 @@ func (h *Handler) ExchangeWorkOS(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Code == "" || body.CodeVerifier == "" {
 		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
+		return
+	}
+	if body.RedirectURI != auth.NativeAuthRedirectURI {
+		http.Error(w, `{"error":"invalid redirect uri"}`, http.StatusBadRequest)
 		return
 	}
 	var (

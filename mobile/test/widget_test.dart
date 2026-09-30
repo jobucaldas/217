@@ -6,7 +6,7 @@ import 'package:a217/src/i18n.dart';
 import 'package:a217/src/screens/auth_screen.dart';
 
 void main() {
-  testWidgets('auth screen shows brand, WorkOS CTA, and API base', (tester) async {
+  testWidgets('auth screen shows brand and single sign-in CTA', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
         home: AuthScreen(
@@ -19,8 +19,10 @@ void main() {
       ),
     );
     expect(find.text('217'), findsOneWidget);
-    expect(find.text('Continuar com WorkOS'), findsOneWidget);
-    expect(find.text('http://10.0.2.2:8787'), findsOneWidget);
+    expect(find.text('Entrar'), findsOneWidget);
+    expect(find.text('Seu calendário de tomada.'), findsOneWidget);
+    // API base URL stays in Settings, not on the first viewport.
+    expect(find.text('http://10.0.2.2:8787'), findsNothing);
     expect(find.byIcon(Icons.settings_outlined), findsOneWidget);
   });
 

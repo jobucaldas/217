@@ -9,7 +9,7 @@ import (
 )
 
 func TestWorkOSExchangeAgainstMockAuthKit(t *testing.T) {
-	var sawCode, sawVerifier string
+	var sawCode, sawVerifier, sawAuth, sawSecret string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/user_management/authenticate" {
 			http.NotFound(w, r)
@@ -21,6 +21,8 @@ func TestWorkOSExchangeAgainstMockAuthKit(t *testing.T) {
 		}
 		sawCode, _ = body["code"].(string)
 		sawVerifier, _ = body["code_verifier"].(string)
+		sawSecret, _ = body["client_secret"].(string)
+		sawAuth = r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"user": map[string]any{
@@ -36,7 +38,7 @@ func TestWorkOSExchangeAgainstMockAuthKit(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider, err := NewWorkOSOAuth("", "client_test", "http://localhost:8080")
+	provider, err := NewWorkOSOAuth("sk_test_secret", "client_test", "http://localhost:8080")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,10 +51,16 @@ func TestWorkOSExchangeAgainstMockAuthKit(t *testing.T) {
 	if sawCode != "auth-code" || sawVerifier != "pkce-verifier" {
 		t.Fatalf("unexpected authenticate payload code=%q verifier=%q", sawCode, sawVerifier)
 	}
+	if sawAuth != "" || sawSecret != "" {
+		t.Fatalf("PKCE exchange must not send API key material auth=%q secret=%q", sawAuth, sawSecret)
+	}
 	if info.Subject != "user_01TEST" || info.Email != "native@example.com" || !info.EmailVerified || info.Name != "Native User" {
 		t.Fatalf("unexpected user info: %#v", info)
 	}
 	if !info.AuthoritativeEmail() {
 		t.Fatal("verified WorkOS email should be authoritative")
+	}
+	if _, err := provider.ExchangeWithRedirect(context.Background(), "auth-code", "pkce-verifier", "https://evil.example/callback"); err == nil {
+		t.Fatal("expected unregistered redirect to be rejected")
 	}
 }

@@ -13,14 +13,17 @@ class AuthScreen extends StatelessWidget {
   });
 
   final Strings strings;
-  final String apiBaseUrl;
+  final String apiBaseUrl; // call-site compat; API URL lives in Settings only
   final Future<void> Function() onSignIn;
   final VoidCallback onToggleLanguage;
   final VoidCallback onOpenSettings;
 
   @override
   Widget build(BuildContext context) {
+    // ignore: unused_local_variable — reserved for future debug badge
+    final _ = apiBaseUrl;
     final scheme = Theme.of(context).colorScheme;
+    final text = Theme.of(context).textTheme;
     return Scaffold(
       body: Container(
         width: double.infinity,
@@ -30,14 +33,14 @@ class AuthScreen extends StatelessWidget {
             end: Alignment.bottomRight,
             colors: [
               scheme.surface,
-              scheme.primaryContainer.withValues(alpha: 0.55),
+              scheme.primaryContainer.withValues(alpha: 0.72),
               scheme.surface,
             ],
           ),
         ),
         child: SafeArea(
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -51,7 +54,7 @@ class AuthScreen extends StatelessWidget {
                     const Spacer(),
                     TextButton(
                       onPressed: onToggleLanguage,
-                      child: Text(strings.pt ? 'English' : 'Português'),
+                      child: Text(strings.pt ? 'EN' : 'PT'),
                     ),
                   ],
                 ),
@@ -59,34 +62,20 @@ class AuthScreen extends StatelessWidget {
                 Text(
                   strings.brand,
                   textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.displayLarge?.copyWith(
-                        color: scheme.primary,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: -1.5,
-                      ),
+                  style: text.displayLarge?.copyWith(color: scheme.primary),
                 ),
                 const SizedBox(height: 12),
                 Text(
                   strings.signInSubtitle,
                   textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.bodyLarge,
+                  style: text.bodyLarge,
                 ),
-                const SizedBox(height: 12),
-                Text(
-                  apiBaseUrl,
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: scheme.onSurfaceVariant,
-                      ),
-                ),
-                const SizedBox(height: 28),
+                const SizedBox(height: 36),
                 FilledButton(
                   onPressed: onSignIn,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    child: Text(strings.continueWorkOS),
-                  ),
+                  child: Text(strings.continueWorkOS),
                 ),
+                // apiBaseUrl stays in Settings — not on the first viewport.
                 const Spacer(flex: 2),
               ],
             ),
