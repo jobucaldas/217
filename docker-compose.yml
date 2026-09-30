@@ -28,33 +28,36 @@ services:
       VAPID_PUBLIC_KEY: "${VAPID_PUBLIC_KEY:-}"
       VAPID_PRIVATE_KEY: "${VAPID_PRIVATE_KEY:-}"
       VAPID_SUBJECT: "${VAPID_SUBJECT:-}"
-      GOOGLE_CLIENT_ID: "${GOOGLE_CLIENT_ID:-}"
-      GOOGLE_CLIENT_SECRET: "${GOOGLE_CLIENT_SECRET:-}"
-      APP_BASE_URL: "${APP_BASE_URL:-http://localhost:8080}"
+      WORKOS_API_KEY: "${WORKOS_API_KEY:-}"
+      WORKOS_CLIENT_ID: "${WORKOS_CLIENT_ID:-client_01M3QCMK75B35RPC8EAJA5GREP}"
+      APP_BASE_URL: "${APP_BASE_URL:-http://localhost:8787}"
     depends_on:
       - postgres
     volumes:
       - ./backend:/app:Z
     working_dir: /app
     restart: unless-stopped
-    command: >
-      sh -c '
-        echo "Waiting for postgres..." &&
-        for i in $(seq 1 30); do
-          pg_isready -h postgres -U app_217 -d app_217 2>/dev/null && break;
-          echo "attempt $i...";
-          sleep 1;
-        done &&
-        echo "Starting backend..." &&
-        go run ./cmd/server -addr "$BACKEND_ADDR" -db "$DATABASE_URL"
-      '
+    command:
+      - sh
+      - -c
+      - |
+        echo "Waiting for postgres..."
+        for i in $$(seq 1 30); do
+          pg_isready -h postgres -U app_217 -d app_217 2>/dev/null && break
+          echo "attempt $$i..."
+          sleep 1
+        done
+        echo "Starting backend..."
+        go run ./cmd/server -addr "$$BACKEND_ADDR" -db "$$DATABASE_URL"
 
   caddy:
     image: docker.io/caddy:alpine
     ports:
-      - "8080:8080"
+      # Override with HTTP_PORT=... if 8787 is taken on the host.
+      - "${HTTP_PORT:-8787}:8787"
     volumes:
-      - ./frontend/dist:/srv/frontend:Z
+      # Flutter web release build (`make mobile-web`). Falls back to ./web notice if missing.
+      - ./mobile/build/web:/srv/web:Z
       - ./Caddyfile:/etc/caddy/Caddyfile:Z
     depends_on:
       - backend

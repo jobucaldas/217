@@ -2,7 +2,6 @@ package auth
 
 import (
 	"context"
-	"strings"
 )
 
 // OAuthUserInfo represents the minimal identity returned by an OAuth provider.
@@ -14,13 +13,20 @@ type OAuthUserInfo struct {
 	HostedDomain  string
 }
 
-// AuthoritativeEmail is only meaningful for claims from a validated Google ID token.
+// AuthoritativeEmail is true when the identity provider verified the email claim.
+// WorkOS AuthKit only returns verified emails for account linking decisions here.
 func (u *OAuthUserInfo) AuthoritativeEmail() bool {
-	return u.EmailVerified && (strings.HasSuffix(strings.ToLower(u.Email), "@gmail.com") || u.HostedDomain != "")
+	return u.EmailVerified
 }
 
 // OAuthProvider abstracts authorization URL generation and token exchange.
 type OAuthProvider interface {
 	AuthCodeURL(state, codeChallenge, nonce string) string
 	Exchange(ctx context.Context, code, codeVerifier, nonce string) (*OAuthUserInfo, error)
+}
+
+// WorkOSExchanger optionally supports exchanging codes issued for alternate redirect URIs
+// (for example a native Android deep link).
+type WorkOSExchanger interface {
+	ExchangeWithRedirect(ctx context.Context, code, codeVerifier, redirectURI string) (*OAuthUserInfo, error)
 }

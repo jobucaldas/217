@@ -163,13 +163,13 @@ func TestMemoryStore_GetEntryNotFound(t *testing.T) {
 	}
 }
 
-func TestMemoryStore_LinkGoogleIdentityUsesNormalizedEmailAndDurableSubject(t *testing.T) {
+func TestMemoryStore_LinkWorkOSIdentityUsesNormalizedEmailAndDurableSubject(t *testing.T) {
 	s := NewMemoryStore()
 	user, _ := s.CreateUser("Linked@Example.com", "U", "testpass123")
 
-	linked, err := s.LinkGoogleIdentity("subject-a", "linked@example.com", "Linked", true)
+	linked, err := s.LinkWorkOSIdentity("subject-a", "linked@example.com", "Linked", true)
 	if err != nil {
-		t.Fatalf("LinkGoogleIdentity failed: %v", err)
+		t.Fatalf("LinkWorkOSIdentity failed: %v", err)
 	}
 	if linked.ID != user.ID {
 		t.Fatalf("expected same user ID, got %s", linked.ID)
@@ -178,7 +178,7 @@ func TestMemoryStore_LinkGoogleIdentityUsesNormalizedEmailAndDurableSubject(t *t
 		t.Fatalf("linked user must be sanitized: %#v", linked)
 	}
 
-	again, err := s.LinkGoogleIdentity("subject-a", "different@example.com", "Different", false)
+	again, err := s.LinkWorkOSIdentity("subject-a", "different@example.com", "Different", false)
 	if err != nil {
 		t.Fatalf("durable subject failed: %v", err)
 	}
@@ -186,21 +186,21 @@ func TestMemoryStore_LinkGoogleIdentityUsesNormalizedEmailAndDurableSubject(t *t
 		t.Fatalf("expected durable subject to reuse user, got %s", again.ID)
 	}
 
-	if _, err := s.LinkGoogleIdentity("subject-b", "linked@example.com", "Linked", true); err == nil {
+	if _, err := s.LinkWorkOSIdentity("subject-b", "linked@example.com", "Linked", true); err == nil {
 		t.Fatal("must not link another subject by email")
 	}
 }
 
-func TestMemoryStore_LinkGoogleIdentityCreatesOAuthUser(t *testing.T) {
+func TestMemoryStore_LinkWorkOSIdentityCreatesOAuthUser(t *testing.T) {
 	s := NewMemoryStore()
-	created, err := s.LinkGoogleIdentity("new-subject", "New@Example.com", "New User", true)
+	created, err := s.LinkWorkOSIdentity("new-subject", "New@Example.com", "New User", true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if created.Email != "new@example.com" || created.Name != "New User" {
 		t.Fatalf("unexpected user: %#v", created)
 	}
-	again, err := s.LinkGoogleIdentity("new-subject", "changed@example.com", "Changed", true)
+	again, err := s.LinkWorkOSIdentity("new-subject", "changed@example.com", "Changed", true)
 	if err != nil || again.ID != created.ID {
 		t.Fatalf("subject was not durable: %#v, %v", again, err)
 	}
@@ -238,7 +238,7 @@ func TestMemoryStore_OAuthAttemptOneTimeAndExpiring(t *testing.T) {
 	}
 }
 
-func TestMemoryStore_LinkGoogleIdentityRejectsAmbiguousNormalizedEmail(t *testing.T) {
+func TestMemoryStore_LinkWorkOSIdentityRejectsAmbiguousNormalizedEmail(t *testing.T) {
 	s := NewMemoryStore()
 	if _, err := s.CreateUser("User@example.com", "One", "password123"); err != nil {
 		t.Fatal(err)
@@ -246,7 +246,7 @@ func TestMemoryStore_LinkGoogleIdentityRejectsAmbiguousNormalizedEmail(t *testin
 	if _, err := s.CreateUser("user@example.com", "Two", "password123"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.LinkGoogleIdentity("subject", "USER@example.com", "Google User", true); err == nil || !strings.Contains(err.Error(), "ambiguous normalized email") {
+	if _, err := s.LinkWorkOSIdentity("subject", "USER@example.com", "WorkOS User", true); err == nil || !strings.Contains(err.Error(), "ambiguous normalized email") {
 		t.Fatalf("expected ambiguous-email failure, got %v", err)
 	}
 }

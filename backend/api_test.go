@@ -5,9 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -32,12 +35,13 @@ func (f *fakeOAuthProvider) AuthCodeURL(state, codeChallenge, nonce string) stri
 	f.nonce = nonce
 	f.state = state
 	f.challenge = codeChallenge
-	return "https://accounts.google.com/o/oauth2/v2/auth?state=" + url.QueryEscape(state) + "&code_challenge=" + url.QueryEscape(codeChallenge) + "&code_challenge_method=S256"
+	return "https://api.workos.com/user_management/authorize?state=" + url.QueryEscape(state) + "&code_challenge=" + url.QueryEscape(codeChallenge) + "&code_challenge_method=S256"
 }
 
 func (f *fakeOAuthProvider) Exchange(_ context.Context, code, codeVerifier, nonce string) (*auth.OAuthUserInfo, error) {
 	f.exchangeNonce = nonce
-	if nonce != f.nonce || nonce == "" {
+	// Browser cookie flow binds a nonce; native PKCE exchange may omit it.
+	if nonce != "" && nonce != f.nonce {
 		return nil, fmt.Errorf("nonce mismatch")
 	}
 	f.exchangeCode = code
@@ -74,31 +78,37 @@ func authedRequest(method, path string, cookie *http.Cookie, body []byte) *http.
 	return req
 }
 
-func TestGoogleOAuthStartAndCallback(t *testing.T) {
+func TestWorkOSOAuthStartAndCallback(t *testing.T) {
 	h, s := newTestHandler(t)
 	user, err := s.CreateUser("verified@example.com", "Verified User", "password123")
 	if err != nil {
 		t.Fatal(err)
 	}
-	provider := &fakeOAuthProvider{userInfo: &auth.OAuthUserInfo{Subject: "google-subject-1", Email: "verified@example.com", EmailVerified: true, HostedDomain: "example.com", Name: "Google User"}}
+	provider := &fakeOAuthProvider{userInfo: &auth.OAuthUserInfo{Subject: "workos-subject-1", Email: "verified@example.com", EmailVerified: true, HostedDomain: "example.com", Name: "WorkOS User"}}
 	h.SetOAuthProvider(provider)
 
-	startReq := httptest.NewRequest(http.MethodGet, "/api/auth/google", nil)
+	startReq := httptest.NewRequest(http.MethodGet, "/api/auth/workos", nil)
 	startW := httptest.NewRecorder()
-	h.StartGoogleOAuth(startW, startReq)
-	if startW.Code != http.StatusFound {
-		t.Fatalf("expected redirect, got %d: %s", startW.Code, startW.Body.String())
+	h.StartWorkOSOAuth(startW, startReq)
+	if startW.Code != http.StatusOK {
+		t.Fatalf("expected interstitial HTML (not bounce 302), got %d: %s", startW.Code, startW.Body.String())
 	}
-	location := startW.Header().Get("Location")
-	parsed, err := url.Parse(location)
+	if ct := startW.Header().Get("Content-Type"); !strings.Contains(ct, "text/html") {
+		t.Fatalf("expected HTML interstitial, content-type=%q", ct)
+	}
+	if startW.Header().Get("Location") != "" {
+		t.Fatal("start must not 302 bounce; binding cookie must be set on a document response")
+	}
+	authURL := mustAuthURLFromStart(t, startW)
+	parsed, err := url.Parse(authURL)
 	if err != nil {
-		t.Fatalf("parse redirect url: %v", err)
+		t.Fatalf("parse auth url: %v", err)
 	}
 	state := parsed.Query().Get("state")
 	bindingCookie := cookieNamed(t, startW.Result().Cookies(), "217_oauth_binding")
 	challenge := parsed.Query().Get("code_challenge")
 	if state == "" || challenge == "" {
-		t.Fatalf("missing state or challenge in redirect: %s", location)
+		t.Fatalf("missing state or challenge in auth url: %s", authURL)
 	}
 	if parsed.Query().Get("code_challenge_method") != "S256" {
 		t.Fatalf("expected S256 PKCE, got %s", parsed.RawQuery)
@@ -110,10 +120,10 @@ func TestGoogleOAuthStartAndCallback(t *testing.T) {
 		t.Fatalf("provider saw unexpected challenge: %q vs %q", provider.challenge, challenge)
 	}
 
-	cbReq := httptest.NewRequest(http.MethodGet, "/api/auth/google/callback?code=auth-code&state="+url.QueryEscape(state), nil)
+	cbReq := httptest.NewRequest(http.MethodGet, "/api/auth/workos/callback?code=auth-code&state="+url.QueryEscape(state), nil)
 	cbReq.AddCookie(bindingCookie)
 	cbW := httptest.NewRecorder()
-	h.GoogleOAuthCallback(cbW, cbReq)
+	h.WorkOSOAuthCallback(cbW, cbReq)
 	if cbW.Code != http.StatusFound {
 		t.Fatalf("expected callback redirect, got %d: %s", cbW.Code, cbW.Body.String())
 	}
@@ -151,20 +161,20 @@ func TestGoogleOAuthStartAndCallback(t *testing.T) {
 		t.Fatal("session response must not expose api_key")
 	}
 
-	reuseReq := httptest.NewRequest(http.MethodGet, "/api/auth/google/callback?code=auth-code&state="+url.QueryEscape(state), nil)
+	reuseReq := httptest.NewRequest(http.MethodGet, "/api/auth/workos/callback?code=auth-code&state="+url.QueryEscape(state), nil)
 	reuseReq.AddCookie(bindingCookie)
 	reuseW := httptest.NewRecorder()
-	h.GoogleOAuthCallback(reuseW, reuseReq)
+	h.WorkOSOAuthCallback(reuseW, reuseReq)
 	if reuseW.Code != http.StatusBadRequest {
 		t.Fatalf("reused state should fail, got %d", reuseW.Code)
 	}
 }
 
-func TestGoogleOAuthCallbackRejectsUnknownState(t *testing.T) {
+func TestWorkOSOAuthCallbackRejectsUnknownState(t *testing.T) {
 	h, _ := newTestHandler(t)
 	h.SetOAuthProvider(&fakeOAuthProvider{userInfo: &auth.OAuthUserInfo{Subject: "subject", Email: "user@example.com", EmailVerified: true}})
 	w := httptest.NewRecorder()
-	h.GoogleOAuthCallback(w, httptest.NewRequest(http.MethodGet, "/api/auth/google/callback?code=code&state=unknown", nil))
+	h.WorkOSOAuthCallback(w, httptest.NewRequest(http.MethodGet, "/api/auth/workos/callback?code=code&state=unknown", nil))
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("unknown state should fail, got %d", w.Code)
 	}
@@ -177,86 +187,86 @@ func TestHTTPSUsesSecureSessionCookie(t *testing.T) {
 	h.SetOAuthProvider(provider)
 	state, bindingCookie := startOAuth(t, h)
 	w := httptest.NewRecorder()
-	callback := httptest.NewRequest(http.MethodGet, "/api/auth/google/callback?code=code&state="+url.QueryEscape(state), nil)
+	callback := httptest.NewRequest(http.MethodGet, "/api/auth/workos/callback?code=code&state="+url.QueryEscape(state), nil)
 	callback.AddCookie(bindingCookie)
-	h.GoogleOAuthCallback(w, callback)
+	h.WorkOSOAuthCallback(w, callback)
 	cookies := w.Result().Cookies()
 	if w.Code != http.StatusFound || !cookieNamed(t, cookies, "217_session").Secure || !cookieNamed(t, cookies, "217_oauth_binding").Secure {
 		t.Fatalf("HTTPS callback must use Secure cookies: status=%d cookies=%#v", w.Code, cookies)
 	}
 }
 
-func TestGoogleOAuthCallbackRejectsUnverifiedEmail(t *testing.T) {
+func TestWorkOSOAuthCallbackRejectsUnverifiedEmail(t *testing.T) {
 	h, _ := newTestHandler(t)
-	provider := &fakeOAuthProvider{userInfo: &auth.OAuthUserInfo{Subject: "google-subject-2", Email: "verified@example.com", EmailVerified: false, Name: "Google User"}}
+	provider := &fakeOAuthProvider{userInfo: &auth.OAuthUserInfo{Subject: "workos-subject-2", Email: "verified@example.com", EmailVerified: false, Name: "WorkOS User"}}
 	h.SetOAuthProvider(provider)
 
-	startReq := httptest.NewRequest(http.MethodGet, "/api/auth/google", nil)
+	startReq := httptest.NewRequest(http.MethodGet, "/api/auth/workos", nil)
 	startW := httptest.NewRecorder()
-	h.StartGoogleOAuth(startW, startReq)
-	state := mustStateFromLocation(t, startW.Header().Get("Location"))
+	h.StartWorkOSOAuth(startW, startReq)
+	state := mustStateFromAuthURL(t, mustAuthURLFromStart(t, startW))
 	bindingCookie := cookieNamed(t, startW.Result().Cookies(), "217_oauth_binding")
 
-	cbReq := httptest.NewRequest(http.MethodGet, "/api/auth/google/callback?code=auth-code&state="+url.QueryEscape(state), nil)
+	cbReq := httptest.NewRequest(http.MethodGet, "/api/auth/workos/callback?code=auth-code&state="+url.QueryEscape(state), nil)
 	cbReq.AddCookie(bindingCookie)
 	cbW := httptest.NewRecorder()
-	h.GoogleOAuthCallback(cbW, cbReq)
+	h.WorkOSOAuthCallback(cbW, cbReq)
 	if cbW.Code != http.StatusForbidden {
 		t.Fatalf("expected forbidden, got %d", cbW.Code)
 	}
 }
 
-func TestGoogleOAuthCallbackRequiresBrowserBindingAndClearsCookie(t *testing.T) {
+func TestWorkOSOAuthCallbackRequiresBrowserBindingAndClearsCookie(t *testing.T) {
 	h, _ := newTestHandler(t)
 	h.SetOAuthProvider(&fakeOAuthProvider{userInfo: &auth.OAuthUserInfo{Subject: "subject", Email: "user@example.com", EmailVerified: true}})
 	state, _ := startOAuth(t, h)
 	w := httptest.NewRecorder()
-	h.GoogleOAuthCallback(w, httptest.NewRequest(http.MethodGet, "/api/auth/google/callback?code=code&state="+url.QueryEscape(state), nil))
+	h.WorkOSOAuthCallback(w, httptest.NewRequest(http.MethodGet, "/api/auth/workos/callback?code=code&state="+url.QueryEscape(state), nil))
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("missing browser binding should fail, got %d", w.Code)
 	}
 	cleared := cookieNamed(t, w.Result().Cookies(), "217_oauth_binding")
-	if cleared.MaxAge != -1 || cleared.Path != "/api/auth/google/callback" {
+	if cleared.MaxAge != -1 || cleared.Path != "/api/auth/workos/callback" {
 		t.Fatalf("callback must clear scoped binding cookie: %#v", cleared)
 	}
 }
 
-func TestGoogleOAuthCallbackLinksByNormalizedEmailAndSubject(t *testing.T) {
+func TestWorkOSOAuthCallbackLinksByNormalizedEmailAndSubject(t *testing.T) {
 	h, s := newTestHandler(t)
 	user, err := s.CreateUser("Linked@Example.com", "Linked User", "password123")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	providerA := &fakeOAuthProvider{userInfo: &auth.OAuthUserInfo{Subject: "subject-a", Email: "linked@example.com", EmailVerified: true, HostedDomain: "example.com", Name: "Google User"}}
+	providerA := &fakeOAuthProvider{userInfo: &auth.OAuthUserInfo{Subject: "subject-a", Email: "linked@example.com", EmailVerified: true, HostedDomain: "example.com", Name: "WorkOS User"}}
 	h.SetOAuthProvider(providerA)
 	stateA, bindingA := startOAuth(t, h)
-	cbA := httptest.NewRequest(http.MethodGet, "/api/auth/google/callback?code=code-a&state="+url.QueryEscape(stateA), nil)
+	cbA := httptest.NewRequest(http.MethodGet, "/api/auth/workos/callback?code=code-a&state="+url.QueryEscape(stateA), nil)
 	cbA.AddCookie(bindingA)
 	cbWA := httptest.NewRecorder()
-	h.GoogleOAuthCallback(cbWA, cbA)
+	h.WorkOSOAuthCallback(cbWA, cbA)
 	if cbWA.Code != http.StatusFound {
 		t.Fatalf("expected successful first link, got %d", cbWA.Code)
 	}
 
-	providerB := &fakeOAuthProvider{userInfo: &auth.OAuthUserInfo{Subject: "subject-b", Email: "linked@example.com", EmailVerified: true, HostedDomain: "example.com", Name: "Google User"}}
+	providerB := &fakeOAuthProvider{userInfo: &auth.OAuthUserInfo{Subject: "subject-b", Email: "linked@example.com", EmailVerified: true, HostedDomain: "example.com", Name: "WorkOS User"}}
 	h.SetOAuthProvider(providerB)
 	stateB, bindingB := startOAuth(t, h)
-	cbB := httptest.NewRequest(http.MethodGet, "/api/auth/google/callback?code=code-b&state="+url.QueryEscape(stateB), nil)
+	cbB := httptest.NewRequest(http.MethodGet, "/api/auth/workos/callback?code=code-b&state="+url.QueryEscape(stateB), nil)
 	cbB.AddCookie(bindingB)
 	cbWB := httptest.NewRecorder()
-	h.GoogleOAuthCallback(cbWB, cbB)
+	h.WorkOSOAuthCallback(cbWB, cbB)
 	if cbWB.Code != http.StatusForbidden {
 		t.Fatalf("expected second subject to be rejected, got %d", cbWB.Code)
 	}
 
-	providerC := &fakeOAuthProvider{userInfo: &auth.OAuthUserInfo{Subject: "subject-a", Email: "different@example.com", EmailVerified: true, HostedDomain: "example.com", Name: "Google User"}}
+	providerC := &fakeOAuthProvider{userInfo: &auth.OAuthUserInfo{Subject: "subject-a", Email: "different@example.com", EmailVerified: true, HostedDomain: "example.com", Name: "WorkOS User"}}
 	h.SetOAuthProvider(providerC)
 	stateC, bindingC := startOAuth(t, h)
-	cbC := httptest.NewRequest(http.MethodGet, "/api/auth/google/callback?code=code-c&state="+url.QueryEscape(stateC), nil)
+	cbC := httptest.NewRequest(http.MethodGet, "/api/auth/workos/callback?code=code-c&state="+url.QueryEscape(stateC), nil)
 	cbC.AddCookie(bindingC)
 	cbWC := httptest.NewRecorder()
-	h.GoogleOAuthCallback(cbWC, cbC)
+	h.WorkOSOAuthCallback(cbWC, cbC)
 	if cbWC.Code != http.StatusFound {
 		t.Fatalf("expected durable subject login, got %d", cbWC.Code)
 	}
@@ -346,10 +356,13 @@ func TestOriginGuardRejectsUnsafeCrossOriginRequests(t *testing.T) {
 
 func startOAuth(t *testing.T, h *handler.Handler) (string, *http.Cookie) {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodGet, "/api/auth/google", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/workos", nil)
 	w := httptest.NewRecorder()
-	h.StartGoogleOAuth(w, req)
-	return mustStateFromLocation(t, w.Header().Get("Location")), cookieNamed(t, w.Result().Cookies(), "217_oauth_binding")
+	h.StartWorkOSOAuth(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected interstitial start, got %d: %s", w.Code, w.Body.String())
+	}
+	return mustStateFromAuthURL(t, mustAuthURLFromStart(t, w)), cookieNamed(t, w.Result().Cookies(), "217_oauth_binding")
 }
 
 func cookieNamed(t *testing.T, cookies []*http.Cookie, name string) *http.Cookie {
@@ -363,17 +376,64 @@ func cookieNamed(t *testing.T, cookies []*http.Cookie, name string) *http.Cookie
 	return nil
 }
 
-func mustStateFromLocation(t *testing.T, location string) string {
+var continueHrefRE = regexp.MustCompile(`id="continue"\s+href="([^"]+)"`)
+
+func mustAuthURLFromStart(t *testing.T, w *httptest.ResponseRecorder) string {
 	t.Helper()
-	parsed, err := url.Parse(location)
+	if loc := w.Header().Get("Location"); loc != "" {
+		return loc
+	}
+	m := continueHrefRE.FindStringSubmatch(w.Body.String())
+	if m == nil {
+		t.Fatalf("missing #continue auth link in start HTML: %s", w.Body.String())
+	}
+	return html.UnescapeString(m[1])
+}
+
+func mustStateFromAuthURL(t *testing.T, authURL string) string {
+	t.Helper()
+	parsed, err := url.Parse(authURL)
 	if err != nil {
 		t.Fatal(err)
 	}
 	state := parsed.Query().Get("state")
 	if state == "" {
-		t.Fatalf("missing state in redirect: %s", location)
+		t.Fatalf("missing state in auth url: %s", authURL)
 	}
 	return state
+}
+
+func mustStateFromLocation(t *testing.T, location string) string {
+	t.Helper()
+	return mustStateFromAuthURL(t, location)
+}
+
+func TestWorkOSOAuthStartUsesInterstitialNotBounceRedirect(t *testing.T) {
+	h, _ := newTestHandler(t)
+	h.SetOAuthProvider(&fakeOAuthProvider{userInfo: &auth.OAuthUserInfo{Subject: "s", Email: "u@example.com", EmailVerified: true}})
+	w := httptest.NewRecorder()
+	h.StartWorkOSOAuth(w, httptest.NewRequest(http.MethodGet, "/api/auth/workos", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("bounce 302 loses binding cookie in Chromium; want 200 interstitial, got %d", w.Code)
+	}
+	if w.Header().Get("Location") != "" {
+		t.Fatal("Location on start causes bounce-tracking to drop 217_oauth_binding")
+	}
+	binding := cookieNamed(t, w.Result().Cookies(), "217_oauth_binding")
+	if binding.Path != "/api/auth/workos/callback" || !binding.HttpOnly {
+		t.Fatalf("unexpected binding cookie: %#v", binding)
+	}
+	authURL := mustAuthURLFromStart(t, w)
+	body := w.Body.String()
+	if !strings.Contains(authURL, "state=") || !strings.Contains(body, `id="continue"`) || !strings.Contains(body, "__WORKOS_AUTH_URL__") {
+		t.Fatalf("interstitial must expose click-through Continue to AuthKit: url=%s body=%s", authURL, body)
+	}
+	if strings.Contains(body, "location.replace") || strings.Contains(body, "http-equiv=\"refresh\"") {
+		t.Fatal("auto-navigation reintroduces Chromium bounce-tracking cookie loss")
+	}
+	if w.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("interstitial must be uncached, got %q", w.Header().Get("Cache-Control"))
+	}
 }
 
 func TestProtectedRoutesStillTrackEntriesWithCookieAuth(t *testing.T) {
@@ -409,28 +469,64 @@ func TestProtectedRoutesStillTrackEntriesWithCookieAuth(t *testing.T) {
 	}
 }
 
-func TestGoogleExternalEmailCollisionFailsClosed(t *testing.T) {
+func TestWorkOSVerifiedEmailLinksLegacyAccount(t *testing.T) {
 	h, s := newTestHandler(t)
-	if _, err := s.CreateUser("Legacy@example.com", "Legacy", "password123"); err != nil {
+	legacy, err := s.CreateUser("Legacy@example.com", "Legacy", "password123")
+	if err != nil {
 		t.Fatal(err)
 	}
 	h.SetOAuthProvider(&fakeOAuthProvider{userInfo: &auth.OAuthUserInfo{
-		Subject: "external-subject", Email: "legacy@example.com", EmailVerified: true,
+		Subject: "workos-subject-legacy", Email: "legacy@example.com", EmailVerified: true, Name: "Legacy",
 	}})
 	state, binding := startOAuth(t, h)
-	req := httptest.NewRequest(http.MethodGet, "/api/auth/google/callback?code=code&state="+url.QueryEscape(state), nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/workos/callback?code=code&state="+url.QueryEscape(state), nil)
 	req.AddCookie(binding)
 	w := httptest.NewRecorder()
-	h.GoogleOAuthCallback(w, req)
-	if w.Code != http.StatusForbidden || !bytes.Contains(w.Body.Bytes(), []byte("Contact the app operator")) {
-		t.Fatalf("expected actionable generic rejection, got %d: %s", w.Code, w.Body.String())
+	h.WorkOSOAuthCallback(w, req)
+	if w.Code != http.StatusFound {
+		t.Fatalf("expected redirect after verified WorkOS link, got %d: %s", w.Code, w.Body.String())
 	}
-	for _, cookie := range w.Result().Cookies() {
-		if cookie.Name == "217_session" && cookie.Value != "" {
-			t.Fatal("rejected collision issued an app session")
-		}
+	cookie := cookieNamed(t, w.Result().Cookies(), "217_session")
+	sessionReq := authedRequest(http.MethodGet, "/api/auth/session", cookie, nil)
+	sessionW := httptest.NewRecorder()
+	h.CurrentSession(sessionW, sessionReq)
+	var current map[string]any
+	if err := json.NewDecoder(sessionW.Body).Decode(&current); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := s.ConsumeOAuthAttempt(state, binding.Value); err == nil {
-		t.Fatal("rejected callback left its attempt reusable")
+	user := current["user"].(map[string]any)
+	if user["id"] != legacy.ID {
+		t.Fatalf("expected legacy account link, got %#v", current)
+	}
+}
+
+func TestWorkOSExchangeReturnsBearerSession(t *testing.T) {
+	h, _ := newTestHandler(t)
+	provider := &fakeOAuthProvider{userInfo: &auth.OAuthUserInfo{
+		Subject: "workos-mobile-1", Email: "mobile@example.com", EmailVerified: true, Name: "Mobile",
+	}}
+	h.SetOAuthProvider(provider)
+	body := []byte(`{"code":"auth-code","code_verifier":"verifier","redirect_uri":"com.jobucaldas.a217://auth/callback"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/workos/exchange", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.ExchangeWorkOS(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected exchange success, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	token, _ := resp["session_token"].(string)
+	if token == "" || resp["user"] == nil {
+		t.Fatalf("expected session_token and user, got %#v", resp)
+	}
+	authReq := httptest.NewRequest(http.MethodGet, "/api/auth/session", nil)
+	authReq.Header.Set("Authorization", "Bearer "+token)
+	authW := httptest.NewRecorder()
+	h.CurrentSession(authW, authReq)
+	if authW.Code != http.StatusOK || !bytes.Contains(authW.Body.Bytes(), []byte("mobile@example.com")) {
+		t.Fatalf("bearer session restore failed: %d %s", authW.Code, authW.Body.String())
 	}
 }

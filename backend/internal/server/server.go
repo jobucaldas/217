@@ -20,10 +20,10 @@ type PushConfig struct {
 	Subject    string
 }
 
-type GoogleConfig struct {
-	ClientID     string
-	ClientSecret string
-	AppBaseURL   string
+type WorkOSConfig struct {
+	APIKey     string
+	ClientID   string
+	AppBaseURL string
 }
 
 func ValidatePushConfig(push PushConfig) (PushConfig, error) {
@@ -49,22 +49,22 @@ func Start(addr, databaseURL string) error {
 	return StartWithPush(addr, databaseURL, "", PushConfig{})
 }
 
-func StartWithPush(addr, databaseURL, appBaseURL string, push PushConfig, googleConfigs ...GoogleConfig) error {
+func StartWithPush(addr, databaseURL, appBaseURL string, push PushConfig, workosConfigs ...WorkOSConfig) error {
 	canonicalBaseURL, err := auth.ValidateAppBaseURL(appBaseURL)
 	if err != nil {
 		return err
 	}
 	appBaseURL = canonicalBaseURL
-	if len(googleConfigs) > 0 && googleConfigs[0].AppBaseURL != "" {
-		googleBaseURL, validateErr := auth.ValidateAppBaseURL(googleConfigs[0].AppBaseURL)
+	if len(workosConfigs) > 0 && workosConfigs[0].AppBaseURL != "" {
+		workosBaseURL, validateErr := auth.ValidateAppBaseURL(workosConfigs[0].AppBaseURL)
 		if validateErr != nil {
 			return validateErr
 		}
-		if appBaseURL != "" && appBaseURL != googleBaseURL {
-			return fmt.Errorf("APP_BASE_URL must be consistent across server and Google OAuth configuration")
+		if appBaseURL != "" && appBaseURL != workosBaseURL {
+			return fmt.Errorf("APP_BASE_URL must be consistent across server and WorkOS OAuth configuration")
 		}
-		appBaseURL = googleBaseURL
-		googleConfigs[0].AppBaseURL = googleBaseURL
+		appBaseURL = workosBaseURL
+		workosConfigs[0].AppBaseURL = workosBaseURL
 	}
 	validatedPush, err := ValidatePushConfig(push)
 	if err != nil {
@@ -89,21 +89,25 @@ func StartWithPush(addr, databaseURL, appBaseURL string, push PushConfig, google
 	h := handler.NewWithVAPID(s, push.PublicKey)
 	h.SetAppBaseURL(appBaseURL)
 
-	if len(googleConfigs) > 0 {
-		google := googleConfigs[0]
-		if google.ClientID != "" && google.ClientSecret != "" && google.AppBaseURL != "" {
-			provider, providerErr := auth.NewGoogleOAuth(google.ClientID, google.ClientSecret, google.AppBaseURL)
+	if len(workosConfigs) > 0 {
+		cfg := workosConfigs[0]
+		if cfg.ClientID != "" && cfg.AppBaseURL != "" {
+			provider, providerErr := auth.NewWorkOSOAuth(cfg.APIKey, cfg.ClientID, cfg.AppBaseURL)
 			if providerErr != nil {
-				log.Printf("google oauth disabled: %v", providerErr)
+				log.Printf("workos oauth disabled: %v", providerErr)
 			} else {
 				h.SetOAuthProvider(provider)
-				log.Println("google oauth enabled")
+				if cfg.APIKey == "" {
+					log.Println("workos oauth enabled (PKCE public exchange; WORKOS_API_KEY unset)")
+				} else {
+					log.Println("workos oauth enabled")
+				}
 			}
 		} else {
-			log.Println("google oauth disabled: missing GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, or APP_BASE_URL")
+			log.Println("workos oauth disabled: missing WORKOS_CLIENT_ID or APP_BASE_URL")
 		}
 	} else {
-		log.Println("google oauth disabled: missing configuration")
+		log.Println("workos oauth disabled: missing configuration")
 	}
 
 	if push.PublicKey != "" && push.PrivateKey != "" {
@@ -122,8 +126,9 @@ func StartWithPush(addr, databaseURL, appBaseURL string, push PushConfig, google
 
 	mux.HandleFunc("GET /api/auth/session", h.CurrentSession)
 	mux.HandleFunc("POST /api/auth/logout", h.Logout)
-	mux.HandleFunc("GET /api/auth/google", h.StartGoogleOAuth)
-	mux.HandleFunc("GET /api/auth/google/callback", h.GoogleOAuthCallback)
+	mux.HandleFunc("GET /api/auth/workos", h.StartWorkOSOAuth)
+	mux.HandleFunc("GET /api/auth/workos/callback", h.WorkOSOAuthCallback)
+	mux.HandleFunc("POST /api/auth/workos/exchange", h.ExchangeWorkOS)
 
 	mux.HandleFunc("GET /api/entries", h.AuthMiddleware(h.ListEntries))
 	mux.HandleFunc("GET /api/entries/{date}", h.AuthMiddleware(h.GetEntry))
@@ -149,26 +154,19 @@ func corsMiddleware(next http.Handler, appBaseURL string) http.Handler {
 		if origin != "" && allowedOrigin != "" && origin == allowedOrigin {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
-			w.Header().Set("Vary", "Origin")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 		}
-
 		if r.Method == http.MethodOptions {
-			if origin != "" && allowedOrigin != "" && origin != allowedOrigin {
-				http.Error(w, "forbidden", http.StatusForbidden)
-				return
-			}
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
-
 		next.ServeHTTP(w, r)
 	})
 }
 
-func originFromBaseURL(baseURL string) string {
-	u, err := url.Parse(baseURL)
+func originFromBaseURL(appBaseURL string) string {
+	u, err := url.Parse(appBaseURL)
 	if err != nil || u.Scheme == "" || u.Host == "" {
 		return ""
 	}

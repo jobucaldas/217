@@ -239,11 +239,11 @@ func (s *PGStore) ChangePassword(userID, oldPassword, newPassword string) error 
 	return nil
 }
 
-func (s *PGStore) LinkGoogleIdentity(subject, verifiedEmail, name string, authoritative bool) (*model.User, error) {
+func (s *PGStore) LinkWorkOSIdentity(subject, verifiedEmail, name string, authoritative bool) (*model.User, error) {
 	normalizedEmail := normalizeEmail(verifiedEmail)
 	tx, err := s.db.BeginTx(context.Background(), &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
-		return nil, fmt.Errorf("beginning google link transaction: %w", err)
+		return nil, fmt.Errorf("beginning workos link transaction: %w", err)
 	}
 	defer func() {
 		_ = tx.Rollback()
@@ -251,26 +251,26 @@ func (s *PGStore) LinkGoogleIdentity(subject, verifiedEmail, name string, author
 	// Serialize both subject and normalized-email decisions so concurrent first
 	// logins cannot create duplicate users or move an identity between users.
 	if _, err := tx.Exec(`SELECT pg_advisory_xact_lock(hashtextextended($1, 217))`, subject); err != nil {
-		return nil, fmt.Errorf("locking google subject: %w", err)
+		return nil, fmt.Errorf("locking workos subject: %w", err)
 	}
 	if _, err := tx.Exec(`SELECT pg_advisory_xact_lock(hashtextextended($1, 218))`, normalizedEmail); err != nil {
-		return nil, fmt.Errorf("locking google email: %w", err)
+		return nil, fmt.Errorf("locking workos email: %w", err)
 	}
 
 	user := &model.User{}
 	err = tx.QueryRow(`SELECT u.id, u.email, u.name, u.api_key, u.password_hash, u.created_at, u.updated_at
-		FROM google_identities gi
+		FROM workos_identities gi
 		JOIN users u ON u.id = gi.user_id
 		WHERE gi.subject = $1`, subject).
 		Scan(&user.ID, &user.Email, &user.Name, &user.APIKey, &user.PasswordHash, &user.CreatedAt, &user.UpdatedAt)
 	if err == nil {
 		if err := tx.Commit(); err != nil {
-			return nil, fmt.Errorf("committing google identity lookup: %w", err)
+			return nil, fmt.Errorf("committing workos identity lookup: %w", err)
 		}
 		return sanitizeUser(user), nil
 	}
 	if err != nil && err != sql.ErrNoRows {
-		return nil, fmt.Errorf("getting google identity: %w", err)
+		return nil, fmt.Errorf("getting workos identity: %w", err)
 	}
 
 	var normalizedMatches int
@@ -286,11 +286,11 @@ func (s *PGStore) LinkGoogleIdentity(subject, verifiedEmail, name string, author
 			return nil, fmt.Errorf("legacy account requires independent ownership proof")
 		}
 		var alreadyLinked bool
-		if err := tx.QueryRow(`SELECT EXISTS (SELECT 1 FROM google_identities gi JOIN users u ON u.id = gi.user_id WHERE LOWER(u.email) = $1)`, normalizedEmail).Scan(&alreadyLinked); err != nil {
-			return nil, fmt.Errorf("checking existing google link: %w", err)
+		if err := tx.QueryRow(`SELECT EXISTS (SELECT 1 FROM workos_identities gi JOIN users u ON u.id = gi.user_id WHERE LOWER(u.email) = $1)`, normalizedEmail).Scan(&alreadyLinked); err != nil {
+			return nil, fmt.Errorf("checking existing workos link: %w", err)
 		}
 		if alreadyLinked {
-			return nil, fmt.Errorf("account already linked to another google subject")
+			return nil, fmt.Errorf("account already linked to another workos subject")
 		}
 	}
 
@@ -307,17 +307,17 @@ func (s *PGStore) LinkGoogleIdentity(subject, verifiedEmail, name string, author
 			Scan(&user.ID, &user.Email, &user.Name, &user.APIKey, &user.PasswordHash, &user.CreatedAt, &user.UpdatedAt)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("finding user for google identity: %w", err)
+		return nil, fmt.Errorf("finding user for workos identity: %w", err)
 	}
 
-	_, err = tx.Exec(`INSERT INTO google_identities (subject, user_id, email_normalized)
+	_, err = tx.Exec(`INSERT INTO workos_identities (subject, user_id, email_normalized)
 		VALUES ($1, $2, $3)`,
 		subject, user.ID, normalizedEmail)
 	if err != nil {
-		return nil, fmt.Errorf("linking google identity: %w", err)
+		return nil, fmt.Errorf("linking workos identity: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("committing google identity link: %w", err)
+		return nil, fmt.Errorf("committing workos identity link: %w", err)
 	}
 	return sanitizeUser(user), nil
 }

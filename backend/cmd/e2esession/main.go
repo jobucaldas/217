@@ -29,7 +29,7 @@ func main() {
 		log.Fatal(err)
 	}
 	defer s.Close()
-	user, err := s.LinkGoogleIdentity("e2e:"+*email, *email, *name, false)
+	user, err := s.LinkWorkOSIdentity("e2e:"+*email, *email, *name, false)
 	if err != nil {
 		log.Fatal(err)
 	}

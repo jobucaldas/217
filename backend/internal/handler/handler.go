@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"html"
 	"log"
 	"net"
 	"net/http"
@@ -89,12 +90,12 @@ func (h *Handler) clearSessionCookie() *http.Cookie {
 }
 
 func (h *Handler) oauthBindingCookieValue(value string, expires time.Time) *http.Cookie {
-	return &http.Cookie{Name: oauthBindingCookie, Value: value, Path: "/api/auth/google/callback", HttpOnly: true,
+	return &http.Cookie{Name: oauthBindingCookie, Value: value, Path: "/api/auth/workos/callback", HttpOnly: true,
 		Secure: h.sessionCookieSecure(), SameSite: http.SameSiteLaxMode, Expires: expires, MaxAge: 300}
 }
 
 func (h *Handler) clearOAuthBindingCookie() *http.Cookie {
-	return &http.Cookie{Name: oauthBindingCookie, Path: "/api/auth/google/callback", HttpOnly: true,
+	return &http.Cookie{Name: oauthBindingCookie, Path: "/api/auth/workos/callback", HttpOnly: true,
 		Secure: h.sessionCookieSecure(), SameSite: http.SameSiteLaxMode, Expires: time.Unix(0, 0), MaxAge: -1}
 }
 
@@ -126,14 +127,28 @@ func isUnsafeMethod(method string) bool {
 	}
 }
 
+func (h *Handler) sessionTokenFromRequest(r *http.Request) (string, bool) {
+	if cookie, err := r.Cookie(h.sessionCookie); err == nil && cookie.Value != "" {
+		return cookie.Value, true
+	}
+	authz := r.Header.Get("Authorization")
+	if strings.HasPrefix(strings.ToLower(authz), "bearer ") {
+		token := strings.TrimSpace(authz[7:])
+		if token != "" {
+			return token, true
+		}
+	}
+	return "", false
+}
+
 func (h *Handler) AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		cookie, err := r.Cookie(h.sessionCookie)
-		if err != nil || cookie.Value == "" {
+		token, ok := h.sessionTokenFromRequest(r)
+		if !ok {
 			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 			return
 		}
-		user, err := h.store.GetUserBySession(cookie.Value)
+		user, err := h.store.GetUserBySession(token)
 		if err != nil {
 			http.SetCookie(w, h.clearSessionCookie())
 			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
@@ -158,8 +173,8 @@ func getUserID(r *http.Request) string {
 // --- Session & OAuth handlers ---
 
 func (h *Handler) CurrentSession(w http.ResponseWriter, r *http.Request) {
-	if cookie, err := r.Cookie(h.sessionCookie); err == nil && cookie.Value != "" {
-		user, err := h.store.GetUserBySession(cookie.Value)
+	if token, ok := h.sessionTokenFromRequest(r); ok {
+		user, err := h.store.GetUserBySession(token)
 		if err == nil {
 			writeJSON(w, http.StatusOK, map[string]interface{}{"user": user})
 			return
@@ -174,8 +189,8 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
 		return
 	}
-	if cookie, err := r.Cookie(h.sessionCookie); err == nil && cookie.Value != "" {
-		if err := h.store.DeleteSession(cookie.Value); err != nil {
+	if token, ok := h.sessionTokenFromRequest(r); ok {
+		if err := h.store.DeleteSession(token); err != nil {
 			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "could not log out; retry"})
 			return
 		}
@@ -184,7 +199,7 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-func (h *Handler) StartGoogleOAuth(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) StartWorkOSOAuth(w http.ResponseWriter, r *http.Request) {
 	if h.oauthProvider == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "oauth not configured"})
 		return
@@ -217,10 +232,87 @@ func (h *Handler) StartGoogleOAuth(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, h.oauthBindingCookieValue(binding, expires))
 	authURL := h.oauthProvider.AuthCodeURL(state, pkceChallengeS256(verifier), nonce)
-	http.Redirect(w, r, authURL, http.StatusFound)
+	if authURL == "" {
+		http.Error(w, `{"error":"cannot build authorization url"}`, http.StatusInternalServerError)
+		return
+	}
+	// Serve a same-origin HTML document (not a 302 bounce) so Chromium keeps the
+	// HttpOnly binding cookie across the subsequent navigation to AuthKit.
+	writeOAuthContinuePage(w, authURL)
 }
 
-func (h *Handler) GoogleOAuthCallback(w http.ResponseWriter, r *http.Request) {
+func writeOAuthContinuePage(w http.ResponseWriter, authURL string) {
+	jsURL, err := json.Marshal(authURL)
+	if err != nil {
+		http.Error(w, `{"error":"cannot build authorization url"}`, http.StatusInternalServerError)
+		return
+	}
+	href := html.EscapeString(authURL)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	// Require a same-origin click before leaving for AuthKit. Chromium bounce
+	// tracking drops cookies set on automatic cross-site hops (302, meta-refresh,
+	// or short setTimeout redirects); a user gesture keeps 217_oauth_binding.
+	_, _ = fmt.Fprintf(w, `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Continue sign-in</title>
+<style>
+  :root { color-scheme: dark; font-family: system-ui, sans-serif; }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center;
+    background: #121212; color: #f4f7f5; }
+  main { text-align: center; padding: 2rem; max-width: 22rem; }
+  h1 { font-size: 1.25rem; margin: 0 0 0.75rem; }
+  p { opacity: 0.85; line-height: 1.45; margin: 0 0 1.25rem; }
+  a.continue { display: inline-block; padding: 0.75rem 1.25rem; border-radius: 0.5rem;
+    background: #7dceb2; color: #10241c; font-weight: 600; text-decoration: none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Continue to WorkOS</h1>
+  <p>Click continue to finish sign-in. This keeps your secure browser session for the callback.</p>
+  <p><a class="continue" id="continue" href="%s" rel="noopener">Continue</a></p>
+</main>
+<script>
+// Expose URL for tests; navigation is click-driven only.
+window.__WORKOS_AUTH_URL__ = %s;
+</script>
+</body>
+</html>`, href, jsURL)
+}
+
+func (h *Handler) createSessionForUser(w http.ResponseWriter, r *http.Request, user *model.User) (string, error) {
+	sessionToken, err := generateRandom(32)
+	if err != nil {
+		return "", err
+	}
+	expires := time.Now().UTC().Add(h.sessionDuration)
+	if err := h.store.CreateSession(user.ID, sessionToken, expires, r.UserAgent(), r.RemoteAddr); err != nil {
+		return "", err
+	}
+	http.SetCookie(w, h.sessionCookieValue(sessionToken, expires))
+	return sessionToken, nil
+}
+
+func (h *Handler) linkWorkOSUser(w http.ResponseWriter, userInfo *auth.OAuthUserInfo) (*model.User, bool) {
+	if userInfo == nil || !userInfo.EmailVerified || userInfo.Subject == "" || userInfo.Email == "" {
+		http.Error(w, `{"error":"workos email not verified"}`, http.StatusForbidden)
+		return nil, false
+	}
+	user, err := h.store.LinkWorkOSIdentity(userInfo.Subject, userInfo.Email, userInfo.Name, userInfo.AuthoritativeEmail())
+	if err != nil {
+		log.Printf("link workos identity failed: %v", err)
+		http.Error(w, `{"error":"Unable to link this WorkOS account. Contact the app operator for account ownership verification. / Não foi possível vincular esta conta WorkOS. Contate o responsável pelo aplicativo para verificar a titularidade."}`, http.StatusForbidden)
+		return nil, false
+	}
+	return user, true
+}
+
+func (h *Handler) WorkOSOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, h.clearOAuthBindingCookie())
 	if h.oauthProvider == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "oauth not configured"})
@@ -249,33 +341,63 @@ func (h *Handler) GoogleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"oauth exchange failed"}`, http.StatusBadRequest)
 		return
 	}
-	if userInfo == nil || !userInfo.EmailVerified || userInfo.Subject == "" || userInfo.Email == "" {
-		http.Error(w, `{"error":"google email not verified"}`, http.StatusForbidden)
+	user, ok := h.linkWorkOSUser(w, userInfo)
+	if !ok {
 		return
 	}
-	user, err := h.store.LinkGoogleIdentity(userInfo.Subject, userInfo.Email, userInfo.Name, userInfo.AuthoritativeEmail())
-	if err != nil {
-		log.Printf("link google identity failed: %v", err)
-		http.Error(w, `{"error":"Unable to link this Google account. Contact the app operator for account ownership verification. / Não foi possível vincular esta conta Google. Contate o responsável pelo aplicativo para verificar a titularidade."}`, http.StatusForbidden)
-		return
-	}
-	sessionToken, err := generateRandom(32)
-	if err != nil {
-		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
-		return
-	}
-	expires := time.Now().UTC().Add(h.sessionDuration)
-	if err := h.store.CreateSession(user.ID, sessionToken, expires, r.UserAgent(), r.RemoteAddr); err != nil {
+	if _, err := h.createSessionForUser(w, r, user); err != nil {
 		log.Printf("create session failed: %v", err)
 		http.Error(w, `{"error":"cannot create session"}`, http.StatusInternalServerError)
 		return
 	}
-	http.SetCookie(w, h.sessionCookieValue(sessionToken, expires))
 	redirectTo := strings.TrimRight(h.appBaseURL, "/")
 	if redirectTo == "" {
 		redirectTo = "/"
 	}
 	http.Redirect(w, r, redirectTo, http.StatusFound)
+}
+
+// ExchangeWorkOS handles native (Flutter) AuthKit PKCE completion.
+// The mobile app opens AuthKit with a custom-scheme redirect, then posts code+verifier here.
+func (h *Handler) ExchangeWorkOS(w http.ResponseWriter, r *http.Request) {
+	if h.oauthProvider == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "oauth not configured"})
+		return
+	}
+	var body struct {
+		Code         string `json:"code"`
+		CodeVerifier string `json:"code_verifier"`
+		RedirectURI  string `json:"redirect_uri"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Code == "" || body.CodeVerifier == "" {
+		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
+		return
+	}
+	var (
+		userInfo *auth.OAuthUserInfo
+		err      error
+	)
+	if exchanger, ok := h.oauthProvider.(auth.WorkOSExchanger); ok && body.RedirectURI != "" {
+		userInfo, err = exchanger.ExchangeWithRedirect(r.Context(), body.Code, body.CodeVerifier, body.RedirectURI)
+	} else {
+		userInfo, err = h.oauthProvider.Exchange(r.Context(), body.Code, body.CodeVerifier, "")
+	}
+	if err != nil {
+		log.Printf("workos mobile exchange error: %v", err)
+		http.Error(w, `{"error":"oauth exchange failed"}`, http.StatusBadRequest)
+		return
+	}
+	user, ok := h.linkWorkOSUser(w, userInfo)
+	if !ok {
+		return
+	}
+	sessionToken, err := h.createSessionForUser(w, r, user)
+	if err != nil {
+		log.Printf("create session failed: %v", err)
+		http.Error(w, `{"error":"cannot create session"}`, http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"user": user, "session_token": sessionToken})
 }
 
 // --- Entry handlers ---
