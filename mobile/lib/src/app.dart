@@ -25,7 +25,7 @@ class _App217State extends State<App217> {
   User? _user;
   bool _loading = true;
   bool _portuguese = true;
-  ThemeMode _themeMode = ThemeMode.dark;
+  ThemeMode _themeMode = ThemeMode.light;
 
   Strings get _strings => Strings(_portuguese);
 

@@ -13,13 +13,15 @@ class AuthScreen extends StatelessWidget {
   });
 
   final Strings strings;
-  final String apiBaseUrl;
+  final String apiBaseUrl; // call-site compat; API URL lives in Settings only
   final Future<void> Function() onSignIn;
   final VoidCallback onToggleLanguage;
   final VoidCallback onOpenSettings;
 
   @override
   Widget build(BuildContext context) {
+    // ignore: unused_local_variable — reserved for future debug badge
+    final _ = apiBaseUrl;
     final scheme = Theme.of(context).colorScheme;
     final text = Theme.of(context).textTheme;
     return Scaffold(
@@ -52,7 +54,7 @@ class AuthScreen extends StatelessWidget {
                     const Spacer(),
                     TextButton(
                       onPressed: onToggleLanguage,
-                      child: Text(strings.pt ? 'English' : 'Português'),
+                      child: Text(strings.pt ? 'EN' : 'PT'),
                     ),
                   ],
                 ),
@@ -62,23 +64,18 @@ class AuthScreen extends StatelessWidget {
                   textAlign: TextAlign.center,
                   style: text.displayLarge?.copyWith(color: scheme.primary),
                 ),
-                const SizedBox(height: 14),
+                const SizedBox(height: 12),
                 Text(
                   strings.signInSubtitle,
                   textAlign: TextAlign.center,
                   style: text.bodyLarge,
                 ),
-                const SizedBox(height: 32),
+                const SizedBox(height: 36),
                 FilledButton(
                   onPressed: onSignIn,
                   child: Text(strings.continueWorkOS),
                 ),
-                const SizedBox(height: 16),
-                Text(
-                  apiBaseUrl,
-                  textAlign: TextAlign.center,
-                  style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
-                ),
+                // apiBaseUrl stays in Settings — not on the first viewport.
                 const Spacer(flex: 2),
               ],
             ),

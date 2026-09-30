@@ -87,6 +87,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
     final result = await showModalBottomSheet<_DayEditResult>(
       context: context,
       isScrollControlled: true,
+      showDragHandle: true,
       builder: (context) => _DayEditor(
         strings: widget.strings,
         date: key,
@@ -101,16 +102,21 @@ class _CalendarScreenState extends State<CalendarScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final label = DateFormat.yMMMM(widget.strings.pt ? 'pt_BR' : 'en_US').format(_month);
+    final locale = widget.strings.pt ? 'pt_BR' : 'en_US';
+    final monthLabel = DateFormat.yMMMM(locale).format(_month);
     final todayKey = DateFormat('yyyy-MM-dd').format(_today);
     final todayEntry = _entries[todayKey];
     final scheme = Theme.of(context).colorScheme;
+    final text = Theme.of(context).textTheme;
     final todayStatus = todayEntry == null
         ? widget.strings.unrecorded
         : (todayEntry.taken ? widget.strings.taken : widget.strings.missed);
     final todayColor = todayEntry == null
         ? scheme.onSurfaceVariant
         : (todayEntry.taken ? App217Colors.taken : App217Colors.missed);
+    final humanDate = DateFormat.MMMMd(locale).format(_today);
+    final primaryLabel =
+        todayEntry == null ? widget.strings.recordToday : widget.strings.updateToday;
 
     return Scaffold(
       appBar: AppBar(
@@ -129,82 +135,59 @@ class _CalendarScreenState extends State<CalendarScreen> {
         ],
       ),
       body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          // One job: today's intake — status + single primary action.
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-            child: Card(
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  widget.strings.today,
+                  style: text.labelLarge?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                    letterSpacing: 0.6,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.baseline,
+                  textBaseline: TextBaseline.alphabetic,
                   children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            '${widget.strings.today} · $todayKey',
-                            style: Theme.of(context).textTheme.titleLarge,
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                          decoration: BoxDecoration(
-                            color: todayColor.withValues(alpha: 0.15),
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                          child: Text(
-                            todayStatus,
-                            style: TextStyle(
-                              color: todayColor,
-                              fontWeight: FontWeight.w700,
-                              fontSize: 13,
-                            ),
-                          ),
-                        ),
-                      ],
+                    Expanded(
+                      child: Text(humanDate, style: text.headlineMedium),
                     ),
-                    const SizedBox(height: 8),
                     Text(
-                      _reminderSummary.isEmpty
-                          ? widget.strings.reminderNotReady
-                          : _reminderSummary,
-                      style: Theme.of(context).textTheme.bodyMedium,
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: () => _openDay(_today),
-                            child: Text(widget.strings.todayStatus),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: FilledButton(
-                            onPressed: () {
-                              setState(() => _month = DateTime(_today.year, _today.month));
-                              _load();
-                            },
-                            child: Text(widget.strings.today),
-                          ),
-                        ),
-                      ],
+                      todayStatus,
+                      style: text.titleLarge?.copyWith(color: todayColor),
                     ),
                   ],
                 ),
-              ),
+                const SizedBox(height: 6),
+                Text(
+                  _reminderSummary.isEmpty
+                      ? widget.strings.reminderNotReady
+                      : _reminderSummary,
+                  style: text.bodyMedium,
+                ),
+                const SizedBox(height: 14),
+                FilledButton(
+                  onPressed: () => _openDay(_today),
+                  child: Text(primaryLabel),
+                ),
+              ],
             ),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
-            child: Wrap(
-              spacing: 12,
-              runSpacing: 6,
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
+            child: Row(
               children: [
-                _LegendChip(color: App217Colors.taken, label: widget.strings.legendTaken),
-                _LegendChip(color: App217Colors.missed, label: widget.strings.legendMissed),
-                _LegendChip(
+                _LegendDot(color: App217Colors.taken, label: widget.strings.legendTaken),
+                const SizedBox(width: 14),
+                _LegendDot(color: App217Colors.missed, label: widget.strings.legendMissed),
+                const SizedBox(width: 14),
+                _LegendDot(
                   color: scheme.outline,
                   label: widget.strings.legendUnrecorded,
                   outlined: true,
@@ -213,10 +196,11 @@ class _CalendarScreenState extends State<CalendarScreen> {
             ),
           ),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 4),
             child: Row(
               children: [
                 IconButton(
+                  tooltip: monthLabel,
                   onPressed: () {
                     setState(() => _month = DateTime(_month.year, _month.month - 1));
                     _load();
@@ -225,9 +209,9 @@ class _CalendarScreenState extends State<CalendarScreen> {
                 ),
                 Expanded(
                   child: Text(
-                    label,
+                    monthLabel,
                     textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.titleLarge,
+                    style: text.titleLarge,
                   ),
                 ),
                 IconButton(
@@ -243,8 +227,8 @@ class _CalendarScreenState extends State<CalendarScreen> {
           if (_loading) const LinearProgressIndicator(minHeight: 2),
           if (_error != null)
             Padding(
-              padding: const EdgeInsets.all(12),
-              child: Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+              child: Text(_error!, style: TextStyle(color: scheme.error)),
             ),
           Expanded(
             child: _MonthGrid(
@@ -261,8 +245,8 @@ class _CalendarScreenState extends State<CalendarScreen> {
   }
 }
 
-class _LegendChip extends StatelessWidget {
-  const _LegendChip({
+class _LegendDot extends StatelessWidget {
+  const _LegendDot({
     required this.color,
     required this.label,
     this.outlined = false,
@@ -278,16 +262,16 @@ class _LegendChip extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         Container(
-          width: 16,
-          height: 16,
+          width: 12,
+          height: 12,
           decoration: BoxDecoration(
             color: outlined ? Colors.transparent : color,
-            borderRadius: BorderRadius.circular(4),
-            border: Border.all(color: color),
+            shape: BoxShape.circle,
+            border: Border.all(color: color, width: 1.5),
           ),
         ),
         const SizedBox(width: 6),
-        Text(label, style: Theme.of(context).textTheme.bodySmall),
+        Text(label, style: Theme.of(context).textTheme.labelLarge),
       ],
     );
   }
@@ -312,10 +296,17 @@ class _MonthGrid extends StatelessWidget {
   Widget build(BuildContext context) {
     final first = DateTime(month.year, month.month, 1);
     final daysInMonth = DateTime(month.year, month.month + 1, 0).day;
-    final leading = (first.weekday % 7); // Sunday-first
+    final leading = first.weekday % 7; // Sunday-first
     final cells = <Widget>[
       for (final label in ['S', 'M', 'T', 'W', 'T', 'F', 'S'])
-        Center(child: Text(label, style: Theme.of(context).textTheme.labelMedium)),
+        Center(
+          child: Text(
+            label,
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+          ),
+        ),
       for (var i = 0; i < leading; i++) const SizedBox.shrink(),
       for (var day = 1; day <= daysInMonth; day++)
         _DayCell(
@@ -327,7 +318,7 @@ class _MonthGrid extends StatelessWidget {
         ),
     ];
     return GridView.count(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
       crossAxisCount: 7,
       children: cells,
     );
@@ -364,11 +355,11 @@ class _DayCell extends StatelessWidget {
       child: Container(
         margin: const EdgeInsets.all(3),
         decoration: BoxDecoration(
-          color: bg ?? scheme.surface.withValues(alpha: isFuture ? 0.25 : 0.55),
+          color: bg ?? scheme.surface.withValues(alpha: isFuture ? 0.25 : 0.7),
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: isToday ? const Color(0xFFE67E22) : scheme.outline.withValues(alpha: 0.35),
-            width: isToday ? 2 : 1,
+            color: isToday ? App217Colors.forest : scheme.outline.withValues(alpha: 0.4),
+            width: isToday ? 2.2 : 1,
           ),
         ),
         child: Column(
@@ -378,16 +369,16 @@ class _DayCell extends StatelessWidget {
               '${day.day}',
               style: TextStyle(
                 color: bg == null ? scheme.onSurface : Colors.white,
-                fontWeight: isToday ? FontWeight.w700 : FontWeight.w500,
+                fontWeight: isToday ? FontWeight.w800 : FontWeight.w500,
               ),
             ),
             if (isToday)
               Text(
                 todayLabel,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 9,
                   fontWeight: FontWeight.w800,
-                  color: Color(0xFFE67E22),
+                  color: bg == null ? App217Colors.forest : Colors.white,
                 ),
               ),
           ],
@@ -432,19 +423,26 @@ class _DayEditorState extends State<_DayEditor> {
 
   @override
   Widget build(BuildContext context) {
+    final locale = widget.strings.pt ? 'pt_BR' : 'en_US';
+    final human = DateFormat.yMMMMd(locale).format(DateTime.parse(widget.date));
     return Padding(
       padding: EdgeInsets.only(
-        left: 16,
-        right: 16,
-        top: 16,
-        bottom: MediaQuery.viewInsetsOf(context).bottom + 16,
+        left: 20,
+        right: 20,
+        top: 8,
+        bottom: MediaQuery.viewInsetsOf(context).bottom + 20,
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(widget.date, style: Theme.of(context).textTheme.titleLarge),
-          const SizedBox(height: 12),
+          Text(human, style: Theme.of(context).textTheme.headlineMedium),
+          const SizedBox(height: 6),
+          Text(
+            widget.strings.pickStatus,
+            style: Theme.of(context).textTheme.bodyLarge,
+          ),
+          const SizedBox(height: 14),
           SegmentedButton<bool>(
             emptySelectionAllowed: true,
             segments: [
@@ -454,33 +452,28 @@ class _DayEditorState extends State<_DayEditor> {
             selected: {if (_taken != null) _taken!},
             onSelectionChanged: (value) => setState(() => _taken = value.isEmpty ? null : value.first),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 14),
           TextField(
             controller: _notes,
-            maxLines: 3,
+            maxLines: 2,
             decoration: InputDecoration(
               labelText: widget.strings.notes,
               border: const OutlineInputBorder(),
             ),
           ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: Text(widget.strings.cancel),
-              ),
-              const Spacer(),
-              FilledButton(
-                onPressed: _taken == null
-                    ? null
-                    : () => Navigator.pop(
-                          context,
-                          _DayEditResult(taken: _taken!, notes: _notes.text.trim()),
-                        ),
-                child: Text(widget.strings.save),
-              ),
-            ],
+          const SizedBox(height: 16),
+          FilledButton(
+            onPressed: _taken == null
+                ? null
+                : () => Navigator.pop(
+                      context,
+                      _DayEditResult(taken: _taken!, notes: _notes.text.trim()),
+                    ),
+            child: Text(widget.strings.save),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(widget.strings.cancel),
           ),
         ],
       ),
