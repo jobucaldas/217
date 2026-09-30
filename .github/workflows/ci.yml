@@ -1,7 +1,15 @@
 name: 217 CI
 
 on:
+  push:
   pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   nix:
@@ -16,6 +24,7 @@ jobs:
         run: nix run nixpkgs#nixfmt -- --check flake.nix
       - name: Validate flake
         run: nix flake check
+
   backend:
     name: Go fmt, test, vet and build
     runs-on: ubuntu-latest
@@ -32,6 +41,7 @@ jobs:
         run: nix develop --command bash -lc 'cd backend && go vet -mod=readonly ./...'
       - name: Go build
         run: nix develop --command bash -lc 'cd backend && go build -mod=readonly ./...'
+
   mobile:
     name: Flutter analyze and test
     runs-on: ubuntu-latest
@@ -46,3 +56,70 @@ jobs:
           flutter pub get
           flutter analyze
           flutter test
+
+  # Roomies-style: boot API with real WORKOS_* repo secrets and smoke AuthKit wiring.
+  workos-smoke:
+    name: WorkOS AuthKit deploy smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: app_217
+          POSTGRES_USER: app_217
+          POSTGRES_PASSWORD: app_217
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U app_217 -d app_217"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      WORKOS_CLIENT_ID: ${{ secrets.WORKOS_CLIENT_ID }}
+      WORKOS_API_KEY: ${{ secrets.WORKOS_API_KEY }}
+      APP_BASE_URL: http://localhost:8787
+      DATABASE_URL: postgres://app_217:app_217@localhost:5432/app_217?sslmode=disable
+      BACKEND_ADDR: 127.0.0.1:3000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Require WorkOS secrets
+        run: |
+          set -euo pipefail
+          if [ -z "${WORKOS_CLIENT_ID}" ] || [ -z "${WORKOS_API_KEY}" ]; then
+            echo "Missing WORKOS_CLIENT_ID and/or WORKOS_API_KEY repo Actions secrets." >&2
+            exit 1
+          fi
+          # Mask values so they never appear in logs if echoed by accident.
+          echo "::add-mask::${WORKOS_CLIENT_ID}"
+          echo "::add-mask::${WORKOS_API_KEY}"
+      - name: AuthKit smoke against Postgres
+        run: bash scripts/ci-workos-smoke.sh
+
+  # Deploy-shaped artifact: Flutter web release bundle (same input as home-lab image).
+  flutter-web-build:
+    name: Flutter web release build
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/cirruslabs/flutter:stable
+    env:
+      # Public client id (safe). Sourced from repo secret when present.
+      WORKOS_CLIENT_ID: ${{ secrets.WORKOS_CLIENT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build web
+        working-directory: mobile
+        run: |
+          git config --global --add safe.directory /sdks/flutter || true
+          flutter pub get
+          # Fall back to Staging public client id if secret unset (fork PRs).
+          CLIENT_ID="${WORKOS_CLIENT_ID:-client_01M3QCMK75B35RPC8EAJA5GREP}"
+          flutter build web --release --no-web-resources-cdn \
+            --dart-define=WORKOS_CLIENT_ID="${CLIENT_ID}"
+      - name: Assert index.html present
+        run: test -f mobile/build/web/index.html
