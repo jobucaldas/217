@@ -1,36 +1,50 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:timezone/data/latest_all.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
+
+import 'reminder_schedule.dart';
 
 const _channelId = 'intake_daily';
 const _notifId = 21701;
 
-final FlutterLocalNotificationsPlugin _plugin = FlutterLocalNotificationsPlugin();
-bool _ready = false;
+final FlutterLocalNotificationsPlugin _plugin =
+    FlutterLocalNotificationsPlugin();
+bool _initialized = false;
 
 bool get supportsLocalReminders =>
     !kIsWeb &&
     (defaultTargetPlatform == TargetPlatform.android ||
         defaultTargetPlatform == TargetPlatform.iOS);
 
-Future<bool> syncLocalDailyReminder({
+Future<LocalReminderSyncResult> syncLocalDailyReminder({
   required bool enabled,
   required String timeHhMm,
   required String title,
   required String body,
 }) async {
-  if (!supportsLocalReminders) return false;
+  if (!supportsLocalReminders) {
+    return const LocalReminderSyncResult(LocalReminderSyncStatus.unsupported);
+  }
+
   try {
-    await _ensureReady();
+    final ready = await _ensureReady();
+    if (!ready) {
+      return const LocalReminderSyncResult(
+        LocalReminderSyncStatus.permissionDenied,
+      );
+    }
+
     if (!enabled) {
       await _plugin.cancel(_notifId);
-      return true;
+      return const LocalReminderSyncResult(LocalReminderSyncStatus.cancelled);
     }
-    final parts = timeHhMm.split(':');
-    final hour = int.tryParse(parts.first) ?? 9;
-    final minute = int.tryParse(parts.length > 1 ? parts[1] : '0') ?? 0;
+
+    final parsed = parseReminderTime(timeHhMm);
+    final when = _nextTz(parsed.hour, parsed.minute);
+    final exact = await _canUseExactAlarms();
 
     const android = AndroidNotificationDetails(
       _channelId,
@@ -42,54 +56,105 @@ Future<bool> syncLocalDailyReminder({
     const ios = DarwinNotificationDetails();
     const details = NotificationDetails(android: android, iOS: ios);
 
-    final when = _nextLocalAsUtc(hour, minute);
     await _plugin.zonedSchedule(
       _notifId,
       title,
       body,
       when,
       details,
-      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+      androidScheduleMode: exact
+          ? AndroidScheduleMode.exactAllowWhileIdle
+          : AndroidScheduleMode.inexactAllowWhileIdle,
       uiLocalNotificationDateInterpretation:
           UILocalNotificationDateInterpretation.absoluteTime,
       matchDateTimeComponents: DateTimeComponents.time,
     );
-    return true;
+    return LocalReminderSyncResult(
+      LocalReminderSyncStatus.scheduled,
+      exact: exact,
+    );
   } on MissingPluginException {
-    return false;
+    return const LocalReminderSyncResult(LocalReminderSyncStatus.unsupported);
+  } catch (_) {
+    return const LocalReminderSyncResult(LocalReminderSyncStatus.failed);
+  }
+}
+
+Future<bool> _ensureReady() async {
+  if (!_initialized) {
+    tzdata.initializeTimeZones();
+    try {
+      final name = await FlutterTimezone.getLocalTimezone();
+      tz.setLocalLocation(tz.getLocation(name));
+    } catch (_) {
+      // Fall back to UTC location with wall-clock conversion below.
+      tz.setLocalLocation(tz.UTC);
+    }
+
+    const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
+    const iosInit = DarwinInitializationSettings(
+      requestAlertPermission: false,
+      requestBadgePermission: false,
+      requestSoundPermission: false,
+    );
+    await _plugin.initialize(
+      const InitializationSettings(android: androidInit, iOS: iosInit),
+    );
+    _initialized = true;
+  }
+
+  final android = _plugin.resolvePlatformSpecificImplementation<
+      AndroidFlutterLocalNotificationsPlugin>();
+  if (android != null) {
+    final allowed = await android.requestNotificationsPermission();
+    if (allowed == false) {
+      return false;
+    }
+    // Best-effort exact alarms (Android 12+). Denial → inexact schedule.
+    try {
+      await android.requestExactAlarmsPermission();
+    } catch (_) {}
+  }
+
+  final ios = _plugin.resolvePlatformSpecificImplementation<
+      IOSFlutterLocalNotificationsPlugin>();
+  if (ios != null) {
+    final allowed = await ios.requestPermissions(
+      alert: true,
+      badge: true,
+      sound: true,
+    );
+    if (allowed == false) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+Future<bool> _canUseExactAlarms() async {
+  final android = _plugin.resolvePlatformSpecificImplementation<
+      AndroidFlutterLocalNotificationsPlugin>();
+  if (android == null) return false;
+  try {
+    return await android.canScheduleExactNotifications() ?? false;
   } catch (_) {
     return false;
   }
 }
 
-Future<void> _ensureReady() async {
-  if (_ready) return;
-  tzdata.initializeTimeZones();
-  tz.setLocalLocation(tz.UTC);
-  const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
-  const iosInit = DarwinInitializationSettings();
-  await _plugin.initialize(
-    const InitializationSettings(android: androidInit, iOS: iosInit),
+tz.TZDateTime _nextTz(int hour, int minute) {
+  final now = tz.TZDateTime.now(tz.local);
+  var scheduled = tz.TZDateTime(
+    tz.local,
+    now.year,
+    now.month,
+    now.day,
+    hour,
+    minute,
   );
-  final android = _plugin.resolvePlatformSpecificImplementation<
-      AndroidFlutterLocalNotificationsPlugin>();
-  await android?.requestNotificationsPermission();
-  _ready = true;
-}
-
-/// Convert device-local wall time to a TZDateTime in UTC for scheduling.
-tz.TZDateTime _nextLocalAsUtc(int hour, int minute) {
-  final now = DateTime.now();
-  var local = DateTime(now.year, now.month, now.day, hour, minute);
-  if (!local.isAfter(now)) {
-    local = local.add(const Duration(days: 1));
+  if (!scheduled.isAfter(now)) {
+    scheduled = scheduled.add(const Duration(days: 1));
   }
-  final utc = local.toUtc();
-  return tz.TZDateTime.utc(
-    utc.year,
-    utc.month,
-    utc.day,
-    utc.hour,
-    utc.minute,
-  );
+  return scheduled;
 }

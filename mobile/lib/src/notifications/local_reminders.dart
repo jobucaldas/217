@@ -1,8 +1,15 @@
+import 'reminder_schedule.dart';
 import 'local_reminders_stub.dart'
+    if (dart.library.html) 'local_reminders_web.dart'
     if (dart.library.io) 'local_reminders_io.dart' as impl;
 
-/// Schedules (or cancels) a daily local reminder when the platform supports it.
-Future<bool> syncLocalDailyReminder({
+export 'reminder_schedule.dart';
+
+/// True when this build can attempt OS/browser local notifications.
+bool get supportsLocalReminders => impl.supportsLocalReminders;
+
+/// Schedules or cancels a daily local reminder. Never throws for UI callers.
+Future<LocalReminderSyncResult> syncLocalDailyReminder({
   required bool enabled,
   required String timeHhMm,
   required String title,
@@ -14,6 +21,3 @@ Future<bool> syncLocalDailyReminder({
       title: title,
       body: body,
     );
-
-/// True when this build can schedule OS local notifications (Android/iOS).
-bool get supportsLocalReminders => impl.supportsLocalReminders;
