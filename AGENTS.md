@@ -26,7 +26,7 @@ make mobile-apk      # debug APK in container
 ## Architecture
 ```
 Browser (same origin) cookie flow:
-  / → Flutter web → GET /api/auth/workos → AuthKit → /api/auth/workos/callback → cookie → /
+ / → Flutter web → GET /api/auth/workos (JSON + binding cookie) → AuthKit → /api/auth/workos/callback → cookie → /
 
 Android deep-link PKCE:
   Flutter → AuthKit → com.jobucaldas.a217://… → POST /api/auth/workos/exchange → Bearer

@@ -54,13 +54,16 @@ assert b.get("password") is False, b
 print("authkit=true password=false")
 '
 
-echo "GET /api/auth/workos (AuthKit continue page)…"
-body="$(curl -fsS -c /tmp/217-cookies.txt "${BASE_URL}/api/auth/workos")"
-echo "${body}" | grep -Eq 'id="continue"|Continuar|Continue'
-echo "${body}" | grep -Fq '217'
-echo "${body}" | grep -Eq 'calendário de anticoncepcional|contraceptive calendar'
-echo "${body}" | grep -Eq 'https://[^"]*workos\.com|https://[^"]*authkit'
-echo "${body}" | grep -Fq "${WORKOS_CLIENT_ID}"
+echo "GET /api/auth/workos (JSON auth_url + binding cookie)…"
+body="$(curl -fsS -c /tmp/217-cookies.txt -H 'Accept: application/json' "${BASE_URL}/api/auth/workos")"
+echo "${body}" | python3 -c "
+import json,os,sys,re
+b=json.load(sys.stdin)
+u=b.get('auth_url') or ''
+assert 'workos.com' in u or 'authkit' in u.lower(), b
+assert os.environ['WORKOS_CLIENT_ID'] in u, b
+print('auth_url ok')
+"
 # Binding cookie must be set for the callback path.
 grep -qi '217_oauth_binding' /tmp/217-cookies.txt
 

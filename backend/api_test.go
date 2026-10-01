@@ -5,11 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"html"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -91,13 +89,13 @@ func TestWorkOSOAuthStartAndCallback(t *testing.T) {
 	startW := httptest.NewRecorder()
 	h.StartWorkOSOAuth(startW, startReq)
 	if startW.Code != http.StatusOK {
-		t.Fatalf("expected interstitial HTML (not bounce 302), got %d: %s", startW.Code, startW.Body.String())
+		t.Fatalf("expected JSON start (not bounce 302), got %d: %s", startW.Code, startW.Body.String())
 	}
-	if ct := startW.Header().Get("Content-Type"); !strings.Contains(ct, "text/html") {
-		t.Fatalf("expected HTML interstitial, content-type=%q", ct)
+	if ct := startW.Header().Get("Content-Type"); !strings.Contains(ct, "application/json") {
+		t.Fatalf("expected JSON auth start, content-type=%q", ct)
 	}
 	if startW.Header().Get("Location") != "" {
-		t.Fatal("start must not 302 bounce; binding cookie must be set on a document response")
+		t.Fatal("start must not 302 bounce; binding cookie must be set on a JSON response")
 	}
 	authURL := mustAuthURLFromStart(t, startW)
 	parsed, err := url.Parse(authURL)
@@ -360,7 +358,7 @@ func startOAuth(t *testing.T, h *handler.Handler) (string, *http.Cookie) {
 	w := httptest.NewRecorder()
 	h.StartWorkOSOAuth(w, req)
 	if w.Code != http.StatusOK {
-		t.Fatalf("expected interstitial start, got %d: %s", w.Code, w.Body.String())
+		t.Fatalf("expected JSON auth start, got %d: %s", w.Code, w.Body.String())
 	}
 	return mustStateFromAuthURL(t, mustAuthURLFromStart(t, w)), cookieNamed(t, w.Result().Cookies(), "217_oauth_binding")
 }
@@ -376,18 +374,20 @@ func cookieNamed(t *testing.T, cookies []*http.Cookie, name string) *http.Cookie
 	return nil
 }
 
-var continueHrefRE = regexp.MustCompile(`id="continue"\s+href="([^"]+)"`)
-
 func mustAuthURLFromStart(t *testing.T, w *httptest.ResponseRecorder) string {
 	t.Helper()
 	if loc := w.Header().Get("Location"); loc != "" {
 		return loc
 	}
-	m := continueHrefRE.FindStringSubmatch(w.Body.String())
-	if m == nil {
-		t.Fatalf("missing #continue auth link in start HTML: %s", w.Body.String())
+	var payload map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("auth start JSON: %v body=%s", err, w.Body.String())
 	}
-	return html.UnescapeString(m[1])
+	authURL := payload["auth_url"]
+	if authURL == "" {
+		t.Fatalf("missing auth_url in start JSON: %s", w.Body.String())
+	}
+	return authURL
 }
 
 func mustStateFromAuthURL(t *testing.T, authURL string) string {
@@ -408,47 +408,33 @@ func mustStateFromLocation(t *testing.T, location string) string {
 	return mustStateFromAuthURL(t, location)
 }
 
-func TestWorkOSOAuthStartUsesInterstitialNotBounceRedirect(t *testing.T) {
+func TestWorkOSOAuthStartJSONNotBounceRedirect(t *testing.T) {
 	h, _ := newTestHandler(t)
 	h.SetOAuthProvider(&fakeOAuthProvider{userInfo: &auth.OAuthUserInfo{Subject: "s", Email: "u@example.com", EmailVerified: true}})
 	w := httptest.NewRecorder()
 	h.StartWorkOSOAuth(w, httptest.NewRequest(http.MethodGet, "/api/auth/workos", nil))
 	if w.Code != http.StatusOK {
-		t.Fatalf("bounce 302 loses binding cookie in Chromium; want 200 interstitial, got %d", w.Code)
+		t.Fatalf("bounce 302 loses binding cookie in Chromium; want 200 JSON, got %d", w.Code)
 	}
 	if w.Header().Get("Location") != "" {
 		t.Fatal("Location on start causes bounce-tracking to drop 217_oauth_binding")
+	}
+	if ct := w.Header().Get("Content-Type"); !strings.Contains(ct, "application/json") {
+		t.Fatalf("expected JSON, got %q", ct)
 	}
 	binding := cookieNamed(t, w.Result().Cookies(), "217_oauth_binding")
 	if binding.Path != "/api/auth/workos/callback" || !binding.HttpOnly {
 		t.Fatalf("unexpected binding cookie: %#v", binding)
 	}
 	authURL := mustAuthURLFromStart(t, w)
-	body := w.Body.String()
-	if !strings.Contains(authURL, "state=") || !strings.Contains(body, `id="continue"`) || !strings.Contains(body, "__WORKOS_AUTH_URL__") {
-		t.Fatalf("interstitial must expose click-through Continue to AuthKit: url=%s body=%s", authURL, body)
+	if !strings.Contains(authURL, "state=") {
+		t.Fatalf("auth_url missing state: %s", authURL)
 	}
-	if !strings.Contains(body, "217") || !strings.Contains(body, "calendário de anticoncepcional") {
-		t.Fatalf("interstitial must match 217 login chrome (PT default): body=%s", body)
-	}
-	if strings.Contains(body, "Continue to WorkOS") {
-		t.Fatal("interstitial must not advertise a foreign WorkOS product page")
-	}
-	if strings.Contains(body, "location.replace") || strings.Contains(body, "http-equiv=\"refresh\"") {
+	if strings.Contains(w.Body.String(), "location.replace") || strings.Contains(w.Body.String(), "http-equiv=\"refresh\"") {
 		t.Fatal("auto-navigation reintroduces Chromium bounce-tracking cookie loss")
 	}
 	if w.Header().Get("Cache-Control") != "no-store" {
-		t.Fatalf("interstitial must be uncached, got %q", w.Header().Get("Cache-Control"))
-	}
-
-	// English Accept-Language keeps the same chrome with EN tagline.
-	wEN := httptest.NewRecorder()
-	reqEN := httptest.NewRequest(http.MethodGet, "/api/auth/workos", nil)
-	reqEN.Header.Set("Accept-Language", "en-US,en;q=0.9")
-	h.StartWorkOSOAuth(wEN, reqEN)
-	bodyEN := wEN.Body.String()
-	if !strings.Contains(bodyEN, "contraceptive calendar") || !strings.Contains(bodyEN, `id="continue"`) {
-		t.Fatalf("EN interstitial missing 217 tagline/continue: %s", bodyEN)
+		t.Fatalf("auth start must be uncached, got %q", w.Header().Get("Cache-Control"))
 	}
 }
 
