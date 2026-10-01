@@ -73,7 +73,6 @@ Color scaffoldBackgroundFor(Brightness brightness) =>
         : App217Colors.canvas;
 
 ThemeData buildApp217Theme({required Brightness brightness}) {
-  final isDark = brightness == Brightness.dark;
   final scheme = buildApp217ColorScheme(brightness);
 
   final display = GoogleFonts.frauncesTextTheme();
