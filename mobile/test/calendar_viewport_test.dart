@@ -162,7 +162,8 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('Record today'), findsOneWidget);
+      expect(find.byIcon(Icons.add), findsOneWidget);
+      expect(find.text('Record today'), findsNothing);
       expect(find.byType(Positioned), findsWidgets);
       expect(overlayInset, findsOneWidget);
       expect(
@@ -172,4 +173,57 @@ void main() {
       );
     },
   );
+
+  testWidgets('horizontal swipe changes month with animation', (tester) async {
+    const size = Size(390, 844);
+    await tester.binding.setSurfaceSize(size);
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildApp217Theme(
+          brightness: Brightness.light,
+          palette: AppPalette.azure,
+        ),
+        home: MediaQuery(
+          data: const MediaQueryData(size: size),
+          child: CalendarScreen(
+            api: _FakeCalendarApi(),
+            user: const User(
+              id: 'u1',
+              email: 'shot@example.invalid',
+              name: 'Shot',
+            ),
+            strings: const Strings(false),
+            onLogout: () async {},
+            onOpenSettings: () {},
+            palette: AppPalette.azure,
+          ),
+        ),
+      ),
+    );
+    // FAB settle bounce (~860ms) + load.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 900));
+    await tester.pumpAndSettle();
+
+    final now = DateTime.now();
+    final labelBefore = find.textContaining('${now.year}');
+    expect(labelBefore, findsWidgets);
+
+    expect(find.byType(AnimatedSwitcher), findsOneWidget);
+    await tester.fling(
+      find.byType(AnimatedSwitcher),
+      const Offset(-420, 0),
+      1400,
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 240));
+    await tester.pumpAndSettle();
+
+    final next = DateTime(now.year, now.month + 1);
+    expect(find.textContaining('${next.year}'), findsWidgets);
+    // Swiped into a different month header than the starting month number.
+    expect(find.byType(AnimatedSwitcher), findsOneWidget);
+  });
 }

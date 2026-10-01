@@ -12,7 +12,7 @@ void main() {
   GoogleFonts.config.allowRuntimeFetching = false;
 
   for (final brightness in Brightness.values) {
-    testWidgets('today nudge visible when unrecorded ($brightness)',
+    testWidgets('today nudge is circular plus when unrecorded ($brightness)',
         (tester) async {
       await tester.pumpWidget(
         MaterialApp(
@@ -30,10 +30,16 @@ void main() {
           ),
         ),
       );
-      await tester.pumpAndSettle();
-      expect(find.text('Registrar hoje'), findsOneWidget);
-      expect(find.byIcon(Icons.notifications_active_outlined), findsOneWidget);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(find.text('Registrar hoje'), findsNothing);
+      expect(find.byIcon(Icons.add), findsOneWidget);
+      expect(find.byIcon(Icons.notifications_active_outlined), findsNothing);
       expect(find.byType(Positioned), findsOneWidget);
+      expect(
+        tester.getSize(find.byType(InkWell)),
+        const Size(TodayNudge.size, TodayNudge.size),
+      );
     });
 
     testWidgets('today nudge hidden after registration ($brightness)',
@@ -58,9 +64,49 @@ void main() {
           ),
         ),
       );
-      await tester.pumpAndSettle();
+      await tester.pump();
+      expect(find.byIcon(Icons.add), findsNothing);
       expect(find.text('Registrar hoje'), findsNothing);
       expect(find.text('Atualizar hoje'), findsNothing);
+    });
+
+    testWidgets('today nudge magnetically snaps across edges ($brightness)',
+        (tester) async {
+      await tester.binding.setSurfaceSize(const Size(390, 844));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildApp217Theme(brightness: brightness),
+          home: MediaQuery(
+            data: const MediaQueryData(size: Size(390, 844)),
+            child: Scaffold(
+              body: Stack(
+                children: [
+                  TodayNudge(
+                    strings: const Strings(false),
+                    todayEntry: null,
+                    onRecord: () {},
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      final start = tester.getCenter(find.byIcon(Icons.add));
+      expect(start.dx, greaterThan(200)); // default right edge
+
+      await tester.drag(find.byIcon(Icons.add), const Offset(-220, 0));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 320));
+      await tester.pumpAndSettle();
+
+      final end = tester.getCenter(find.byIcon(Icons.add));
+      expect(end.dx, lessThan(120)); // snapped to left
     });
   }
 }

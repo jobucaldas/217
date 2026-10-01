@@ -40,6 +40,8 @@ class _CalendarScreenState extends State<CalendarScreen> {
   Entry? _todayEntry;
   bool _loading = true;
   String? _error;
+  /// +1 = incoming month from right (swipe left / next); -1 from left.
+  int _monthSlide = 0;
 
   DateTime get _today {
     final now = DateTime.now();
@@ -95,6 +97,16 @@ class _CalendarScreenState extends State<CalendarScreen> {
         _error = err.toString();
       });
     }
+  }
+
+  void _shiftMonth(int delta) {
+    if (delta == 0) return;
+    setState(() {
+      // Swipe left (next) enters from the right → positive begin offset.
+      _monthSlide = delta > 0 ? 1 : -1;
+      _month = DateTime(_month.year, _month.month + delta);
+    });
+    _load();
   }
 
   Future<void> _openDay(DateTime day) async {
@@ -266,13 +278,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                   children: [
                     IconButton(
                       tooltip: monthLabel,
-                      onPressed: () {
-                        setState(
-                          () =>
-                              _month = DateTime(_month.year, _month.month - 1),
-                        );
-                        _load();
-                      },
+                      onPressed: () => _shiftMonth(-1),
                       icon: const Icon(Icons.chevron_left),
                     ),
                     Expanded(
@@ -283,13 +289,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                       ),
                     ),
                     IconButton(
-                      onPressed: () {
-                        setState(
-                          () =>
-                              _month = DateTime(_month.year, _month.month + 1),
-                        );
-                        _load();
-                      },
+                      onPressed: () => _shiftMonth(1),
                       icon: const Icon(Icons.chevron_right),
                     ),
                   ],
@@ -303,15 +303,63 @@ class _CalendarScreenState extends State<CalendarScreen> {
                   child: Text(_error!, style: TextStyle(color: scheme.error)),
                 ),
               Expanded(
-                child: _MonthGrid(
-                  month: _month,
-                  today: _today,
-                  entries: _entries,
-                  onDayTap: _openDay,
-                  todayLabel: widget.strings.today,
-                  portuguese: widget.strings.pt,
-                  palette: widget.palette,
-                  bottomInset: 12,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onHorizontalDragEnd: (details) {
+                    final v = details.primaryVelocity ?? 0;
+                    if (v < -280) {
+                      _shiftMonth(1);
+                    } else if (v > 280) {
+                      _shiftMonth(-1);
+                    }
+                  },
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 220),
+                    switchInCurve: Curves.easeOutCubic,
+                    switchOutCurve: Curves.easeInCubic,
+                    layoutBuilder: (current, previous) => Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        ...previous,
+                        if (current != null) current,
+                      ],
+                    ),
+                    transitionBuilder: (child, animation) {
+                      final slideIn = Offset(_monthSlide * 0.2, 0);
+                      final slideOut = Offset(-_monthSlide * 0.2, 0);
+                      final curved = CurvedAnimation(
+                        parent: animation,
+                        curve: Curves.easeOutCubic,
+                        reverseCurve: Curves.easeInCubic,
+                      );
+                      // Reverse = outgoing month; exit opposite the enter side.
+                      final tween = animation.status == AnimationStatus.reverse
+                          ? Tween<Offset>(begin: slideOut, end: Offset.zero)
+                          : Tween<Offset>(begin: slideIn, end: Offset.zero);
+                      return ClipRect(
+                        child: SlideTransition(
+                          position: tween.animate(curved),
+                          child: FadeTransition(
+                            opacity: curved,
+                            child: child,
+                          ),
+                        ),
+                      );
+                    },
+                    child: KeyedSubtree(
+                      key: ValueKey('${_month.year}-${_month.month}'),
+                      child: _MonthGrid(
+                        month: _month,
+                        today: _today,
+                        entries: _entries,
+                        onDayTap: _openDay,
+                        todayLabel: widget.strings.today,
+                        portuguese: widget.strings.pt,
+                        palette: widget.palette,
+                        bottomInset: 12,
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ],
