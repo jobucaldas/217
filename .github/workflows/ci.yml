@@ -158,10 +158,11 @@ jobs:
           retention-days: 3
 
   # Main-only: APK to rolling nightly + immutable datetime_sha GitHub Releases.
+  # Independent of GHCR / flutter-web-build — Android compile must not wait on Docker.
   nightly-apk:
     name: Android APK → GitHub Releases (nightly + datetime_sha)
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [backend, mobile, workos-smoke, flutter-web-build, mobile-apk-build]
+    needs: [backend, mobile, workos-smoke, mobile-apk-build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -225,10 +226,12 @@ jobs:
             --prerelease \
             "dist/217-${DATETIME_SHA}.apk"
 
+  # Main-only: backend + frontend images. Independent of Android APK build/publish —
+  # GHCR must not wait on mobile-apk-build (or nightly-apk).
   ghcr-images:
     name: GHCR images (nightly + datetime_sha)
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [backend, mobile, workos-smoke, flutter-web-build, mobile-apk-build]
+    needs: [backend, mobile, workos-smoke, flutter-web-build]
     runs-on: ubuntu-latest
     permissions:
       contents: read
