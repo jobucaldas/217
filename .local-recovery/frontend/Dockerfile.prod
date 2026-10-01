@@ -1,5 +1,0 @@
-# Static WASM/PWA bundle for the Caddy initContainer pattern.
-FROM docker.io/library/alpine:3.20
-RUN adduser -D -H -u 65532 -g nonroot nonroot
-COPY dist/ /app/dist/
-USER 65532:65532
