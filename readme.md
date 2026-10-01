@@ -35,6 +35,8 @@ make mobile-apk
 
 Install `mobile/build/app/outputs/flutter-apk/app-debug.apk`. Emulator API base defaults to `http://10.0.2.2:8787` (`--dart-define=API_BASE_URL=...` to override).
 
+Every push to `main` (after CI is green) also publishes a rolling **Nightly** GitHub Release with `217-nightly.apk`, and pushes `ghcr.io/jobucaldas/app-217-{backend,frontend}` tagged `nightly`, `dev`, and `YYYYMMDDHHMMSS_<shortsha>`.
+
 ## Layout
 
 | Path | Role |

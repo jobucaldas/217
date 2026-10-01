@@ -10,8 +10,10 @@ Day-to-day access is Tailscale Serve from encom (see Project
 1. Namespace `app-217-dev` (also created by this overlay).
 2. Secret `app-217-secrets` with at least `DATABASE_URL`.
 3. In-cluster Postgres matching that URL (see `deploy/kustomize/overlays/dev/postgres.yaml`).
-4. Images `ghcr.io/jobucaldas/app-217-{backend,frontend}:dev` present on the node
-   (local `podman build` + `k3s ctr images import` is fine).
+4. Images `ghcr.io/jobucaldas/app-217-{backend,frontend}:dev` (or `:nightly`) present
+   on the node. On every `main` push, CI publishes both tags to GHCR plus an immutable
+   `YYYYMMDDHHMMSS_<shortsha>` tag. Local `podman build` + `k3s ctr images import` is
+   still fine for one-off tryouts.
 
 ## Render / apply
 
