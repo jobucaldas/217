@@ -533,6 +533,29 @@ func (h *Handler) UpsertEntry(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, entry)
 }
 
+func (h *Handler) DeleteEntry(w http.ResponseWriter, r *http.Request) {
+	userID := getUserID(r)
+	date := r.PathValue("date")
+	if date == "" {
+		http.Error(w, `{"error":"missing date"}`, http.StatusBadRequest)
+		return
+	}
+	if _, err := time.Parse("2006-01-02", date); err != nil {
+		http.Error(w, `{"error":"invalid date format, use YYYY-MM-DD"}`, http.StatusBadRequest)
+		return
+	}
+	if err := h.store.DeleteEntry(userID, date); err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "entry not found"})
+			return
+		}
+		log.Printf("delete entry error: %v", err)
+		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (h *Handler) GetStats(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r)
 	year, month := parseYearMonth(r)
@@ -585,17 +608,8 @@ func (h *Handler) UpsertReminderPreference(w http.ResponseWriter, r *http.Reques
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	if preference.Enabled {
-		count, err := h.store.CountPushSubscriptions(getUserID(r))
-		if err != nil {
-			http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
-			return
-		}
-		if count == 0 {
-			writeJSON(w, http.StatusConflict, map[string]string{"error": "enable notifications on this device before enabling reminders"})
-			return
-		}
-	}
+	// Allow enabling without a web-push subscription so native clients can
+	// schedule OS local notifications. Deliverable still reflects push readiness.
 	result, err := h.store.UpsertReminderPreference(getUserID(r), preference)
 	if err != nil {
 		log.Printf("upsert reminder preference: %v", err)

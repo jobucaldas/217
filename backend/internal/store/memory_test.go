@@ -86,6 +86,13 @@ func TestMemoryStore_UpsertAndGetEntry(t *testing.T) {
 	if got.Notes != "updated" {
 		t.Errorf("expected updated notes, got %q", got.Notes)
 	}
+
+	if err := s.DeleteEntry(user.ID, "2026-05-13"); err != nil {
+		t.Fatalf("DeleteEntry failed: %v", err)
+	}
+	if _, err := s.GetEntry(user.ID, "2026-05-13"); err == nil {
+		t.Fatal("expected entry gone after DeleteEntry")
+	}
 }
 
 func TestMemoryStore_UserEntryIsolation(t *testing.T) {

@@ -150,6 +150,7 @@ func StartWithPush(addr, databaseURL, appBaseURL string, push PushConfig, workos
 	mux.HandleFunc("GET /api/entries", h.AuthMiddleware(h.ListEntries))
 	mux.HandleFunc("GET /api/entries/{date}", h.AuthMiddleware(h.GetEntry))
 	mux.HandleFunc("POST /api/entries/{date}", h.AuthMiddleware(h.UpsertEntry))
+	mux.HandleFunc("DELETE /api/entries/{date}", h.AuthMiddleware(h.DeleteEntry))
 	mux.HandleFunc("GET /api/stats", h.AuthMiddleware(h.GetStats))
 
 	mux.HandleFunc("GET /api/reminders/preferences", h.AuthMiddleware(h.GetReminderPreference))

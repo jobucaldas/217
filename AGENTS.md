@@ -55,7 +55,7 @@ Android deep-link PKCE:
 
 ### Entries (auth required)
 - `GET /api/entries?year=YYYY&month=MM`
-- `GET|POST /api/entries/{date}`
+- `GET|POST|DELETE /api/entries/{date}`
 - `GET /api/stats?year=YYYY&month=MM`
 
 ## Testing expectations

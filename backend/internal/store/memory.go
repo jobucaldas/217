@@ -185,6 +185,17 @@ func (s *MemoryStore) UpsertEntry(userID, date string, req model.UpsertRequest) 
 	return entry, nil
 }
 
+func (s *MemoryStore) DeleteEntry(userID, date string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := entryKey(userID, date)
+	if _, ok := s.entries[key]; !ok {
+		return fmt.Errorf("entry not found")
+	}
+	delete(s.entries, key)
+	return nil
+}
+
 func (s *MemoryStore) GetStats(userID string, year, month int) (*model.Stats, error) {
 	entries, _ := s.ListEntries(userID, year, month)
 	now := time.Now().UTC()
