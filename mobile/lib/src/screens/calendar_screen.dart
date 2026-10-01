@@ -205,26 +205,7 @@ class _CalendarScreenState extends State<CalendarScreen>
     });
   }
 
-  Future<void> _openDay(DateTime day) async {
-    if (!widget.share.canEditCalendar) {
-      return;
-    }
-    final key = DateFormat('yyyy-MM-dd').format(day);
-    final existing = key == _todayKey ? _todayEntry : _entries[key];
-    final result = await showModalBottomSheet<DayEditResult>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (context) => DayEditorSheet(
-        strings: widget.strings,
-        date: key,
-        initialTaken: existing?.taken,
-        initialNotes: existing?.notes ?? '',
-        initialHeart: existing?.heart ?? false,
-        hadEntry: existing != null,
-      ),
-    );
-    if (result == null) return;
+  Future<void> _persistDay(String key, DayEditResult result) async {
     if (result.clear) {
       await widget.api.deleteEntry(key);
     } else {
@@ -236,6 +217,35 @@ class _CalendarScreenState extends State<CalendarScreen>
       );
     }
     await _load();
+  }
+
+  Future<void> _openDay(DateTime day) async {
+    if (!widget.share.canEditCalendar) {
+      return;
+    }
+    final key = DateFormat('yyyy-MM-dd').format(day);
+    final existing = key == _todayKey ? _todayEntry : _entries[key];
+    // Persist via onCommit — not the sheet's pop value. Nested note-dialog
+    // → sheet pop races on web and can drop the result (note/heart "save"
+    // that only sticks after Taken/Missed re-tap).
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (context) => DayEditorSheet(
+        strings: widget.strings,
+        date: key,
+        initialTaken: existing?.taken,
+        initialNotes: existing?.notes ?? '',
+        initialHeart: existing?.heart ?? false,
+        hadEntry: existing != null,
+        onCommit: (result) {
+          _persistDay(key, result).catchError((Object err) {
+            if (mounted) setState(() => _error = err.toString());
+          });
+        },
+      ),
+    );
   }
 
   @override
@@ -759,6 +769,7 @@ class DayEditorSheet extends StatefulWidget {
     required this.initialNotes,
     required this.hadEntry,
     this.initialHeart = false,
+    this.onCommit,
   });
 
   final Strings strings;
@@ -767,6 +778,10 @@ class DayEditorSheet extends StatefulWidget {
   final String initialNotes;
   final bool initialHeart;
   final bool hadEntry;
+
+  /// When set (production calendar), persist immediately — do not rely on the
+  /// modal sheet's `Navigator.pop` value surviving a nested note dialog.
+  final ValueChanged<DayEditResult>? onCommit;
 
   @override
   State<DayEditorSheet> createState() => _DayEditorSheetState();
@@ -784,9 +799,23 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
   }) =>
       DayEditResult.save(taken: taken, notes: notes.trim(), heart: heart);
 
+  void _emit(DayEditResult result) {
+    final onCommit = widget.onCommit;
+    if (onCommit != null) {
+      onCommit(result);
+      if (mounted && Navigator.of(context).canPop()) {
+        Navigator.pop(context);
+      }
+      return;
+    }
+    // Test harness / no callback: return result via sheet pop.
+    if (mounted && Navigator.of(context).canPop()) {
+      Navigator.pop(context, result);
+    }
+  }
+
   void _commitSave({String? notes, bool? heart}) {
-    Navigator.pop(
-      context,
+    _emit(
       _saveResult(
         taken: _taken!,
         notes: notes ?? _notes,
@@ -796,7 +825,7 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
   }
 
   void _commitClear() {
-    Navigator.pop(context, const DayEditResult.clear());
+    _emit(const DayEditResult.clear());
   }
 
   void _onStatusChanged(Set<bool> value) {
@@ -815,27 +844,53 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
   }
 
   Future<void> _editNote() async {
+    // Capture before the dialog await — sheet may unmount on web when the
+    // nested route settles, and we still must persist note/heart.
+    final onCommit = widget.onCommit;
     final result = await showDialog<_NoteDialogResult>(
       context: context,
+      useRootNavigator: true,
       builder: (context) => _NoteDialog(
         strings: widget.strings,
         initialNotes: _notes,
         initialHeart: _heart,
       ),
     );
-    if (result == null || !mounted) return;
+    if (result == null) return;
+
+    final notes = result.notes;
+    final heart = result.heart;
+    final status = _taken ?? widget.initialTaken;
+
+    if (mounted) {
+      setState(() {
+        _notes = notes;
+        _heart = heart;
+        if (status != null) _taken = status;
+      });
+    }
+
     // Prefer live selection; fall back to the entry's existing status so Done
     // can persist note/heart without re-tapping Taken/Missed.
-    final status = _taken ?? widget.initialTaken;
-    if (status != null) {
-      _taken = status;
-      _commitSave(notes: result.notes, heart: result.heart);
+    if (status == null) {
+      // Brand-new day with no status yet: keep note/heart until Taken/Missed.
       return;
     }
-    // Brand-new day with no status yet: keep note/heart until Taken/Missed.
-    setState(() {
-      _notes = result.notes;
-      _heart = result.heart;
+
+    final save = _saveResult(taken: status, notes: notes, heart: heart);
+    if (onCommit != null) {
+      // Persist first — independent of whether the sheet route still exists.
+      onCommit(save);
+    }
+    // Close the sheet after the dialog route has fully popped (next frame),
+    // so we do not race the root-navigator dialog dismissal on web.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (onCommit != null) {
+        if (Navigator.of(context).canPop()) Navigator.pop(context);
+      } else if (Navigator.of(context).canPop()) {
+        Navigator.pop(context, save);
+      }
     });
   }
 

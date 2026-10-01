@@ -113,9 +113,10 @@ jobs:
           CID="${WORKOS_CLIENT_ID:-client_01M3QCMK75B35RPC8EAJA5GREP}"
           flutter build web --release --no-web-resources-cdn \
             --dart-define=WORKOS_CLIENT_ID="$CID"
+          # Stamp the commit so live Serve can prove which bundle is running.
           printf 'BUILD_SHA=%s\n' "${GITHUB_SHA}" > build/web/BUILD_SHA.txt
           test -f build/web/index.html
-          test -f build/web/BUILD_SHA.txt
+          test -s build/web/BUILD_SHA.txt
       - name: Upload web bundle for GHCR frontend image
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
