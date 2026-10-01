@@ -472,6 +472,56 @@ func TestProtectedRoutesStillTrackEntriesWithCookieAuth(t *testing.T) {
 	if !entry.Heart {
 		t.Fatalf("expected heart to round-trip, got %#v", entry)
 	}
+	if !model.TakenTrue(entry.Taken) {
+		t.Fatalf("expected taken=true, got %#v", entry.Taken)
+	}
+}
+
+func TestUpsertNoteHeartWithoutTakenStatus(t *testing.T) {
+	h, s := newTestHandler(t)
+	user, err := s.CreateUser("open@example.com", "Open Day", "password123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cookie := sessionCookie(t, s, user.ID)
+
+	upsertBody := `{"taken":null,"notes":"em aberto","heart":true}`
+	req := authedRequest(http.MethodPost, "/api/entries/2026-10-01", cookie, []byte(upsertBody))
+	req.SetPathValue("date", "2026-10-01")
+	w := httptest.NewRecorder()
+	h.AuthMiddleware(h.UpsertEntry)(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected upsert success, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var entry model.Entry
+	if err := json.NewDecoder(w.Body).Decode(&entry); err != nil {
+		t.Fatal(err)
+	}
+	if entry.Taken != nil {
+		t.Fatalf("expected taken=null, got %#v", entry.Taken)
+	}
+	if entry.Notes != "em aberto" || !entry.Heart {
+		t.Fatalf("expected note+heart, got %#v", entry)
+	}
+
+	getReq := authedRequest(http.MethodGet, "/api/entries/2026-10-01", cookie, nil)
+	getReq.SetPathValue("date", "2026-10-01")
+	getW := httptest.NewRecorder()
+	h.AuthMiddleware(h.GetEntry)(getW, getReq)
+	if getW.Code != http.StatusOK {
+		t.Fatalf("expected get success, got %d", getW.Code)
+	}
+	var got model.Entry
+	if err := json.NewDecoder(getW.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Taken != nil {
+		t.Fatalf("expected taken=null on get, got %#v", got.Taken)
+	}
+	if got.Notes != "em aberto" || !got.Heart {
+		t.Fatalf("expected note+heart round-trip, got %#v", got)
+	}
 }
 
 func TestWorkOSVerifiedEmailLinksLegacyAccount(t *testing.T) {

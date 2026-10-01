@@ -211,7 +211,7 @@ class _CalendarScreenState extends State<CalendarScreen>
     } else {
       await widget.api.upsertEntry(
         key,
-        taken: result.taken!,
+        taken: result.taken,
         notes: result.notes,
         heart: result.heart,
       );
@@ -255,12 +255,14 @@ class _CalendarScreenState extends State<CalendarScreen>
     final scheme = Theme.of(context).colorScheme;
     final text = Theme.of(context).textTheme;
     final brightness = Theme.of(context).brightness;
-    final todayStatus = _todayEntry == null
+    final todayStatus = _todayEntry == null || _todayEntry!.taken == null
         ? widget.strings.unrecorded
-        : (_todayEntry!.taken ? widget.strings.taken : widget.strings.missed);
-    final todayColor = _todayEntry == null
+        : (_todayEntry!.taken!
+            ? widget.strings.taken
+            : widget.strings.missed);
+    final todayColor = _todayEntry == null || _todayEntry!.taken == null
         ? scheme.onSurfaceVariant
-        : (_todayEntry!.taken
+        : (_todayEntry!.taken!
             ? App217Colors.statusTaken(brightness, widget.palette)
             : App217Colors.statusMissed(brightness, widget.palette));
     final humanDate = DateFormat.MMMMd(locale).format(_today);
@@ -662,8 +664,8 @@ class _DayCell extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final brightness = Theme.of(context).brightness;
     Color? bg;
-    if (entry != null) {
-      bg = entry!.taken
+    if (entry?.taken != null) {
+      bg = entry!.taken!
           ? App217Colors.cellTaken(brightness, palette)
           : App217Colors.cellMissed(brightness, palette);
     }
@@ -793,7 +795,7 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
   late bool _heart = widget.initialHeart;
 
   DayEditResult _saveResult({
-    required bool taken,
+    required bool? taken,
     required String notes,
     required bool heart,
   }) =>
@@ -815,9 +817,14 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
   }
 
   void _commitSave({String? notes, bool? heart}) {
+    final taken = _taken;
+    if (taken == null) {
+      // Status commits always have a selection; note Done uses _editNote.
+      return;
+    }
     _emit(
       _saveResult(
-        taken: _taken!,
+        taken: taken,
         notes: notes ?? _notes,
         heart: heart ?? _heart,
       ),
@@ -870,13 +877,24 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
       });
     }
 
-    // Prefer live selection; fall back to the entry's existing status so Done
-    // can persist note/heart without re-tapping Taken/Missed.
-    if (status == null) {
-      // Brand-new day with no status yet: keep note/heart until Taken/Missed.
+    // Empty note + no heart + no status → clear any existing note-only entry.
+    if (status == null && notes.trim().isEmpty && !heart) {
+      if (widget.hadEntry) {
+        final clear = const DayEditResult.clear();
+        if (onCommit != null) {
+          onCommit(clear);
+        }
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          if (Navigator.of(context).canPop()) {
+            Navigator.pop(context, onCommit != null ? null : clear);
+          }
+        });
+      }
       return;
     }
 
+    // Persist note/heart even when Taken/Missed is unset (Em aberto).
     final save = _saveResult(taken: status, notes: notes, heart: heart);
     if (onCommit != null) {
       // Persist first — independent of whether the sheet route still exists.

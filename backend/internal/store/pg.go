@@ -194,7 +194,7 @@ func (s *PGStore) GetStats(userID string, year, month int) (*model.Stats, error)
 	var totalEntries int
 	var takenEntries int
 	if err := s.db.QueryRow(
-		`SELECT COUNT(*), COALESCE(SUM(CASE WHEN taken THEN 1 ELSE 0 END), 0)
+		`SELECT COUNT(*), COALESCE(SUM(CASE WHEN taken IS TRUE THEN 1 ELSE 0 END), 0)
 		 FROM entries WHERE user_id = $1 AND date >= $2 AND date <= $3`,
 		userID, firstDay, lastDay,
 	).Scan(&totalEntries, &takenEntries); err != nil {
@@ -208,12 +208,12 @@ func (s *PGStore) GetStats(userID string, year, month int) (*model.Stats, error)
 	// count consecutive days going backwards from today (within this month)
 	currentDate := time.Now().UTC()
 	for currentDate.Month() == time.Month(month) && currentDate.Year() == year {
-		var taken bool
+		var taken sql.NullBool
 		err := s.db.QueryRow(
 			`SELECT taken FROM entries WHERE user_id = $1 AND date = $2`,
 			userID, currentDate.Format("2006-01-02"),
 		).Scan(&taken)
-		if err != nil || !taken {
+		if err != nil || !taken.Valid || !taken.Bool {
 			break
 		}
 		streak++

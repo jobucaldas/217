@@ -213,7 +213,7 @@ func (s *MemoryStore) GetStats(userID string, year, month int) (*model.Stats, er
 
 	takenDays := 0
 	for _, e := range entries {
-		if e.Taken {
+		if model.TakenTrue(e.Taken) {
 			takenDays++
 		}
 	}
@@ -223,7 +223,7 @@ func (s *MemoryStore) GetStats(userID string, year, month int) (*model.Stats, er
 	current := now
 	for current.Month() == time.Month(month) && current.Year() == year && !current.Before(firstDay) {
 		dateStr := current.Format("2006-01-02")
-		if e, ok := s.entries[entryKey(userID, dateStr)]; ok && e.Taken {
+		if e, ok := s.entries[entryKey(userID, dateStr)]; ok && model.TakenTrue(e.Taken) {
 			streak++
 			current = current.AddDate(0, 0, -1)
 		} else {

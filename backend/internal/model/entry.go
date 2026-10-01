@@ -6,7 +6,7 @@ type Entry struct {
 	ID        string    `json:"id"`
 	UserID    string    `json:"user_id"`
 	Date      string    `json:"date"`
-	Taken     bool      `json:"taken"`
+	Taken     *bool     `json:"taken"`
 	Notes     string    `json:"notes"`
 	Heart     bool      `json:"heart"`
 	CreatedAt time.Time `json:"created_at"`
@@ -14,10 +14,16 @@ type Entry struct {
 }
 
 type UpsertRequest struct {
-	Taken bool   `json:"taken"`
+	Taken *bool  `json:"taken"`
 	Notes string `json:"notes"`
 	Heart bool   `json:"heart"`
 }
+
+// BoolPtr returns a pointer to v for nullable taken fields.
+func BoolPtr(v bool) *bool { return &v }
+
+// TakenTrue reports whether taken is non-nil and true.
+func TakenTrue(t *bool) bool { return t != nil && *t }
 
 type MonthEntries struct {
 	Year    int      `json:"year"`

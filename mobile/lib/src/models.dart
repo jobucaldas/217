@@ -127,14 +127,15 @@ class Entry {
   });
 
   final String date;
-  final bool taken;
+  /// Null means Em aberto (no Taken/Missed yet); entry may still hold note/heart.
+  final bool? taken;
   final String notes;
   final bool heart;
 
   factory Entry.fromJson(Map<String, dynamic> json) {
     return Entry(
       date: json['date'] as String,
-      taken: json['taken'] as bool? ?? false,
+      taken: json['taken'] as bool?,
       notes: (json['notes'] as String?) ?? '',
       heart: json['heart'] as bool? ?? false,
     );

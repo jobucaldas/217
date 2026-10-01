@@ -17,7 +17,7 @@ class _FakeApi extends ApiClient {
   @override
   Future<Entry> upsertEntry(
     String date, {
-    required bool taken,
+    bool? taken,
     String notes = '',
     bool heart = false,
   }) async {
@@ -95,19 +95,209 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(find.byType(AlertDialog), findsNothing);
+        // Embedded sheet (no modal): state updates in place; icons show.
         expect(find.byIcon(Icons.sticky_note_2), findsOneWidget);
         expect(find.byIcon(Icons.favorite), findsOneWidget);
-        // Sheet heart uses theme primary (not forced red).
-        final sheetHeart = tester.widget<Icon>(find.byIcon(Icons.favorite).first);
+        final sheetHeart =
+            tester.widget<Icon>(find.byIcon(Icons.favorite).first);
         expect(sheetHeart.color, scheme.primary);
         expect(sheetHeart.color, isNot(const Color(0xFFE11D48)));
-        // No status yet → sheet stays open; Taken/Missed will commit.
         expect(find.text('Taken'), findsOneWidget);
         expect(find.text('Cancel'), findsNothing);
         expect(find.text('Save'), findsNothing);
       },
     );
   }
+
+  testWidgets('Em aberto: note Done alone persists without Taken/Missed',
+      (tester) async {
+    DayEditResult? committed;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildApp217Theme(
+          brightness: Brightness.light,
+          palette: AppPalette.azure,
+        ),
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => TextButton(
+              onPressed: () async {
+                await showModalBottomSheet<void>(
+                  context: context,
+                  isScrollControlled: true,
+                  builder: (_) => DayEditorSheet(
+                    strings: const Strings(false),
+                    date: '2026-10-01',
+                    initialTaken: null,
+                    initialNotes: '',
+                    initialHeart: false,
+                    hadEntry: false,
+                    onCommit: (result) => committed = result,
+                  ),
+                );
+              },
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Add note'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'open day note');
+    await tester.tap(find.text('Done'));
+    await tester.pumpAndSettle();
+
+    expect(committed?.clear, isFalse);
+    expect(committed?.taken, isNull);
+    expect(committed?.notes, 'open day note');
+    expect(committed?.heart, isFalse);
+    expect(find.text('Taken'), findsNothing);
+  });
+
+  testWidgets('Em aberto: heart alone persists without Taken/Missed',
+      (tester) async {
+    DayEditResult? committed;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildApp217Theme(
+          brightness: Brightness.dark,
+          palette: AppPalette.azure,
+        ),
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => TextButton(
+              onPressed: () async {
+                await showModalBottomSheet<void>(
+                  context: context,
+                  isScrollControlled: true,
+                  builder: (_) => DayEditorSheet(
+                    strings: const Strings(false),
+                    date: '2026-10-01',
+                    initialTaken: null,
+                    initialNotes: '',
+                    initialHeart: false,
+                    hadEntry: false,
+                    onCommit: (result) => committed = result,
+                  ),
+                );
+              },
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Add note'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('note-heart-toggle')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Done'));
+    await tester.pumpAndSettle();
+
+    expect(committed?.clear, isFalse);
+    expect(committed?.taken, isNull);
+    expect(committed?.notes, '');
+    expect(committed?.heart, isTrue);
+    expect(find.text('Taken'), findsNothing);
+  });
+
+  testWidgets(
+      'Em aberto: reopen after Done shows persisted note + heart',
+      (tester) async {
+    final api = _FakeApi();
+    DayEditResult? committed;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildApp217Theme(
+          brightness: Brightness.light,
+          palette: AppPalette.azure,
+        ),
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => TextButton(
+              onPressed: () async {
+                await showModalBottomSheet<void>(
+                  context: context,
+                  isScrollControlled: true,
+                  builder: (_) => DayEditorSheet(
+                    strings: const Strings(false),
+                    date: '2026-10-01',
+                    initialTaken: null,
+                    initialNotes: '',
+                    initialHeart: false,
+                    hadEntry: false,
+                    onCommit: (result) async {
+                      committed = result;
+                      if (!result.clear) {
+                        await api.upsertEntry(
+                          '2026-10-01',
+                          taken: result.taken,
+                          notes: result.notes,
+                          heart: result.heart,
+                        );
+                      }
+                    },
+                  ),
+                );
+              },
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Add note'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'keep me');
+    await tester.tap(find.byKey(const ValueKey('note-heart-toggle')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Done'));
+    await tester.pumpAndSettle();
+
+    expect(committed?.taken, isNull);
+    expect(api.store['2026-10-01']?.notes, 'keep me');
+    expect(api.store['2026-10-01']?.heart, isTrue);
+    expect(api.store['2026-10-01']?.taken, isNull);
+
+    // Reopen with persisted state — Em aberto still, note+heart present.
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildApp217Theme(
+          brightness: Brightness.light,
+          palette: AppPalette.azure,
+        ),
+        home: Scaffold(
+          body: DayEditorSheet(
+            strings: const Strings(false),
+            date: '2026-10-01',
+            initialTaken: api.store['2026-10-01']?.taken,
+            initialNotes: api.store['2026-10-01']?.notes ?? '',
+            initialHeart: api.store['2026-10-01']?.heart ?? false,
+            hadEntry: true,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byIcon(Icons.sticky_note_2), findsOneWidget);
+    expect(find.byIcon(Icons.favorite), findsOneWidget);
+    expect(find.text('Taken'), findsOneWidget);
+    // No Taken/Missed selected.
+    final segmented = tester.widget<SegmentedButton<bool>>(
+      find.byType(SegmentedButton<bool>),
+    );
+    expect(segmented.selected, isEmpty);
+  });
 
   testWidgets('tapping Taken commits status + notes + heart immediately',
       (tester) async {
@@ -129,9 +319,9 @@ void main() {
                     strings: Strings(false),
                     date: '2026-10-01',
                     initialTaken: null,
-                    initialNotes: '',
-                    initialHeart: false,
-                    hadEntry: false,
+                    initialNotes: 'with note',
+                    initialHeart: true,
+                    hadEntry: true,
                   ),
                 );
               },
@@ -142,14 +332,6 @@ void main() {
       ),
     );
     await tester.tap(find.text('open'));
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.byTooltip('Add note'));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField), 'with note');
-    await tester.tap(find.byKey(const ValueKey('note-heart-toggle')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Done'));
     await tester.pumpAndSettle();
 
     expect(find.text('Save'), findsNothing);
@@ -386,9 +568,9 @@ void main() {
                     strings: const Strings(false),
                     date: '2026-10-01',
                     initialTaken: null,
-                    initialNotes: '',
-                    initialHeart: false,
-                    hadEntry: false,
+                    initialNotes: 'with note',
+                    initialHeart: true,
+                    hadEntry: true,
                     onCommit: (result) => committed = result,
                   ),
                 );
@@ -402,15 +584,9 @@ void main() {
     await tester.tap(find.text('open'));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('Add note'));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField), 'with note');
-    await tester.tap(find.byKey(const ValueKey('note-heart-toggle')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Done'));
-    await tester.pumpAndSettle();
-    // No status yet → sheet stays; Taken commits.
-    expect(committed, isNull);
+    // Em aberto day already has note+heart; Taken commits all together.
+    expect(find.byIcon(Icons.sticky_note_2), findsOneWidget);
+    expect(find.byIcon(Icons.favorite), findsOneWidget);
     await tester.tap(find.text('Taken'));
     await tester.pumpAndSettle();
 
@@ -469,6 +645,41 @@ void main() {
       },
     );
   }
+
+  for (final brightness in Brightness.values) {
+    testWidgets(
+      'Em aberto calendar cell shows note+heart without taken fill ($brightness)',
+      (tester) async {
+        final now = DateTime.now();
+        final date =
+            '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-01';
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: buildApp217Theme(
+              brightness: brightness,
+              palette: AppPalette.azure,
+            ),
+            home: CalendarScreen(
+              api: _HeartCalendarApi([
+                Entry(date: date, taken: null, notes: 'n', heart: true),
+              ]),
+              user: const User(
+                id: 'u1',
+                email: 'shot@example.invalid',
+                name: 'Shot',
+              ),
+              strings: const Strings(false),
+              onOpenSettings: () {},
+              palette: AppPalette.azure,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.byIcon(Icons.favorite), findsWidgets);
+        expect(find.byIcon(Icons.sticky_note_2_outlined), findsWidgets);
+      },
+    );
+  }
 }
 
 class _HeartCalendarApi extends ApiClient {
@@ -482,7 +693,7 @@ class _HeartCalendarApi extends ApiClient {
   @override
   Future<Entry> upsertEntry(
     String date, {
-    required bool taken,
+    bool? taken,
     String notes = '',
     bool heart = false,
   }) async =>
