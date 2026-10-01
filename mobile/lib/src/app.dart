@@ -180,7 +180,6 @@ class _App217State extends State<App217> {
             ? 'same-origin'
             : _api.config.apiBaseUrl,
         onSignIn: _signIn,
-        onToggleLanguage: () => setState(() => _portuguese = !_portuguese),
         onOpenSettings: _openSettings,
         showReminderHint: !_reminderHintDismissed,
         onDismissReminderHint: _dismissReminderHint,

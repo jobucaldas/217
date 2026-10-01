@@ -293,51 +293,152 @@ func (h *Handler) StartWorkOSOAuth(w http.ResponseWriter, r *http.Request) {
 	}
 	// Serve a same-origin HTML document (not a 302 bounce) so Chromium keeps the
 	// HttpOnly binding cookie across the subsequent navigation to AuthKit.
-	writeOAuthContinuePage(w, authURL)
+	writeOAuthContinuePage(w, r, authURL)
 }
 
-func writeOAuthContinuePage(w http.ResponseWriter, authURL string) {
+func writeOAuthContinuePage(w http.ResponseWriter, r *http.Request, authURL string) {
 	jsURL, err := json.Marshal(authURL)
 	if err != nil {
 		http.Error(w, `{"error":"cannot build authorization url"}`, http.StatusInternalServerError)
 		return
 	}
 	href := html.EscapeString(authURL)
+	pt := prefersPortuguese(r)
+	lang := "en"
+	title := "Continue sign-in"
+	brand := "217"
+	tagline := "contraceptive calendar"
+	bodyCopy := "Continue to finish signing in to 217."
+	cta := "Continue"
+	if pt {
+		lang = "pt"
+		title = "Continuar entrada"
+		tagline = "calendário de anticoncepcional"
+		bodyCopy = "Continue para concluir a entrada no 217."
+		cta = "Continuar"
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
 	// Require a same-origin click before leaving for AuthKit. Chromium bounce
 	// tracking drops cookies set on automatic cross-site hops (302, meta-refresh,
 	// or short setTimeout redirects); a user gesture keeps 217_oauth_binding.
+	// Visual language matches the Flutter AuthScreen + AuthKit branding (azure
+	// accents, pinned neutrals, Fraunces brand, Source Sans body).
 	_, _ = fmt.Fprintf(w, `<!DOCTYPE html>
-<html lang="en">
+<html lang="%s">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Continue sign-in</title>
+<title>%s</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=Source+Sans+3:wght@400;600;700&display=swap" rel="stylesheet">
 <style>
-  :root { color-scheme: dark; font-family: system-ui, sans-serif; }
-  body { margin: 0; min-height: 100vh; display: grid; place-items: center;
-    background: #121212; color: #f4f7f5; }
-  main { text-align: center; padding: 2rem; max-width: 22rem; }
-  h1 { font-size: 1.25rem; margin: 0 0 0.75rem; }
-  p { opacity: 0.85; line-height: 1.45; margin: 0 0 1.25rem; }
-  a.continue { display: inline-block; padding: 0.75rem 1.25rem; border-radius: 0.5rem;
-    background: #7dceb2; color: #10241c; font-weight: 600; text-decoration: none; }
+  :root {
+    color-scheme: light dark;
+    --scaffold: #F5F5F4;
+    --on-surface: #1C1917;
+    --on-variant: #57534E;
+    --primary: #2563EB;
+    --on-primary: #FFFFFF;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --scaffold: #121212;
+      --on-surface: #F5F5F5;
+      --on-variant: #D4D4D4;
+      --primary: #60A5FA;
+      --on-primary: #0B1220;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    background: var(--scaffold);
+    color: var(--on-surface);
+    font-family: "Source Sans 3", system-ui, sans-serif;
+  }
+  main {
+    text-align: center;
+    padding: 2rem 1.75rem;
+    max-width: 22.5rem;
+    width: 100%%;
+  }
+  .brand {
+    font-family: "Fraunces", Georgia, serif;
+    font-weight: 600;
+    font-size: 3.5rem;
+    letter-spacing: -0.04em;
+    line-height: 1;
+    margin: 0 0 0.85rem;
+  }
+  .tagline {
+    margin: 0 0 1.15rem;
+    color: var(--on-variant);
+    font-size: 1.05rem;
+    line-height: 1.4;
+  }
+  .copy {
+    margin: 0 0 1.75rem;
+    color: var(--on-variant);
+    font-size: 0.95rem;
+    line-height: 1.45;
+  }
+  a.continue {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 3.25rem;
+    padding: 0.85rem 1.25rem;
+    border-radius: 14px;
+    background: var(--primary);
+    color: var(--on-primary);
+    font-weight: 700;
+    font-size: 1rem;
+    text-decoration: none;
+  }
 </style>
 </head>
 <body>
 <main>
-  <h1>Continue to WorkOS</h1>
-  <p>Click continue to finish sign-in. This keeps your secure browser session for the callback.</p>
-  <p><a class="continue" id="continue" href="%s" rel="noopener">Continue</a></p>
+  <h1 class="brand">%s</h1>
+  <p class="tagline">%s</p>
+  <p class="copy">%s</p>
+  <p><a class="continue" id="continue" href="%s" rel="noopener">%s</a></p>
 </main>
 <script>
 // Expose URL for tests; navigation is click-driven only.
 window.__WORKOS_AUTH_URL__ = %s;
 </script>
 </body>
-</html>`, href, jsURL)
+</html>`, lang, html.EscapeString(title), html.EscapeString(brand),
+		html.EscapeString(tagline), html.EscapeString(bodyCopy), href,
+		html.EscapeString(cta), jsURL)
+}
+
+func prefersPortuguese(r *http.Request) bool {
+	if r == nil {
+		return true
+	}
+	al := strings.ToLower(r.Header.Get("Accept-Language"))
+	if al == "" {
+		return true
+	}
+	// Prefer the first tag that looks like pt* or en*.
+	for _, part := range strings.Split(al, ",") {
+		tag := strings.TrimSpace(strings.Split(part, ";")[0])
+		if strings.HasPrefix(tag, "pt") {
+			return true
+		}
+		if strings.HasPrefix(tag, "en") {
+			return false
+		}
+	}
+	return true
 }
 
 func (h *Handler) createSessionForUser(w http.ResponseWriter, r *http.Request, user *model.User) (string, error) {
