@@ -109,7 +109,7 @@ class _App217State extends State<App217> {
           portuguese: _portuguese,
           themeMode: _themeMode,
           palette: _palette,
-          onToggleLanguage: () => setState(() => _portuguese = !_portuguese),
+          onPortugueseChanged: (pt) => setState(() => _portuguese = pt),
           onThemeModeChanged: _setThemeMode,
           onPaletteChanged: _setPalette,
           onLogout: _user == null ? null : _logout,

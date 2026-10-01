@@ -14,7 +14,7 @@ class SettingsPage extends StatefulWidget {
     required this.portuguese,
     required this.themeMode,
     required this.palette,
-    required this.onToggleLanguage,
+    required this.onPortugueseChanged,
     required this.onThemeModeChanged,
     required this.onPaletteChanged,
     required this.onApiBaseChanged,
@@ -26,7 +26,7 @@ class SettingsPage extends StatefulWidget {
   final bool portuguese;
   final ThemeMode themeMode;
   final AppPalette palette;
-  final VoidCallback onToggleLanguage;
+  final ValueChanged<bool> onPortugueseChanged;
   final ValueChanged<ThemeMode> onThemeModeChanged;
   final ValueChanged<AppPalette> onPaletteChanged;
   final VoidCallback onApiBaseChanged;
@@ -205,39 +205,57 @@ class _SettingsPageState extends State<SettingsPage> {
             ],
           ),
           const SizedBox(height: 20),
+          _SectionLabel(widget.strings.language),
           _SettingsSection(
             children: [
-              ListTile(
-                title: Text(widget.strings.language),
-                subtitle: Text(widget.portuguese ? 'Português' : 'English'),
-                trailing: Icon(
-                  Icons.chevron_right,
-                  color: scheme.onSurfaceVariant,
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+                child: SegmentedButton<bool>(
+                  showSelectedIcon: false,
+                  segments: [
+                    ButtonSegment(
+                      value: true,
+                      label: Text(widget.strings.languagePortuguese),
+                    ),
+                    ButtonSegment(
+                      value: false,
+                      label: Text(widget.strings.languageEnglish),
+                    ),
+                  ],
+                  selected: {widget.portuguese},
+                  onSelectionChanged: (value) =>
+                      widget.onPortugueseChanged(value.first),
                 ),
-                onTap: widget.onToggleLanguage,
               ),
             ],
           ),
           const SizedBox(height: 20),
-          _SectionLabel(widget.strings.advanced),
           _SettingsSection(
             children: [
-              ListTile(
-                title: Text(widget.strings.advanced),
-                subtitle: Text(
-                  _advancedOpen
-                      ? widget.strings.apiBaseUrl
-                      : widget.strings.advancedHint,
+              if (!_advancedOpen)
+                ListTile(
+                  title: Text(
+                    widget.strings.showMore,
+                    style: text.titleMedium?.copyWith(color: scheme.primary),
+                  ),
+                  trailing: Icon(
+                    Icons.expand_more,
+                    color: scheme.primary,
+                  ),
+                  onTap: () => setState(() => _advancedOpen = true),
+                )
+              else ...[
+                ListTile(
+                  title: Text(
+                    widget.strings.showLess,
+                    style: text.titleMedium?.copyWith(color: scheme.primary),
+                  ),
+                  trailing: Icon(
+                    Icons.expand_less,
+                    color: scheme.primary,
+                  ),
+                  onTap: () => setState(() => _advancedOpen = false),
                 ),
-                trailing: Icon(
-                  _advancedOpen
-                      ? Icons.expand_less
-                      : Icons.expand_more,
-                  color: scheme.onSurfaceVariant,
-                ),
-                onTap: () => setState(() => _advancedOpen = !_advancedOpen),
-              ),
-              if (_advancedOpen) ...[
                 const Divider(height: 1, indent: 16, endIndent: 16),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
