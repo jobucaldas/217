@@ -18,9 +18,6 @@ artifacts/test-results/
 artifacts/run-recovery/
 artifacts/android/
 
-# Workspace-local Nix development tools
-.dev-tools/
-
 # Flutter / mobile
 mobile/.dart_tool/
 mobile/.flutter-plugins
@@ -34,18 +31,7 @@ mobile/**/GeneratedPluginRegistrant.*
 .gomodcache/
 .gocache/
 
-# Legacy Expo tree (not part of this rewrite)
-217/
-
-# Abandoned Dioxus/wasm recovery snapshots (client is Flutter only)
-.local-recovery/
-
-# web static notice
-# (tracked)
 .env
-frontend/dist/
-frontend/target/
-pi-session-*.html
 *.apk
 
 # Local agent notes
