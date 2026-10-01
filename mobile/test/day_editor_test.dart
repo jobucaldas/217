@@ -258,6 +258,167 @@ void main() {
     expect(result?.heart, isTrue);
   });
 
+  testWidgets(
+      'onCommit: note Done persists without Taken/Missed re-tap (production path)',
+      (tester) async {
+    DayEditResult? committed;
+    var commitCount = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildApp217Theme(
+          brightness: Brightness.light,
+          palette: AppPalette.azure,
+        ),
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => TextButton(
+              onPressed: () async {
+                await showModalBottomSheet<void>(
+                  context: context,
+                  isScrollControlled: true,
+                  builder: (_) => DayEditorSheet(
+                    strings: const Strings(false),
+                    date: '2026-10-01',
+                    initialTaken: true,
+                    initialNotes: 'old',
+                    initialHeart: false,
+                    hadEntry: true,
+                    onCommit: (result) {
+                      commitCount++;
+                      committed = result;
+                    },
+                  ),
+                );
+              },
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Note'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'status unchanged');
+    await tester.tap(find.byKey(const ValueKey('note-heart-toggle')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Done'));
+    await tester.pumpAndSettle();
+
+    expect(commitCount, 1);
+    expect(committed?.clear, isFalse);
+    expect(committed?.taken, isTrue);
+    expect(committed?.notes, 'status unchanged');
+    expect(committed?.heart, isTrue);
+    // Sheet closed — no Taken/Missed re-tap required.
+    expect(find.text('Taken'), findsNothing);
+  });
+
+  testWidgets(
+      'onCommit: heart-only Done persists with status left unchanged',
+      (tester) async {
+    DayEditResult? committed;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildApp217Theme(
+          brightness: Brightness.dark,
+          palette: AppPalette.azure,
+        ),
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => TextButton(
+              onPressed: () async {
+                await showModalBottomSheet<void>(
+                  context: context,
+                  isScrollControlled: true,
+                  builder: (_) => DayEditorSheet(
+                    strings: const Strings(false),
+                    date: '2026-10-01',
+                    initialTaken: false,
+                    initialNotes: 'keep me',
+                    initialHeart: false,
+                    hadEntry: true,
+                    onCommit: (result) => committed = result,
+                  ),
+                );
+              },
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Note'));
+    await tester.pumpAndSettle();
+    // Heart only — leave note text alone, do not touch Missed.
+    await tester.tap(find.byKey(const ValueKey('note-heart-toggle')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Done'));
+    await tester.pumpAndSettle();
+
+    expect(committed?.taken, isFalse);
+    expect(committed?.notes, 'keep me');
+    expect(committed?.heart, isTrue);
+  });
+
+  testWidgets('onCommit: Taken still autosaves status + note + heart',
+      (tester) async {
+    DayEditResult? committed;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildApp217Theme(
+          brightness: Brightness.light,
+          palette: AppPalette.azure,
+        ),
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => TextButton(
+              onPressed: () async {
+                await showModalBottomSheet<void>(
+                  context: context,
+                  isScrollControlled: true,
+                  builder: (_) => DayEditorSheet(
+                    strings: const Strings(false),
+                    date: '2026-10-01',
+                    initialTaken: null,
+                    initialNotes: '',
+                    initialHeart: false,
+                    hadEntry: false,
+                    onCommit: (result) => committed = result,
+                  ),
+                );
+              },
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Add note'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'with note');
+    await tester.tap(find.byKey(const ValueKey('note-heart-toggle')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Done'));
+    await tester.pumpAndSettle();
+    // No status yet → sheet stays; Taken commits.
+    expect(committed, isNull);
+    await tester.tap(find.text('Taken'));
+    await tester.pumpAndSettle();
+
+    expect(committed?.taken, isTrue);
+    expect(committed?.notes, 'with note');
+    expect(committed?.heart, isTrue);
+  });
+
   for (final brightness in Brightness.values) {
     testWidgets(
       'calendar heart indicator uses on-cell theme color ($brightness)',
