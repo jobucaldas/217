@@ -41,7 +41,6 @@ class _CalendarScreenState extends State<CalendarScreen>
   Map<String, Entry> _prevEntries = {};
   Map<String, Entry> _nextEntries = {};
   Entry? _todayEntry;
-  bool _loading = true;
   String? _error;
 
   /// Pixel drag offset: negative = finger left (peek next month).
@@ -83,10 +82,9 @@ class _CalendarScreenState extends State<CalendarScreen>
   }
 
   Future<void> _load() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+    // Silent reload: never insert a progress bar into the Column — that
+    // reflows/shrinks the month carousel during swipe/chevron month changes.
+    setState(() => _error = null);
     try {
       final year = _month.year;
       final month = _month.month;
@@ -128,14 +126,10 @@ class _CalendarScreenState extends State<CalendarScreen>
         _prevEntries = prevMap;
         _nextEntries = nextMap;
         _todayEntry = todayEntry;
-        _loading = false;
       });
     } catch (err) {
       if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _error = err.toString();
-      });
+      setState(() => _error = err.toString());
     }
   }
 
@@ -399,13 +393,8 @@ class _CalendarScreenState extends State<CalendarScreen>
                   ],
                 ),
               ),
-              if (_loading) const LinearProgressIndicator(minHeight: 2),
-              if (_error != null)
-                Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-                  child: Text(_error!, style: TextStyle(color: scheme.error)),
-                ),
+              // Errors overlay the carousel instead of inserting Column chrome
+              // that would shrink the month grid.
               Expanded(
                 child: LayoutBuilder(
                   builder: (context, constraints) {
@@ -416,6 +405,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                       onHorizontalDragUpdate: _onMonthDragUpdate,
                       onHorizontalDragEnd: (d) => _onMonthDragEnd(d, pageW),
                       child: ClipRect(
+                        key: const ValueKey('month-carousel'),
                         child: IgnorePointer(
                           ignoring: _monthDragging || _monthSnap.isAnimating,
                           child: Stack(
@@ -479,6 +469,24 @@ class _CalendarScreenState extends State<CalendarScreen>
               ),
             ],
           ),
+          if (_error != null)
+            Positioned(
+              left: 20,
+              right: 20,
+              top: 8,
+              child: Material(
+                color: scheme.errorContainer,
+                borderRadius: BorderRadius.circular(10),
+                child: Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  child: Text(
+                    _error!,
+                    style: text.bodyMedium?.copyWith(color: scheme.error),
+                  ),
+                ),
+              ),
+            ),
           if (nudgeVisible)
             TodayNudge(
               strings: widget.strings,

@@ -5,8 +5,8 @@ import '../i18n.dart';
 import '../models.dart';
 import '../prefs.dart';
 
-/// Floating “update today” control: text pill + connected plus accessory,
-/// idle settle bounce, magnetic edge snap, persists side + bottom inset.
+/// Floating “update today” control: text pill + plus on the pill’s top-right
+/// corner, idle settle bounce, magnetic edge snap, persists side + bottom inset.
 class TodayNudge extends StatefulWidget {
   const TodayNudge({
     super.key,
@@ -25,23 +25,27 @@ class TodayNudge extends StatefulWidget {
   static bool isVisible(Entry? todayEntry) => todayEntry == null;
 
   /// Pill height (logical px).
-  static const double height = 48;
+  static const double pillHeight = 48;
 
   /// Plus accessory diameter (logical px).
-  static const double plusSize = 34;
+  static const double plusSize = 28;
 
-  /// How far the plus overlaps the pill (connected look).
-  static const double plusOverlap = 10;
+  /// How far the plus overhangs past the pill’s top-right corner.
+  static const double plusOverhang = 10;
 
   /// Horizontal padding inside the text pill.
   static const double pillPadX = 16;
+
+  /// Total control height including corner plus overhang.
+  static double get height => pillHeight + plusOverhang;
 
   /// Approximate control width for the longer locale label.
   static double widthFor(Strings strings) {
     // "Atualizar hoje" / "Update today" — keep magnet math stable.
     final label = strings.updateToday;
     final textW = label.length * 8.2;
-    return pillPadX * 2 + textW + plusSize - plusOverlap;
+    // Plus hangs past the right edge a bit; reserve overhang.
+    return pillPadX * 2 + textW + plusOverhang;
   }
 
   @override
@@ -196,8 +200,6 @@ class _TodayNudgeState extends State<TodayNudge> with TickerProviderStateMixin {
     final bottom = _ready ? _bottom.clamp(8.0, maxBottom) : 16.0;
     final floatDy = _dragging ? 0.0 : _floatDy.value;
     final label = widget.strings.updateToday;
-    // Plus sits on the outer edge (toward screen edge), connected to the pill.
-    final plusOnRight = _right;
 
     return AnimatedBuilder(
       animation: Listenable.merge([_float, _snap]),
@@ -217,38 +219,36 @@ class _TodayNudgeState extends State<TodayNudge> with TickerProviderStateMixin {
                 height: TodayNudge.height,
                 child: Stack(
                   clipBehavior: Clip.none,
-                  alignment: Alignment.center,
                   children: [
                     Positioned(
-                      left: plusOnRight ? 0 : TodayNudge.plusSize - TodayNudge.plusOverlap,
-                      right: plusOnRight ? TodayNudge.plusSize - TodayNudge.plusOverlap : 0,
-                      top: 0,
+                      left: 0,
+                      right: TodayNudge.plusOverhang * 0.35,
+                      top: TodayNudge.plusOverhang,
                       bottom: 0,
                       child: Material(
                         elevation: 10,
                         color: scheme.primaryContainer,
                         shadowColor: scheme.shadow.withValues(alpha: 0.5),
-                        surfaceTintColor: scheme.primary.withValues(alpha: 0.12),
+                        surfaceTintColor:
+                            scheme.primary.withValues(alpha: 0.12),
                         shape: const StadiumBorder(),
                         clipBehavior: Clip.antiAlias,
                         child: InkWell(
                           onTap: widget.onRecord,
                           customBorder: const StadiumBorder(),
                           child: Padding(
-                            padding: EdgeInsets.only(
-                              left: plusOnRight
-                                  ? TodayNudge.pillPadX
-                                  : TodayNudge.pillPadX + 4,
-                              right: plusOnRight
-                                  ? TodayNudge.pillPadX + 4
-                                  : TodayNudge.pillPadX,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: TodayNudge.pillPadX,
                             ),
                             child: Center(
                               child: Text(
                                 label,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .labelLarge
+                                    ?.copyWith(
                                       color: scheme.onPrimaryContainer,
                                       fontWeight: FontWeight.w700,
                                       letterSpacing: 0.1,
@@ -259,10 +259,10 @@ class _TodayNudgeState extends State<TodayNudge> with TickerProviderStateMixin {
                         ),
                       ),
                     ),
+                    // Plus badge on the pill’s top-right corner (not beside it).
                     Positioned(
-                      left: plusOnRight ? null : 0,
-                      right: plusOnRight ? 0 : null,
-                      top: (TodayNudge.height - TodayNudge.plusSize) / 2,
+                      right: 0,
+                      top: 0,
                       child: Material(
                         elevation: 14,
                         color: scheme.primary,
@@ -278,7 +278,7 @@ class _TodayNudgeState extends State<TodayNudge> with TickerProviderStateMixin {
                             child: Icon(
                               Icons.add,
                               color: scheme.onPrimary,
-                              size: 22,
+                              size: 18,
                               semanticLabel: label,
                             ),
                           ),

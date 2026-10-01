@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -28,6 +30,32 @@ class _FakeCalendarApi extends ApiClient {
 
   @override
   Future<void> deleteEntry(String date) async {}
+}
+
+/// Holds subsequent loads so tests can assert geometry mid-fetch.
+class _GatedCalendarApi extends _FakeCalendarApi {
+  _GatedCalendarApi() : super();
+
+  int _calls = 0;
+  Completer<void>? _gate;
+
+  /// After the initial triple prefetch, further listEntries wait on [release].
+  void armHang() => _gate = Completer<void>();
+
+  void release() {
+    _gate?.complete();
+    _gate = null;
+  }
+
+  @override
+  Future<List<Entry>> listEntries(int year, int month) async {
+    _calls++;
+    // First paint loads current + prev + next (3 calls).
+    if (_calls > 3 && _gate != null && !_gate!.isCompleted) {
+      await _gate!.future;
+    }
+    return entries;
+  }
 }
 
 /// Representative monitor / window sizes where the month grid used to crop.
@@ -227,5 +255,59 @@ void main() {
 
     final next = DateTime(now.year, now.month + 1);
     expect(find.textContaining('${next.year}'), findsWidgets);
+  });
+
+  testWidgets('month change keeps carousel height (no loading reflow)',
+      (tester) async {
+    const size = Size(390, 844);
+    await tester.binding.setSurfaceSize(size);
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final api = _GatedCalendarApi();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildApp217Theme(
+          brightness: Brightness.light,
+          palette: AppPalette.azure,
+        ),
+        home: MediaQuery(
+          data: const MediaQueryData(size: size),
+          child: CalendarScreen(
+            api: api,
+            user: const User(
+              id: 'u1',
+              email: 'shot@example.invalid',
+              name: 'Shot',
+            ),
+            strings: const Strings(false),
+            onLogout: () async {},
+            onOpenSettings: () {},
+            palette: AppPalette.azure,
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 900));
+    await tester.pumpAndSettle();
+
+    final carousel = find.byKey(const ValueKey('month-carousel'));
+    expect(carousel, findsOneWidget);
+    final sizeBefore = tester.getSize(carousel);
+
+    api.armHang();
+    await tester.tap(find.byIcon(Icons.chevron_right));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 320));
+
+    // Mid-fetch: no progress chrome, carousel height unchanged.
+    expect(find.byType(LinearProgressIndicator), findsNothing);
+    expect(tester.getSize(carousel), sizeBefore);
+
+    api.release();
+    await tester.pumpAndSettle();
+
+    expect(find.byType(LinearProgressIndicator), findsNothing);
+    expect(tester.getSize(carousel), sizeBefore);
   });
 }
