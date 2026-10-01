@@ -40,6 +40,9 @@ mobile/**/GeneratedPluginRegistrant.*
 # Legacy Expo tree (not part of this rewrite)
 217/
 
+# Abandoned Dioxus/wasm recovery snapshots (client is Flutter only)
+.local-recovery/
+
 # web static notice
 # (tracked)
 .env
