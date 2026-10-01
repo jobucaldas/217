@@ -34,14 +34,21 @@ class CalendarScreen extends StatefulWidget {
   State<CalendarScreen> createState() => _CalendarScreenState();
 }
 
-class _CalendarScreenState extends State<CalendarScreen> {
+class _CalendarScreenState extends State<CalendarScreen>
+    with TickerProviderStateMixin {
   late DateTime _month;
   Map<String, Entry> _entries = {};
+  Map<String, Entry> _prevEntries = {};
+  Map<String, Entry> _nextEntries = {};
   Entry? _todayEntry;
   bool _loading = true;
   String? _error;
-  /// +1 = incoming month from right (swipe left / next); -1 from left.
-  int _monthSlide = 0;
+
+  /// Pixel drag offset: negative = finger left (peek next month).
+  double _dragPx = 0;
+  bool _monthDragging = false;
+  late final AnimationController _monthSnap;
+  Animation<double>? _monthSnapAnim;
 
   DateTime get _today {
     final now = DateTime.now();
@@ -50,12 +57,29 @@ class _CalendarScreenState extends State<CalendarScreen> {
 
   String get _todayKey => DateFormat('yyyy-MM-dd').format(_today);
 
+  DateTime get _prevMonth => DateTime(_month.year, _month.month - 1);
+  DateTime get _nextMonth => DateTime(_month.year, _month.month + 1);
+
   @override
   void initState() {
     super.initState();
     final now = DateTime.now();
     _month = DateTime(now.year, now.month);
+    _monthSnap = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 280),
+    )..addListener(() {
+        if (_monthSnapAnim != null && mounted) {
+          setState(() => _dragPx = _monthSnapAnim!.value);
+        }
+      });
     _load();
+  }
+
+  @override
+  void dispose() {
+    _monthSnap.dispose();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -64,9 +88,23 @@ class _CalendarScreenState extends State<CalendarScreen> {
       _error = null;
     });
     try {
-      final entries = await widget.api.listEntries(_month.year, _month.month);
+      final year = _month.year;
+      final month = _month.month;
+      final results = await Future.wait([
+        widget.api.listEntries(year, month),
+        widget.api.listEntries(
+          month == 1 ? year - 1 : year,
+          month == 1 ? 12 : month - 1,
+        ),
+        widget.api.listEntries(
+          month == 12 ? year + 1 : year,
+          month == 12 ? 1 : month + 1,
+        ),
+      ]);
       if (!mounted) return;
-      final map = {for (final e in entries) e.date: e};
+      final map = {for (final e in results[0]) e.date: e};
+      final prevMap = {for (final e in results[1]) e.date: e};
+      final nextMap = {for (final e in results[2]) e.date: e};
       Entry? todayEntry;
       final today = _today;
       if (_month.year == today.year && _month.month == today.month) {
@@ -87,6 +125,8 @@ class _CalendarScreenState extends State<CalendarScreen> {
       if (!mounted) return;
       setState(() {
         _entries = map;
+        _prevEntries = prevMap;
+        _nextEntries = nextMap;
         _todayEntry = todayEntry;
         _loading = false;
       });
@@ -101,12 +141,76 @@ class _CalendarScreenState extends State<CalendarScreen> {
 
   void _shiftMonth(int delta) {
     if (delta == 0) return;
+    final width = MediaQuery.sizeOf(context).width;
+    if (width <= 0) {
+      setState(() {
+        _month = DateTime(_month.year, _month.month + delta);
+        _dragPx = 0;
+      });
+      _load();
+      return;
+    }
+    // Chevron: animate slide with a light recoil, then commit.
+    final target = delta > 0 ? -width : width;
+    _animateMonthTo(target, commitDelta: delta);
+  }
+
+  void _onMonthDragStart(DragStartDetails _) {
+    _monthSnap.stop();
+    _monthSnapAnim = null;
     setState(() {
-      // Swipe left (next) enters from the right → positive begin offset.
-      _monthSlide = delta > 0 ? 1 : -1;
-      _month = DateTime(_month.year, _month.month + delta);
+      _monthDragging = true;
+      _dragPx = 0;
     });
-    _load();
+  }
+
+  void _onMonthDragUpdate(DragUpdateDetails details) {
+    setState(() => _dragPx += details.delta.dx);
+  }
+
+  void _onMonthDragEnd(DragEndDetails details, double width) {
+    final v = details.primaryVelocity ?? 0;
+    final threshold = width * 0.22;
+    int commit = 0;
+    if (_dragPx <= -threshold || v < -480) {
+      commit = 1; // next
+    } else if (_dragPx >= threshold || v > 480) {
+      commit = -1; // previous
+    }
+    final target = commit == 0 ? 0.0 : (commit > 0 ? -width : width);
+    _animateMonthTo(target, commitDelta: commit);
+  }
+
+  void _animateMonthTo(double target, {required int commitDelta}) {
+    final begin = _dragPx;
+    // Slight overshoot on settle (recoil), not overblown.
+    const recoil = Cubic(0.34, 1.22, 0.64, 1);
+    final curve = commitDelta == 0 ? Curves.easeOutCubic : recoil;
+    setState(() {
+      _monthDragging = false;
+      _monthSnapAnim = Tween<double>(begin: begin, end: target).animate(
+        CurvedAnimation(parent: _monthSnap, curve: curve),
+      );
+    });
+    _monthSnap.duration = Duration(
+      milliseconds: commitDelta == 0 ? 220 : 300,
+    );
+    _monthSnap.forward(from: 0).whenComplete(() {
+      if (!mounted) return;
+      if (commitDelta != 0) {
+        setState(() {
+          _month = DateTime(_month.year, _month.month + commitDelta);
+          _dragPx = 0;
+          _monthSnapAnim = null;
+        });
+        _load();
+      } else {
+        setState(() {
+          _dragPx = 0;
+          _monthSnapAnim = null;
+        });
+      }
+    });
   }
 
   Future<void> _openDay(DateTime day) async {
@@ -303,63 +407,74 @@ class _CalendarScreenState extends State<CalendarScreen> {
                   child: Text(_error!, style: TextStyle(color: scheme.error)),
                 ),
               Expanded(
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onHorizontalDragEnd: (details) {
-                    final v = details.primaryVelocity ?? 0;
-                    if (v < -280) {
-                      _shiftMonth(1);
-                    } else if (v > 280) {
-                      _shiftMonth(-1);
-                    }
-                  },
-                  child: AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 220),
-                    switchInCurve: Curves.easeOutCubic,
-                    switchOutCurve: Curves.easeInCubic,
-                    layoutBuilder: (current, previous) => Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        ...previous,
-                        if (current != null) current,
-                      ],
-                    ),
-                    transitionBuilder: (child, animation) {
-                      final slideIn = Offset(_monthSlide * 0.2, 0);
-                      final slideOut = Offset(-_monthSlide * 0.2, 0);
-                      final curved = CurvedAnimation(
-                        parent: animation,
-                        curve: Curves.easeOutCubic,
-                        reverseCurve: Curves.easeInCubic,
-                      );
-                      // Reverse = outgoing month; exit opposite the enter side.
-                      final tween = animation.status == AnimationStatus.reverse
-                          ? Tween<Offset>(begin: slideOut, end: Offset.zero)
-                          : Tween<Offset>(begin: slideIn, end: Offset.zero);
-                      return ClipRect(
-                        child: SlideTransition(
-                          position: tween.animate(curved),
-                          child: FadeTransition(
-                            opacity: curved,
-                            child: child,
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final pageW = constraints.maxWidth;
+                    return GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onHorizontalDragStart: _onMonthDragStart,
+                      onHorizontalDragUpdate: _onMonthDragUpdate,
+                      onHorizontalDragEnd: (d) => _onMonthDragEnd(d, pageW),
+                      child: ClipRect(
+                        child: IgnorePointer(
+                          ignoring: _monthDragging || _monthSnap.isAnimating,
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              Transform.translate(
+                                offset: Offset(_dragPx - pageW, 0),
+                                child: _MonthGrid(
+                                  key: ValueKey(
+                                    '${_prevMonth.year}-${_prevMonth.month}',
+                                  ),
+                                  month: _prevMonth,
+                                  today: _today,
+                                  entries: _prevEntries,
+                                  onDayTap: _openDay,
+                                  todayLabel: widget.strings.today,
+                                  portuguese: widget.strings.pt,
+                                  palette: widget.palette,
+                                  bottomInset: 12,
+                                ),
+                              ),
+                              Transform.translate(
+                                offset: Offset(_dragPx, 0),
+                                child: _MonthGrid(
+                                  key: ValueKey(
+                                    '${_month.year}-${_month.month}',
+                                  ),
+                                  month: _month,
+                                  today: _today,
+                                  entries: _entries,
+                                  onDayTap: _openDay,
+                                  todayLabel: widget.strings.today,
+                                  portuguese: widget.strings.pt,
+                                  palette: widget.palette,
+                                  bottomInset: 12,
+                                ),
+                              ),
+                              Transform.translate(
+                                offset: Offset(_dragPx + pageW, 0),
+                                child: _MonthGrid(
+                                  key: ValueKey(
+                                    '${_nextMonth.year}-${_nextMonth.month}',
+                                  ),
+                                  month: _nextMonth,
+                                  today: _today,
+                                  entries: _nextEntries,
+                                  onDayTap: _openDay,
+                                  todayLabel: widget.strings.today,
+                                  portuguese: widget.strings.pt,
+                                  palette: widget.palette,
+                                  bottomInset: 12,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                      );
-                    },
-                    child: KeyedSubtree(
-                      key: ValueKey('${_month.year}-${_month.month}'),
-                      child: _MonthGrid(
-                        month: _month,
-                        today: _today,
-                        entries: _entries,
-                        onDayTap: _openDay,
-                        todayLabel: widget.strings.today,
-                        portuguese: widget.strings.pt,
-                        palette: widget.palette,
-                        bottomInset: 12,
                       ),
-                    ),
-                  ),
+                    );
+                  },
                 ),
               ),
             ],
@@ -415,6 +530,7 @@ class _LegendDot extends StatelessWidget {
 
 class _MonthGrid extends StatelessWidget {
   const _MonthGrid({
+    super.key,
     required this.month,
     required this.today,
     required this.entries,
