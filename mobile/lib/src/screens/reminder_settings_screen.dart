@@ -1,10 +1,11 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../api/client.dart';
 import '../i18n.dart';
 import '../notifications/local_reminders.dart';
 
-/// Reminder schedule: on/off + time + honest platform status.
+/// Reminder schedule: on/off + time + honest local/push status.
 class ReminderSettingsScreen extends StatefulWidget {
   const ReminderSettingsScreen({
     super.key,
@@ -28,11 +29,44 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen> {
   String _timezone = 'UTC';
   String? _status;
   String? _error;
+  LocalReminderSyncResult? _lastLocal;
 
   @override
   void initState() {
     super.initState();
     _load();
+  }
+
+  String _statusFor({
+    required bool enabled,
+    required String time,
+    required bool deliverable,
+    LocalReminderSyncResult? local,
+  }) {
+    if (!enabled) return widget.strings.remindersOff;
+    if (local?.status == LocalReminderSyncStatus.scheduled) {
+      return '${widget.strings.reminderLocalScheduled} · $time';
+    }
+    if (local?.status == LocalReminderSyncStatus.permissionDenied) {
+      return widget.strings.reminderPermissionDenied;
+    }
+    if (deliverable) {
+      return '${widget.strings.reminderReady} · $time';
+    }
+    if (local?.status == LocalReminderSyncStatus.failed) {
+      return widget.strings.reminderNeedsPush;
+    }
+    if (supportsLocalReminders &&
+        local?.status == LocalReminderSyncStatus.unsupported) {
+      // Web can probe Notification API but cannot schedule background dailies.
+      return kIsWeb
+          ? widget.strings.reminderWebNeedsPush
+          : widget.strings.reminderNeedsPush;
+    }
+    if (supportsLocalReminders) {
+      return widget.strings.reminderNeedsPush;
+    }
+    return widget.strings.reminderUnavailable;
   }
 
   Future<void> _load() async {
@@ -43,19 +77,31 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen> {
     try {
       final pref = await widget.api.getReminderPreference();
       final vapid = await widget.api.vapidConfig();
+      LocalReminderSyncResult? local;
+      if (pref != null && pref.enabled && supportsLocalReminders) {
+        // Re-assert OS schedule after reboot / reinstall of the app process.
+        local = await syncLocalDailyReminder(
+          enabled: true,
+          timeHhMm: pref.time,
+          title: '217',
+          body: widget.strings.recordToday,
+        );
+      }
       if (!mounted) return;
       setState(() {
         _enabled = pref?.enabled ?? false;
         _time = pref?.time ?? '09:00';
         _timezone = pref?.timezone ?? 'UTC';
         _vapidConfigured = vapid.configured;
+        _lastLocal = local;
         _status = pref == null
             ? widget.strings.reminderNotReady
-            : (pref.enabled
-                ? (pref.deliverable || supportsLocalReminders
-                    ? '${widget.strings.reminderReady} · ${pref.time}'
-                    : widget.strings.reminderNeedsPush)
-                : widget.strings.remindersOff);
+            : _statusFor(
+                enabled: pref.enabled,
+                time: pref.time,
+                deliverable: pref.deliverable,
+                local: local,
+              );
         _loading = false;
       });
     } catch (err) {
@@ -89,9 +135,9 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen> {
       _status = null;
     });
     try {
-      // Best-effort local schedule (thin path). Full OS delivery is a follow-on.
+      LocalReminderSyncResult? local;
       if (supportsLocalReminders) {
-        await syncLocalDailyReminder(
+        local = await syncLocalDailyReminder(
           enabled: nextEnabled,
           timeHhMm: _time,
           title: '217',
@@ -110,12 +156,19 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen> {
         _enabled = saved.enabled;
         _time = saved.time;
         _timezone = saved.timezone;
-        _status = saved.enabled
-            ? ((saved.deliverable || supportsLocalReminders)
-                ? '${widget.strings.reminderReady} · ${saved.time}'
-                : widget.strings.reminderNeedsPush)
-            : widget.strings.remindersOff;
+        _lastLocal = local;
+        _status = _statusFor(
+          enabled: saved.enabled,
+          time: saved.time,
+          deliverable: saved.deliverable,
+          local: local,
+        );
         _saving = false;
+        if (local?.status == LocalReminderSyncStatus.permissionDenied) {
+          _error = widget.strings.reminderPermissionDenied;
+        } else if (local?.status == LocalReminderSyncStatus.failed) {
+          _error = widget.strings.reminderNeedsPush;
+        }
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(widget.strings.reminderSaved)),
@@ -135,6 +188,9 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen> {
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
     final scheme = Theme.of(context).colorScheme;
+    final showUnavailable = !_vapidConfigured &&
+        !supportsLocalReminders &&
+        _lastLocal?.status != LocalReminderSyncStatus.scheduled;
     return Scaffold(
       appBar: AppBar(title: Text(widget.strings.reminders)),
       body: _loading
@@ -184,7 +240,7 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen> {
                     style: text.bodyMedium?.copyWith(color: scheme.error),
                   ),
                 ],
-                if (!_vapidConfigured && !supportsLocalReminders) ...[
+                if (showUnavailable) ...[
                   const SizedBox(height: 8),
                   Text(widget.strings.reminderUnavailable, style: text.bodyMedium),
                 ],

@@ -70,6 +70,15 @@ class Strings {
       : 'In this browser, web reminders need push (VAPID). On Android we use native notifications.';
   String get reminderReady => pt ? 'Lembrete ativo' : 'Reminder on';
   String get reminderNativeNote => pt
-      ? 'Android: notificação local diária. Web: push do servidor quando disponível.'
-      : 'Android: daily local notification. Web: server push when available.';
+      ? 'Android: notificação local diária do sistema. Web: push do servidor (VAPID) quando disponível.'
+      : 'Android: daily system local notification. Web: server push (VAPID) when available.';
+  String get reminderPermissionDenied => pt
+      ? 'Permissão de notificação negada neste aparelho.'
+      : 'Notification permission denied on this device.';
+  String get reminderLocalScheduled => pt
+      ? 'Notificação local agendada neste aparelho'
+      : 'Local notification scheduled on this device';
+  String get reminderWebNeedsPush => pt
+      ? 'Neste navegador, entrega em segundo plano precisa de push do servidor.'
+      : 'In this browser, background delivery needs server push.';
 }

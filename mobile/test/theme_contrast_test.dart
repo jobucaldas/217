@@ -55,6 +55,14 @@ void main() {
             reason: 'nudge chip (${palette.name}/$brightness)',
           );
           expect(
+            meetsBodyContrast(
+              scheme.onSecondaryContainer,
+              scheme.secondaryContainer,
+            ),
+            isTrue,
+            reason: 'reminder note chip (${palette.name}/$brightness)',
+          );
+          expect(
             meetsLargeContrast(
               App217Colors.onFilledCell(brightness, palette),
               App217Colors.cellTaken(brightness, palette),
