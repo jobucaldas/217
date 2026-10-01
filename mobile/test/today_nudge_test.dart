@@ -13,7 +13,7 @@ void main() {
 
   for (final brightness in Brightness.values) {
     testWidgets(
-        'today nudge is text pill with connected plus when unrecorded ($brightness)',
+        'today nudge hugs text with outer-corner plus when unrecorded ($brightness)',
         (tester) async {
       await tester.pumpWidget(
         MaterialApp(
@@ -35,46 +35,59 @@ void main() {
       await tester.pump(const Duration(milliseconds: 50));
       expect(find.text('Atualizar hoje'), findsOneWidget);
       expect(find.byIcon(Icons.add), findsOneWidget);
-      expect(find.byIcon(Icons.notifications_active_outlined), findsNothing);
-      expect(find.byType(Positioned), findsWidgets);
-      // Control is a text pill with corner plus, not a lone circular FAB.
+
       final size =
           tester.getSize(find.byKey(const ValueKey('today-nudge-control')));
-      expect(size.width, greaterThan(TodayNudge.pillHeight));
       expect(size.height, TodayNudge.height);
-      // Plus sits on the pill’s top-right corner (higher than pill midline).
+      // Hugs text — not a stretched wide bar.
+      expect(size.width, lessThan(240));
+      expect(size.width, greaterThan(120));
+
+      // Default right edge → plus on top-right corner.
       final plusCenter = tester.getCenter(find.byIcon(Icons.add));
       final controlTopLeft =
           tester.getTopLeft(find.byKey(const ValueKey('today-nudge-control')));
-      expect(plusCenter.dy, lessThan(controlTopLeft.dy + TodayNudge.pillHeight / 2));
+      expect(
+        plusCenter.dy,
+        lessThan(controlTopLeft.dy + TodayNudge.pillHeight / 2),
+      );
       expect(
         plusCenter.dx,
         greaterThan(controlTopLeft.dx + size.width * 0.55),
       );
     });
 
-    testWidgets('today nudge shows Update today in English ($brightness)',
+    testWidgets('today nudge English label is narrower than Portuguese ($brightness)',
         (tester) async {
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: buildApp217Theme(brightness: brightness),
-          home: Scaffold(
-            body: Stack(
-              children: [
-                TodayNudge(
-                  strings: const Strings(false),
-                  todayEntry: null,
-                  onRecord: () {},
-                ),
-              ],
+      Future<double> widthFor(bool pt) async {
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: buildApp217Theme(brightness: brightness),
+            home: Scaffold(
+              body: Stack(
+                children: [
+                  TodayNudge(
+                    strings: Strings(pt),
+                    todayEntry: null,
+                    onRecord: () {},
+                  ),
+                ],
+              ),
             ),
           ),
-        ),
-      );
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 50));
+        );
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 50));
+        return tester
+            .getSize(find.byKey(const ValueKey('today-nudge-control')))
+            .width;
+      }
+
+      final en = await widthFor(false);
       expect(find.text('Update today'), findsOneWidget);
-      expect(find.byIcon(Icons.add), findsOneWidget);
+      final pt = await widthFor(true);
+      expect(find.text('Atualizar hoje'), findsOneWidget);
+      expect(en, lessThan(pt));
     });
 
     testWidgets('today nudge hidden after registration ($brightness)',
@@ -105,7 +118,8 @@ void main() {
       expect(find.text('Atualizar hoje'), findsNothing);
     });
 
-    testWidgets('today nudge magnetically snaps across edges ($brightness)',
+    testWidgets(
+        'today nudge snaps left and flips plus to top-left ($brightness)',
         (tester) async {
       await tester.binding.setSurfaceSize(const Size(390, 844));
       addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -133,20 +147,21 @@ void main() {
       await tester.pump(const Duration(milliseconds: 100));
 
       final start = tester.getCenter(find.byIcon(Icons.add));
-      expect(start.dx, greaterThan(200)); // default right edge
+      expect(start.dx, greaterThan(200)); // default right / top-right plus
 
       await tester.drag(find.byIcon(Icons.add), const Offset(-220, 0));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 320));
       await tester.pumpAndSettle();
 
-      final end = tester.getCenter(find.byIcon(Icons.add));
-      // Plus stays on the pill’s top-right corner; after left snap the whole
-      // control is near the left edge (plus center still inset from left).
-      expect(end.dx, lessThan(start.dx - 80));
-      final controlLeft =
-          tester.getTopLeft(find.byKey(const ValueKey('today-nudge-control'))).dx;
+      final control = find.byKey(const ValueKey('today-nudge-control'));
+      final controlLeft = tester.getTopLeft(control).dx;
+      final controlRight = tester.getTopRight(control).dx;
+      final plus = tester.getCenter(find.byIcon(Icons.add));
       expect(controlLeft, lessThan(40));
+      // Outer top corner on the left edge → plus nearer left than right.
+      expect(plus.dx - controlLeft, lessThan(controlRight - plus.dx));
+      expect(plus.dy, lessThan(tester.getCenter(control).dy));
     });
   }
 }

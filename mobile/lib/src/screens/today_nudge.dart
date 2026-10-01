@@ -5,8 +5,8 @@ import '../i18n.dart';
 import '../models.dart';
 import '../prefs.dart';
 
-/// Floating “update today” control: text pill + plus on the pill’s top-right
-/// corner, idle settle bounce, magnetic edge snap, persists side + bottom inset.
+/// Floating “update today” control: text-hugging pill + plus on the outer
+/// top corner (flips with L/R magnet), idle settle bounce, edge snap.
 class TodayNudge extends StatefulWidget {
   const TodayNudge({
     super.key,
@@ -30,22 +30,31 @@ class TodayNudge extends StatefulWidget {
   /// Plus accessory diameter (logical px).
   static const double plusSize = 28;
 
-  /// How far the plus overhangs past the pill’s top-right corner.
+  /// How far the plus overhangs past the pill’s outer top corner.
   static const double plusOverhang = 10;
 
   /// Horizontal padding inside the text pill.
-  static const double pillPadX = 16;
+  static const double pillPadX = 14;
 
   /// Total control height including corner plus overhang.
   static double get height => pillHeight + plusOverhang;
 
-  /// Approximate control width for the longer locale label.
-  static double widthFor(Strings strings) {
-    // "Atualizar hoje" / "Update today" — keep magnet math stable.
-    final label = strings.updateToday;
-    final textW = label.length * 8.2;
-    // Plus hangs past the right edge a bit; reserve overhang.
-    return pillPadX * 2 + textW + plusOverhang;
+  /// Intrinsic control width for [label] with [style] (magnet math).
+  static double widthForLabel(String label, TextStyle? style) {
+    final painter = TextPainter(
+      text: TextSpan(
+        text: label,
+        style: style ??
+            const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+            ),
+      ),
+      textDirection: TextDirection.ltr,
+      maxLines: 1,
+    )..layout();
+    // Pill hugs text; outer corner plus overhangs past one end.
+    return pillPadX * 2 + painter.width + plusOverhang * 0.4;
   }
 
   @override
@@ -66,8 +75,6 @@ class _TodayNudgeState extends State<TodayNudge> with TickerProviderStateMixin {
   Animation<double>? _snapSide;
 
   bool get visible => TodayNudge.isVisible(widget.todayEntry);
-
-  double get _width => TodayNudge.widthFor(widget.strings);
 
   @override
   void initState() {
@@ -149,9 +156,10 @@ class _TodayNudgeState extends State<TodayNudge> with TickerProviderStateMixin {
     });
   }
 
-  void _onPanEnd(double viewWidth) {
+  void _onPanEnd(double viewWidth, double controlWidth) {
     final minLeft = 16.0;
-    final maxLeft = (viewWidth - 16 - _width).clamp(minLeft, viewWidth);
+    final maxLeft =
+        (viewWidth - 16 - controlWidth).clamp(minLeft, viewWidth);
     final base = _right ? maxLeft : minLeft;
     final currentLeft = (base + _dragDx).clamp(minLeft, maxLeft);
     final mid = (minLeft + maxLeft) / 2;
@@ -177,9 +185,10 @@ class _TodayNudgeState extends State<TodayNudge> with TickerProviderStateMixin {
     });
   }
 
-  double _leftFor(double viewWidth) {
+  double _leftFor(double viewWidth, double controlWidth) {
     final minLeft = 16.0;
-    final maxLeft = (viewWidth - 16 - _width).clamp(minLeft, viewWidth);
+    final maxLeft =
+        (viewWidth - 16 - controlWidth).clamp(minLeft, viewWidth);
     if (_dragging) {
       final base = _right ? maxLeft : minLeft;
       return (base + _dragDx).clamp(minLeft, maxLeft);
@@ -200,92 +209,95 @@ class _TodayNudgeState extends State<TodayNudge> with TickerProviderStateMixin {
     final bottom = _ready ? _bottom.clamp(8.0, maxBottom) : 16.0;
     final floatDy = _dragging ? 0.0 : _floatDy.value;
     final label = widget.strings.updateToday;
+    final labelStyle = Theme.of(context).textTheme.labelLarge?.copyWith(
+          color: scheme.onPrimaryContainer,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.1,
+        );
+    final controlWidth = TodayNudge.widthForLabel(label, labelStyle);
+    // Outer top corner: right edge → top-right; left edge → top-left.
+    final plusOnRight = _right;
 
     return AnimatedBuilder(
       animation: Listenable.merge([_float, _snap]),
       builder: (context, _) {
         return Positioned(
-          left: _leftFor(media.size.width),
+          left: _leftFor(media.size.width, controlWidth),
           bottom: bottom + media.padding.bottom - floatDy,
           child: GestureDetector(
             onPanStart: _onPanStart,
             onPanUpdate: (d) => _onPanUpdate(d, maxBottom),
-            onPanEnd: (_) => _onPanEnd(media.size.width),
+            onPanEnd: (_) => _onPanEnd(media.size.width, controlWidth),
             child: Tooltip(
               message: label,
-              child: SizedBox(
-                key: const ValueKey('today-nudge-control'),
-                width: _width,
-                height: TodayNudge.height,
-                child: Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    Positioned(
-                      left: 0,
-                      right: TodayNudge.plusOverhang * 0.35,
-                      top: TodayNudge.plusOverhang,
-                      bottom: 0,
-                      child: Material(
-                        elevation: 10,
-                        color: scheme.primaryContainer,
-                        shadowColor: scheme.shadow.withValues(alpha: 0.5),
-                        surfaceTintColor:
-                            scheme.primary.withValues(alpha: 0.12),
-                        shape: const StadiumBorder(),
-                        clipBehavior: Clip.antiAlias,
-                        child: InkWell(
-                          onTap: widget.onRecord,
-                          customBorder: const StadiumBorder(),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: TodayNudge.pillPadX,
-                            ),
-                            child: Center(
+              child: IntrinsicWidth(
+                child: SizedBox(
+                  key: const ValueKey('today-nudge-control'),
+                  height: TodayNudge.height,
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      Padding(
+                        padding: EdgeInsets.only(
+                          top: TodayNudge.plusOverhang,
+                          left: plusOnRight ? 0 : TodayNudge.plusOverhang * 0.35,
+                          right:
+                              plusOnRight ? TodayNudge.plusOverhang * 0.35 : 0,
+                        ),
+                        child: Material(
+                          elevation: 10,
+                          color: scheme.primaryContainer,
+                          shadowColor: scheme.shadow.withValues(alpha: 0.5),
+                          surfaceTintColor:
+                              scheme.primary.withValues(alpha: 0.12),
+                          shape: const StadiumBorder(),
+                          clipBehavior: Clip.antiAlias,
+                          child: InkWell(
+                            onTap: widget.onRecord,
+                            customBorder: const StadiumBorder(),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: TodayNudge.pillPadX,
+                                vertical: 12,
+                              ),
                               child: Text(
                                 label,
                                 maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .labelLarge
-                                    ?.copyWith(
-                                      color: scheme.onPrimaryContainer,
-                                      fontWeight: FontWeight.w700,
-                                      letterSpacing: 0.1,
-                                    ),
+                                softWrap: false,
+                                style: labelStyle,
                               ),
                             ),
                           ),
                         ),
                       ),
-                    ),
-                    // Plus badge on the pill’s top-right corner (not beside it).
-                    Positioned(
-                      right: 0,
-                      top: 0,
-                      child: Material(
-                        elevation: 14,
-                        color: scheme.primary,
-                        shadowColor: scheme.shadow.withValues(alpha: 0.55),
-                        shape: const CircleBorder(),
-                        clipBehavior: Clip.antiAlias,
-                        child: InkWell(
-                          onTap: widget.onRecord,
-                          customBorder: const CircleBorder(),
-                          child: SizedBox(
-                            width: TodayNudge.plusSize,
-                            height: TodayNudge.plusSize,
-                            child: Icon(
-                              Icons.add,
-                              color: scheme.onPrimary,
-                              size: 18,
-                              semanticLabel: label,
+                      Positioned(
+                        left: plusOnRight ? null : 0,
+                        right: plusOnRight ? 0 : null,
+                        top: 0,
+                        child: Material(
+                          elevation: 14,
+                          color: scheme.primary,
+                          shadowColor: scheme.shadow.withValues(alpha: 0.55),
+                          shape: const CircleBorder(),
+                          clipBehavior: Clip.antiAlias,
+                          child: InkWell(
+                            onTap: widget.onRecord,
+                            customBorder: const CircleBorder(),
+                            child: SizedBox(
+                              width: TodayNudge.plusSize,
+                              height: TodayNudge.plusSize,
+                              child: Icon(
+                                Icons.add,
+                                color: scheme.onPrimary,
+                                size: 18,
+                                semanticLabel: label,
+                              ),
                             ),
                           ),
                         ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
