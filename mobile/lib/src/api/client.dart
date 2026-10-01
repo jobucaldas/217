@@ -260,7 +260,7 @@ class ApiClient {
 
   Future<Entry> upsertEntry(
     String date, {
-    required bool taken,
+    bool? taken,
     String notes = '',
     bool heart = false,
   }) async {

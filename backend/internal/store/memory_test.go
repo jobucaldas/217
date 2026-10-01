@@ -56,7 +56,7 @@ func TestMemoryStore_UpsertAndGetEntry(t *testing.T) {
 	s := NewMemoryStore()
 	user, _ := s.CreateUser("u@t.com", "U", "testpass123")
 
-	entry, err := s.UpsertEntry(user.ID, "2026-05-13", model.UpsertRequest{Taken: true, Notes: "ok", Heart: true})
+	entry, err := s.UpsertEntry(user.ID, "2026-05-13", model.UpsertRequest{Taken: model.BoolPtr(true), Notes: "ok", Heart: true})
 	if err != nil {
 		t.Fatalf("UpsertEntry failed: %v", err)
 	}
@@ -74,14 +74,14 @@ func TestMemoryStore_UpsertAndGetEntry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetEntry failed: %v", err)
 	}
-	if got.Taken != true {
+	if !model.TakenTrue(got.Taken) {
 		t.Errorf("expected taken=true")
 	}
 	if got.Notes != "ok" {
 		t.Errorf("expected notes to persist, got %q", got.Notes)
 	}
 
-	_, err = s.UpsertEntry(user.ID, "2026-05-13", model.UpsertRequest{Taken: false, Notes: "updated"})
+	_, err = s.UpsertEntry(user.ID, "2026-05-13", model.UpsertRequest{Taken: model.BoolPtr(false), Notes: "updated"})
 	if err != nil {
 		t.Fatalf("updating entry failed: %v", err)
 	}
@@ -98,21 +98,52 @@ func TestMemoryStore_UpsertAndGetEntry(t *testing.T) {
 	}
 }
 
+func TestMemoryStore_UpsertNoteHeartWithoutStatus(t *testing.T) {
+	s := NewMemoryStore()
+	user, _ := s.CreateUser("note@t.com", "N", "testpass123")
+
+	entry, err := s.UpsertEntry(user.ID, "2026-10-01", model.UpsertRequest{
+		Taken: nil,
+		Notes: "em aberto note",
+		Heart: true,
+	})
+	if err != nil {
+		t.Fatalf("UpsertEntry failed: %v", err)
+	}
+	if entry.Taken != nil {
+		t.Fatalf("expected taken=null, got %#v", entry.Taken)
+	}
+	if entry.Notes != "em aberto note" || !entry.Heart {
+		t.Fatalf("expected note+heart, got %#v", entry)
+	}
+
+	got, err := s.GetEntry(user.ID, "2026-10-01")
+	if err != nil {
+		t.Fatalf("GetEntry failed: %v", err)
+	}
+	if got.Taken != nil {
+		t.Fatalf("expected taken=null on get, got %#v", got.Taken)
+	}
+	if got.Notes != "em aberto note" || !got.Heart {
+		t.Fatalf("expected note+heart round-trip, got %#v", got)
+	}
+}
+
 func TestMemoryStore_UserEntryIsolation(t *testing.T) {
 	s := NewMemoryStore()
 	u1, _ := s.CreateUser("u1@t.com", "U1", "testpass123")
 	u2, _ := s.CreateUser("u2@t.com", "U2", "testpass123")
 
-	s.UpsertEntry(u1.ID, "2026-05-01", model.UpsertRequest{Taken: true, Notes: ""})
-	s.UpsertEntry(u2.ID, "2026-05-01", model.UpsertRequest{Taken: false, Notes: ""})
+	s.UpsertEntry(u1.ID, "2026-05-01", model.UpsertRequest{Taken: model.BoolPtr(true), Notes: ""})
+	s.UpsertEntry(u2.ID, "2026-05-01", model.UpsertRequest{Taken: model.BoolPtr(false), Notes: ""})
 
 	e1, _ := s.GetEntry(u1.ID, "2026-05-01")
-	if !e1.Taken {
+	if !model.TakenTrue(e1.Taken) {
 		t.Error("u1 entry should be taken=true")
 	}
 
 	e2, _ := s.GetEntry(u2.ID, "2026-05-01")
-	if e2.Taken {
+	if model.TakenTrue(e2.Taken) || e2.Taken == nil {
 		t.Error("u2 entry should be taken=false")
 	}
 }
@@ -121,9 +152,9 @@ func TestMemoryStore_ListEntries(t *testing.T) {
 	s := NewMemoryStore()
 	u, _ := s.CreateUser("u@t.com", "U", "testpass123")
 
-	s.UpsertEntry(u.ID, "2026-05-01", model.UpsertRequest{Taken: true, Notes: ""})
-	s.UpsertEntry(u.ID, "2026-05-15", model.UpsertRequest{Taken: false, Notes: ""})
-	s.UpsertEntry(u.ID, "2026-05-31", model.UpsertRequest{Taken: true, Notes: ""})
+	s.UpsertEntry(u.ID, "2026-05-01", model.UpsertRequest{Taken: model.BoolPtr(true), Notes: ""})
+	s.UpsertEntry(u.ID, "2026-05-15", model.UpsertRequest{Taken: model.BoolPtr(false), Notes: ""})
+	s.UpsertEntry(u.ID, "2026-05-31", model.UpsertRequest{Taken: model.BoolPtr(true), Notes: ""})
 
 	entries, err := s.ListEntries(u.ID, 2026, 5)
 	if err != nil {

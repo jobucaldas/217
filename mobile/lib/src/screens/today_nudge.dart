@@ -22,7 +22,8 @@ class TodayNudge extends StatefulWidget {
   final AppearancePrefs? prefs;
 
   /// Mid-screen hero CTA is never used; chip only when still open.
-  static bool isVisible(Entry? todayEntry) => todayEntry == null;
+  static bool isVisible(Entry? todayEntry) =>
+      todayEntry == null || todayEntry.taken == null;
 
   /// Pill height (logical px).
   static const double pillHeight = 48;

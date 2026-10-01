@@ -46,7 +46,7 @@ func TestShareInviteAcceptRevokeAndInbox(t *testing.T) {
 		t.Fatalf("partner calendar subject=%q err=%v", subject, err)
 	}
 
-	if _, err := s.UpsertEntry(owner.ID, "2026-10-01", model.UpsertRequest{Taken: true}); err != nil {
+	if _, err := s.UpsertEntry(owner.ID, "2026-10-01", model.UpsertRequest{Taken: model.BoolPtr(true)}); err != nil {
 		t.Fatal(err)
 	}
 	entries, err := s.ListEntries(subject, 2026, 10)
@@ -87,7 +87,7 @@ func TestDeleteUserRemovesData(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.UpsertEntry(user.ID, "2026-10-01", model.UpsertRequest{Taken: true, Notes: "x"}); err != nil {
+	if _, err := s.UpsertEntry(user.ID, "2026-10-01", model.UpsertRequest{Taken: model.BoolPtr(true), Notes: "x"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.CreateSession(user.ID, "tok", time.Now().Add(time.Hour), "ua", "ip"); err != nil {

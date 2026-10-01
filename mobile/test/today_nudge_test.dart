@@ -119,6 +119,36 @@ void main() {
     });
 
     testWidgets(
+        'today nudge still visible for Em aberto note/heart only ($brightness)',
+        (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildApp217Theme(brightness: brightness),
+          home: Scaffold(
+            body: Stack(
+              children: [
+                TodayNudge(
+                  strings: const Strings(true),
+                  todayEntry: const Entry(
+                    date: '2026-10-01',
+                    taken: null,
+                    notes: 'note only',
+                    heart: true,
+                  ),
+                  onRecord: () {},
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(find.text('Atualizar hoje'), findsOneWidget);
+      expect(find.byIcon(Icons.add), findsOneWidget);
+    });
+
+    testWidgets(
         'today nudge snaps left and flips plus to top-left ($brightness)',
         (tester) async {
       await tester.binding.setSurfaceSize(const Size(390, 844));
