@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 import 'package:a217/src/i18n.dart';
 import 'package:a217/src/models.dart';
@@ -7,6 +8,9 @@ import 'package:a217/src/screens/today_nudge.dart';
 import 'package:a217/src/theme/app_theme.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  GoogleFonts.config.allowRuntimeFetching = false;
+
   for (final brightness in Brightness.values) {
     testWidgets('today nudge visible when unrecorded ($brightness)',
         (tester) async {
