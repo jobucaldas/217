@@ -21,6 +21,8 @@ void main() {
     expect(ThemeMode.dark.name, 'dark');
     expect(AppearancePrefs.themeModeKey, 'theme_mode');
     expect(AppearancePrefs.paletteKey, 'app_palette');
+    expect(AppearancePrefs.fabSideKey, 'today_fab_side');
+    expect(AppearancePrefs.fabBottomKey, 'today_fab_bottom');
   });
 
   test('scaffold neutrals are pinned across accents', () {

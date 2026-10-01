@@ -10,8 +10,9 @@ import 'package:a217/src/theme/app_theme.dart';
 void main() {
   for (final brightness in Brightness.values) {
     testWidgets(
-      'settings hides API until Advanced opens ($brightness)',
+      'settings show-more reveals API; language is a selector ($brightness)',
       (tester) async {
+        var portuguese = false;
         final api = ApiClient(AppConfig.fromEnvironment());
         await tester.pumpWidget(
           MaterialApp(
@@ -19,37 +20,44 @@ void main() {
               brightness: brightness,
               palette: AppPalette.azure,
             ),
-            home: SettingsPage(
-              api: api,
-              strings: const Strings(false),
-              portuguese: false,
-              themeMode: ThemeMode.system,
-              palette: AppPalette.azure,
-              onToggleLanguage: () {},
-              onThemeModeChanged: (_) {},
-              onPaletteChanged: (_) {},
-              onApiBaseChanged: () {},
-              onLogout: () async {},
+            home: StatefulBuilder(
+              builder: (context, setState) => SettingsPage(
+                api: api,
+                strings: Strings(portuguese),
+                portuguese: portuguese,
+                themeMode: ThemeMode.system,
+                palette: AppPalette.azure,
+                onPortugueseChanged: (pt) => setState(() => portuguese = pt),
+                onThemeModeChanged: (_) {},
+                onPaletteChanged: (_) {},
+                onApiBaseChanged: () {},
+                onLogout: () async {},
+              ),
             ),
           ),
         );
         await tester.pumpAndSettle();
 
         expect(find.text('Settings'), findsOneWidget);
-        expect(find.text('APPEARANCE'), findsOneWidget);
-        expect(find.text('ADVANCED'), findsOneWidget);
+        expect(find.text('LANGUAGE'), findsOneWidget);
+        expect(find.text('Português'), findsOneWidget);
+        expect(find.text('English'), findsOneWidget);
+        expect(find.text('Show more'), findsOneWidget);
+        expect(find.text('Advanced'), findsNothing);
         expect(find.text('API base URL'), findsNothing);
         expect(find.text('Test connection'), findsNothing);
 
-        await tester.tap(find.text('Advanced').hitTestable().first);
+        await tester.tap(find.text('Show more'));
         await tester.pumpAndSettle();
 
+        expect(find.text('Show less'), findsOneWidget);
         expect(find.text('API base URL'), findsWidgets);
         expect(find.text('Test connection'), findsOneWidget);
 
-        // Section labels and body stay painted (smoke readability).
-        final scheme = buildApp217ColorScheme(brightness);
-        expect(scheme.onSurface, isNot(equals(scheme.surface)));
+        await tester.tap(find.text('Português'));
+        await tester.pumpAndSettle();
+        expect(find.text('Ajustes'), findsOneWidget);
+        expect(find.text('Mostrar menos'), findsOneWidget);
       },
     );
   }

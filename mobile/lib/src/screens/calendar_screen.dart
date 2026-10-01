@@ -541,6 +541,9 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
   late bool? _taken = widget.initialTaken;
   late String _notes = widget.initialNotes;
 
+  /// Save when a status is chosen, or when clearing an existing mark.
+  bool get _canSave => _taken != null || widget.hadEntry;
+
   Future<void> _editNote() async {
     final result = await showDialog<String>(
       context: context,
@@ -631,23 +634,23 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
           ),
           const SizedBox(height: 16),
           FilledButton(
-            onPressed: _taken == null
+            onPressed: !_canSave
                 ? null
-                : () => Navigator.pop(
-                      context,
-                      DayEditResult.save(
-                        taken: _taken!,
-                        notes: _notes.trim(),
-                      ),
-                    ),
+                : () {
+                    if (_taken == null) {
+                      Navigator.pop(context, const DayEditResult.clear());
+                    } else {
+                      Navigator.pop(
+                        context,
+                        DayEditResult.save(
+                          taken: _taken!,
+                          notes: _notes.trim(),
+                        ),
+                      );
+                    }
+                  },
             child: Text(widget.strings.save),
           ),
-          if (widget.hadEntry)
-            TextButton(
-              onPressed: () =>
-                  Navigator.pop(context, const DayEditResult.clear()),
-              child: Text(widget.strings.clearMark),
-            ),
           TextButton(
             onPressed: () => Navigator.pop(context),
             child: Text(widget.strings.cancel),

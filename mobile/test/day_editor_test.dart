@@ -76,4 +76,52 @@ void main() {
     // Note affordance stays on the date row (filled icon after write).
     expect(find.byIcon(Icons.sticky_note_2), findsOneWidget);
   });
+
+  testWidgets('unselecting status keeps Save to clear existing mark',
+      (tester) async {
+    DayEditResult? result;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildApp217Theme(
+          brightness: Brightness.light,
+          palette: AppPalette.azure,
+        ),
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => TextButton(
+              onPressed: () async {
+                result = await showModalBottomSheet<DayEditResult>(
+                  context: context,
+                  builder: (_) => const DayEditorSheet(
+                    strings: Strings(false),
+                    date: '2026-10-01',
+                    initialTaken: true,
+                    initialNotes: '',
+                    hadEntry: true,
+                  ),
+                );
+              },
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Clear mark'), findsNothing);
+    // Unselect Taken in the segmented control.
+    await tester.tap(find.text('Taken'));
+    await tester.pumpAndSettle();
+
+    final save = tester.widget<FilledButton>(
+      find.widgetWithText(FilledButton, 'Save'),
+    );
+    expect(save.onPressed, isNotNull);
+
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(result?.clear, isTrue);
+  });
 }

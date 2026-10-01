@@ -30,9 +30,10 @@ class Strings {
   String get connectionOk => pt ? 'API acessível' : 'API reachable';
   String get connectionFail => pt ? 'API inacessível' : 'API unreachable';
   String get advanced => pt ? 'Avançado' : 'Advanced';
-  String get advancedHint => pt
-      ? 'URL da API e diagnóstico'
-      : 'API URL and diagnostics';
+  String get showMore => pt ? 'Mostrar mais' : 'Show more';
+  String get showLess => pt ? 'Mostrar menos' : 'Show less';
+  String get languagePortuguese => 'Português';
+  String get languageEnglish => 'English';
   String get done => pt ? 'Pronto' : 'Done';
   String get clearNote => pt ? 'Limpar nota' : 'Clear note';
   String get darkMode => pt ? 'Tema escuro' : 'Dark theme';

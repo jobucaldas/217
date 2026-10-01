@@ -18,16 +18,22 @@ void main() {
         MaterialApp(
           theme: buildApp217Theme(brightness: brightness),
           home: Scaffold(
-            body: TodayNudge(
-              strings: const Strings(true),
-              todayEntry: null,
-              onRecord: () {},
+            body: Stack(
+              children: [
+                TodayNudge(
+                  strings: const Strings(true),
+                  todayEntry: null,
+                  onRecord: () {},
+                ),
+              ],
             ),
           ),
         ),
       );
+      await tester.pumpAndSettle();
       expect(find.text('Registrar hoje'), findsOneWidget);
       expect(find.byIcon(Icons.notifications_active_outlined), findsOneWidget);
+      expect(find.byType(Positioned), findsOneWidget);
     });
 
     testWidgets('today nudge hidden after registration ($brightness)',
@@ -36,18 +42,23 @@ void main() {
         MaterialApp(
           theme: buildApp217Theme(brightness: brightness),
           home: Scaffold(
-            body: TodayNudge(
-              strings: const Strings(true),
-              todayEntry: const Entry(
-                date: '2026-10-01',
-                taken: true,
-                notes: '',
-              ),
-              onRecord: () {},
+            body: Stack(
+              children: [
+                TodayNudge(
+                  strings: const Strings(true),
+                  todayEntry: const Entry(
+                    date: '2026-10-01',
+                    taken: true,
+                    notes: '',
+                  ),
+                  onRecord: () {},
+                ),
+              ],
             ),
           ),
         ),
       );
+      await tester.pumpAndSettle();
       expect(find.text('Registrar hoje'), findsNothing);
       expect(find.text('Atualizar hoje'), findsNothing);
     });
