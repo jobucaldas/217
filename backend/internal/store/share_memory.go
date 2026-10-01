@@ -45,6 +45,17 @@ func (s *MemoryStore) GetUserByID(userID string) (*model.User, error) {
 	return nil, fmt.Errorf("user not found")
 }
 
+func (s *MemoryStore) WorkOSSubject(userID string) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for subject, uid := range s.workosSubjects {
+		if uid == userID {
+			return subject, nil
+		}
+	}
+	return "", nil
+}
+
 func (s *MemoryStore) DeleteUser(userID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

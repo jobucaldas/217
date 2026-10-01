@@ -67,7 +67,9 @@ void main() {
       await tester.tap(find.text('Delete account'));
       await tester.pumpAndSettle();
       expect(
-        find.text('This permanently deletes your data. This cannot be undone.'),
+        find.text(
+          'This permanently deletes your data and login account. This cannot be undone.',
+        ),
         findsOneWidget,
       );
       expect(find.text('Delete permanently'), findsOneWidget);

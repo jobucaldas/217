@@ -23,6 +23,20 @@ func (s *PGStore) GetUserByID(userID string) (*model.User, error) {
 	return sanitizeUser(user), nil
 }
 
+func (s *PGStore) WorkOSSubject(userID string) (string, error) {
+	var subject string
+	err := s.db.QueryRow(
+		`SELECT subject FROM workos_identities WHERE user_id = $1 LIMIT 1`, userID,
+	).Scan(&subject)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("looking up workos subject: %w", err)
+	}
+	return subject, nil
+}
+
 func (s *PGStore) DeleteUser(userID string) error {
 	res, err := s.db.Exec(`DELETE FROM users WHERE id = $1`, userID)
 	if err != nil {

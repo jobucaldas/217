@@ -168,10 +168,11 @@ class ApiClient {
 
   Future<void> deleteAccount() async {
     final response = await _send('DELETE', _uri('/api/account'));
-    await clearSession();
     if (response.statusCode != 204 && response.statusCode != 200) {
       throw StateError('delete account failed: ${response.body}');
     }
+    // Only clear local tokens after the server confirms WorkOS + app data deletion.
+    await clearSession();
   }
 
   Future<ShareState> getShare() async {

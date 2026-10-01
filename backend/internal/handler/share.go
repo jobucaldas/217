@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"217/backend/internal/auth"
 	"217/backend/internal/model"
 )
 
@@ -29,13 +30,45 @@ func (h *Handler) sessionPayload(user *model.User) map[string]interface{} {
 
 func (h *Handler) DeleteAccount(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r)
+	if userID == "" {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+
+	subject, err := h.store.WorkOSSubject(userID)
+	if err != nil {
+		log.Printf("delete account workos subject lookup: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "could not resolve WorkOS identity; account not deleted",
+		})
+		return
+	}
+	if subject != "" {
+		deleter, ok := h.oauthProvider.(auth.WorkOSUserDeleter)
+		if !ok || deleter == nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+				"error": "WorkOS user delete is not configured; account not deleted",
+			})
+			return
+		}
+		if err := deleter.DeleteUser(r.Context(), subject); err != nil {
+			log.Printf("delete account workos user %s: %v", subject, err)
+			writeJSON(w, http.StatusBadGateway, map[string]string{
+				"error": "failed to delete WorkOS user; account not deleted",
+			})
+			return
+		}
+	}
+
 	if err := h.store.DeleteUser(userID); err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "user not found"})
 			return
 		}
 		log.Printf("delete account error: %v", err)
-		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "failed to delete local account data",
+		})
 		return
 	}
 	http.SetCookie(w, h.clearSessionCookie())

@@ -30,3 +30,9 @@ type OAuthProvider interface {
 type WorkOSExchanger interface {
 	ExchangeWithRedirect(ctx context.Context, code, codeVerifier, redirectURI string) (*OAuthUserInfo, error)
 }
+
+// WorkOSUserDeleter permanently removes an AuthKit user via the User Management API.
+// Account deletion must invoke this before wiping local app data (fail closed).
+type WorkOSUserDeleter interface {
+	DeleteUser(ctx context.Context, workosUserID string) error
+}

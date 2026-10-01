@@ -11,6 +11,7 @@ type Store interface {
 	GetUserByEmail(email string) (*model.User, error)
 	GetUserByID(userID string) (*model.User, error)
 	LinkWorkOSIdentity(subject, verifiedEmail, name string, authoritative bool) (*model.User, error)
+	WorkOSSubject(userID string) (string, error)
 	DeleteUser(userID string) error
 
 	GetEntry(userID, date string) (*model.Entry, error)

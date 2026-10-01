@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -126,6 +127,28 @@ func (w *WorkOSOAuth) ExchangeWithRedirect(ctx context.Context, code, codeVerifi
 		return nil, fmt.Errorf("workos exchange decode: %w", err)
 	}
 	return userInfoFromWorkOS(&parsed)
+}
+
+// DeleteUser permanently deletes the AuthKit user (DELETE /user_management/users/{id}).
+// A missing user (already deleted) is treated as success so retries stay idempotent.
+func (w *WorkOSOAuth) DeleteUser(ctx context.Context, workosUserID string) error {
+	if w == nil || w.apiKey == "" {
+		return fmt.Errorf("workos user delete requires WORKOS_API_KEY")
+	}
+	if workosUserID == "" {
+		return fmt.Errorf("missing workos user id")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	err := w.client.UserManagement().Delete(ctx, workosUserID)
+	if err == nil {
+		return nil
+	}
+	var notFound *workos.NotFoundError
+	if errors.As(err, &notFound) {
+		return nil
+	}
+	return fmt.Errorf("workos delete user: %w", err)
 }
 
 func userInfoFromWorkOS(resp *workos.AuthenticateResponse) (*OAuthUserInfo, error) {

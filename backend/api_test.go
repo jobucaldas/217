@@ -27,6 +27,8 @@ type fakeOAuthProvider struct {
 	exchangeVerify string
 	userInfo       *auth.OAuthUserInfo
 	exchangeErr    error
+	deletedIDs     []string
+	deleteErr      error
 }
 
 func (f *fakeOAuthProvider) AuthCodeURL(state, codeChallenge, nonce string) string {
@@ -48,6 +50,14 @@ func (f *fakeOAuthProvider) Exchange(_ context.Context, code, codeVerifier, nonc
 		return nil, f.exchangeErr
 	}
 	return f.userInfo, nil
+}
+
+func (f *fakeOAuthProvider) DeleteUser(_ context.Context, workosUserID string) error {
+	if f.deleteErr != nil {
+		return f.deleteErr
+	}
+	f.deletedIDs = append(f.deletedIDs, workosUserID)
+	return nil
 }
 
 func newTestHandler(t *testing.T) (*handler.Handler, *store.MemoryStore) {

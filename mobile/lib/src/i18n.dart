@@ -94,8 +94,8 @@ class Strings {
   // Account / share
   String get deleteAccount => pt ? 'Excluir conta' : 'Delete account';
   String get deleteAccountWarn => pt
-      ? 'Isso apaga permanentemente seus dados. Não dá para desfazer.'
-      : 'This permanently deletes your data. This cannot be undone.';
+      ? 'Isso apaga permanentemente seus dados e a conta de login. Não dá para desfazer.'
+      : 'This permanently deletes your data and login account. This cannot be undone.';
   String get deleteAccountConfirm => pt ? 'Excluir definitivamente' : 'Delete permanently';
   String get shareCalendar =>
       pt ? 'Compartilhar calendário com namorado' : 'Share calendar with boyfriend';

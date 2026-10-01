@@ -1,11 +1,15 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"217/backend/internal/auth"
 )
 
 func TestAccountDeleteAndShareHTTP(t *testing.T) {
@@ -80,6 +84,102 @@ func TestAccountDeleteAndShareHTTP(t *testing.T) {
 	}
 	if _, err := s.GetUserByID(partner.ID); err == nil {
 		t.Fatal("partner should be deleted")
+	}
+}
+
+func TestDeleteAccountRemovesWorkOSUserFirst(t *testing.T) {
+	h, s := newTestHandler(t)
+	provider := &fakeOAuthProvider{}
+	h.SetOAuthProvider(provider)
+
+	user, err := s.LinkWorkOSIdentity("user_workos_delete_1", "deleteme@example.com", "Delete Me", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cookie := sessionCookie(t, s, user.ID)
+
+	req := authedRequest(http.MethodDelete, "/api/account", cookie, nil)
+	w := httptest.NewRecorder()
+	h.AuthMiddleware(h.DeleteAccount)(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("delete: %d %s", w.Code, w.Body.String())
+	}
+	if len(provider.deletedIDs) != 1 || provider.deletedIDs[0] != "user_workos_delete_1" {
+		t.Fatalf("expected WorkOS delete of subject, got %#v", provider.deletedIDs)
+	}
+	cleared := false
+	for _, c := range w.Result().Cookies() {
+		if c.Name == "217_session" && c.MaxAge < 0 {
+			cleared = true
+		}
+	}
+	if !cleared {
+		t.Fatal("expected session cookie cleared")
+	}
+	if _, err := s.GetUserByID(user.ID); err == nil {
+		t.Fatal("local user should be gone after WorkOS delete")
+	}
+	subject, err := s.WorkOSSubject(user.ID)
+	if err != nil || subject != "" {
+		t.Fatalf("expected no local WorkOS subject after delete, got %q err=%v", subject, err)
+	}
+}
+
+func TestDeleteAccountFailsClosedWhenWorkOSDeleteFails(t *testing.T) {
+	h, s := newTestHandler(t)
+	provider := &fakeOAuthProvider{deleteErr: fmt.Errorf("workos unavailable")}
+	h.SetOAuthProvider(provider)
+
+	user, err := s.LinkWorkOSIdentity("user_workos_keep_1", "keepme@example.com", "Keep Me", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cookie := sessionCookie(t, s, user.ID)
+
+	req := authedRequest(http.MethodDelete, "/api/account", cookie, nil)
+	w := httptest.NewRecorder()
+	h.AuthMiddleware(h.DeleteAccount)(w, req)
+	if w.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502 fail-closed, got %d %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "failed to delete WorkOS user") {
+		t.Fatalf("expected clear WorkOS error, got %s", w.Body.String())
+	}
+	if _, err := s.GetUserByID(user.ID); err != nil {
+		t.Fatalf("local user must remain when WorkOS delete fails: %v", err)
+	}
+	subject, err := s.WorkOSSubject(user.ID)
+	if err != nil || subject != "user_workos_keep_1" {
+		t.Fatalf("subject must remain, got %q err=%v", subject, err)
+	}
+}
+
+type authOnlyProvider struct{}
+
+func (authOnlyProvider) AuthCodeURL(state, codeChallenge, nonce string) string {
+	return "https://example.test/auth"
+}
+func (authOnlyProvider) Exchange(context.Context, string, string, string) (*auth.OAuthUserInfo, error) {
+	return nil, fmt.Errorf("unused")
+}
+
+func TestDeleteAccountFailsClosedWithoutWorkOSDeleter(t *testing.T) {
+	h, s := newTestHandler(t)
+	h.SetOAuthProvider(authOnlyProvider{})
+
+	user, err := s.LinkWorkOSIdentity("user_workos_nodeleter", "nodeleter@example.com", "No Deleter", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cookie := sessionCookie(t, s, user.ID)
+	req := authedRequest(http.MethodDelete, "/api/account", cookie, nil)
+	w := httptest.NewRecorder()
+	h.AuthMiddleware(h.DeleteAccount)(w, req)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d %s", w.Code, w.Body.String())
+	}
+	if _, err := s.GetUserByID(user.ID); err != nil {
+		t.Fatalf("local user must remain: %v", err)
 	}
 }
 
