@@ -171,6 +171,8 @@ jobs:
       - name: Publish nightly + datetime_sha releases
         env:
           GH_TOKEN: ${{ github.token }}
+          # Job has no checkout; tell gh which repo to target.
+          GH_REPO: ${{ github.repository }}
           COMMIT_TIMESTAMP: ${{ github.event.head_commit.timestamp }}
         run: |
           set -euo pipefail
