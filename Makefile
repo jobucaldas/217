@@ -7,7 +7,7 @@ COMPOSE_ENV = $(if $(wildcard .env.reminders.local),--env-file .env.reminders.lo
 .PHONY: dev-image test-backend test-mobile test validate dev-up dev-down dev-logs vapid-keys mobile-apk mobile-web
 
 dev-image:
-	podman build -t $(DEV_IMAGE) -f .devcontainer/Dockerfile .
+	podman build -t $(DEV_IMAGE) -f dev/Containerfile .
 
 test-backend: dev-image
 	$(PODMAN_RUN) sh -c 'cd backend && test -z "$$(gofmt -l .)" && go test -mod=readonly ./... -v && go vet -mod=readonly ./... && go build -mod=readonly ./...'

@@ -1,9 +1,6 @@
 # dependencies
 node_modules/
 
-# devcontainer
-.devcontainer/.env
-
 # Build output
 backend/bin/
 backend/server
@@ -50,3 +47,8 @@ frontend/dist/
 frontend/target/
 pi-session-*.html
 *.apk
+
+# Local agent notes
+blockers.md
+.mission/
+
