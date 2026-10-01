@@ -878,38 +878,30 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
     }
 
     // Empty note + no heart + no status → clear any existing note-only entry.
+    // Keep the day sheet open — only the note dialog closed.
     if (status == null && notes.trim().isEmpty && !heart) {
       if (widget.hadEntry) {
         final clear = const DayEditResult.clear();
         if (onCommit != null) {
           onCommit(clear);
+        } else if (mounted && Navigator.of(context).canPop()) {
+          // Test harness without onCommit: return clear via sheet pop.
+          Navigator.pop(context, clear);
         }
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!mounted) return;
-          if (Navigator.of(context).canPop()) {
-            Navigator.pop(context, onCommit != null ? null : clear);
-          }
-        });
       }
       return;
     }
 
     // Persist note/heart even when Taken/Missed is unset (Em aberto).
+    // Close only the note dialog (already dismissed by showDialog); keep the
+    // day sheet open so Taken/Missed/heart remain tappable without reopen.
     final save = _saveResult(taken: status, notes: notes, heart: heart);
     if (onCommit != null) {
-      // Persist first — independent of whether the sheet route still exists.
       onCommit(save);
+    } else if (mounted && Navigator.of(context).canPop()) {
+      // Test harness without onCommit: return save via sheet pop.
+      Navigator.pop(context, save);
     }
-    // Close the sheet after the dialog route has fully popped (next frame),
-    // so we do not race the root-navigator dialog dismissal on web.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      if (onCommit != null) {
-        if (Navigator.of(context).canPop()) Navigator.pop(context);
-      } else if (Navigator.of(context).canPop()) {
-        Navigator.pop(context, save);
-      }
-    });
   }
 
   @override

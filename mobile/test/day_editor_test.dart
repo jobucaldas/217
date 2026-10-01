@@ -155,7 +155,9 @@ void main() {
     expect(committed?.taken, isNull);
     expect(committed?.notes, 'open day note');
     expect(committed?.heart, isFalse);
-    expect(find.text('Taken'), findsNothing);
+    // Pronto closes note dialog only — day sheet stays open.
+    expect(find.text('Taken'), findsOneWidget);
+    expect(find.byIcon(Icons.sticky_note_2), findsOneWidget);
   });
 
   testWidgets('Em aberto: heart alone persists without Taken/Missed',
@@ -205,7 +207,9 @@ void main() {
     expect(committed?.taken, isNull);
     expect(committed?.notes, '');
     expect(committed?.heart, isTrue);
-    expect(find.text('Taken'), findsNothing);
+    // Pronto closes note dialog only — day sheet stays open with heart.
+    expect(find.text('Taken'), findsOneWidget);
+    expect(find.byIcon(Icons.favorite), findsWidgets);
   });
 
   testWidgets(
@@ -268,31 +272,10 @@ void main() {
     expect(api.store['2026-10-01']?.notes, 'keep me');
     expect(api.store['2026-10-01']?.heart, isTrue);
     expect(api.store['2026-10-01']?.taken, isNull);
-
-    // Reopen with persisted state — Em aberto still, note+heart present.
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: buildApp217Theme(
-          brightness: Brightness.light,
-          palette: AppPalette.azure,
-        ),
-        home: Scaffold(
-          body: DayEditorSheet(
-            strings: const Strings(false),
-            date: '2026-10-01',
-            initialTaken: api.store['2026-10-01']?.taken,
-            initialNotes: api.store['2026-10-01']?.notes ?? '',
-            initialHeart: api.store['2026-10-01']?.heart ?? false,
-            hadEntry: true,
-          ),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-    expect(find.byIcon(Icons.sticky_note_2), findsOneWidget);
-    expect(find.byIcon(Icons.favorite), findsOneWidget);
+    // Pronto left the day sheet open with note+heart — Em aberto still.
     expect(find.text('Taken'), findsOneWidget);
-    // No Taken/Missed selected.
+    expect(find.byIcon(Icons.sticky_note_2), findsOneWidget);
+    expect(find.byIcon(Icons.favorite), findsWidgets);
     final segmented = tester.widget<SegmentedButton<bool>>(
       find.byType(SegmentedButton<bool>),
     );
@@ -494,8 +477,11 @@ void main() {
     expect(committed?.taken, isTrue);
     expect(committed?.notes, 'status unchanged');
     expect(committed?.heart, isTrue);
-    // Sheet closed — no Taken/Missed re-tap required.
-    expect(find.text('Taken'), findsNothing);
+    // Pronto closes note dialog only — day sheet stays open for Taken/Missed.
+    expect(find.text('Taken'), findsOneWidget);
+    expect(find.text('Missed'), findsOneWidget);
+    expect(find.byIcon(Icons.sticky_note_2), findsOneWidget);
+    expect(find.byIcon(Icons.favorite), findsWidgets);
   });
 
   testWidgets(
@@ -546,6 +532,9 @@ void main() {
     expect(committed?.taken, isFalse);
     expect(committed?.notes, 'keep me');
     expect(committed?.heart, isTrue);
+    // Day sheet remains so Missed/Taken can still be tapped.
+    expect(find.text('Missed'), findsOneWidget);
+    expect(find.text('Taken'), findsOneWidget);
   });
 
   testWidgets('onCommit: Taken still autosaves status + note + heart',
@@ -594,6 +583,69 @@ void main() {
     expect(committed?.notes, 'with note');
     expect(committed?.heart, isTrue);
   });
+
+  for (final brightness in Brightness.values) {
+    testWidgets(
+      'onCommit: Pronto keeps day sheet open for Taken ($brightness)',
+      (tester) async {
+        final commits = <DayEditResult>[];
+        const strings = Strings(false);
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: buildApp217Theme(
+              brightness: brightness,
+              palette: AppPalette.azure,
+            ),
+            home: Scaffold(
+              body: Builder(
+                builder: (context) => TextButton(
+                  onPressed: () async {
+                    await showModalBottomSheet<void>(
+                      context: context,
+                      isScrollControlled: true,
+                      builder: (_) => DayEditorSheet(
+                        strings: strings,
+                        date: '2026-10-01',
+                        initialTaken: null,
+                        initialNotes: '',
+                        initialHeart: false,
+                        hadEntry: false,
+                        onCommit: commits.add,
+                      ),
+                    );
+                  },
+                  child: const Text('open'),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.tap(find.text('open'));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byTooltip(strings.addNote));
+        await tester.pumpAndSettle();
+        await tester.enterText(find.byType(TextField), 'stay open');
+        await tester.tap(find.text(strings.done));
+        await tester.pumpAndSettle();
+
+        expect(commits, hasLength(1));
+        expect(commits.single.taken, isNull);
+        expect(commits.single.notes, 'stay open');
+        // Note dialog gone; day sheet still shows status buttons.
+        expect(find.byType(TextField), findsNothing);
+        expect(find.text(strings.takenLabel), findsOneWidget);
+        expect(find.text(strings.missedLabel), findsOneWidget);
+
+        // Can tap Taken without reopening the day card.
+        await tester.tap(find.text(strings.takenLabel));
+        await tester.pumpAndSettle();
+        expect(commits, hasLength(2));
+        expect(commits.last.taken, isTrue);
+        expect(commits.last.notes, 'stay open');
+      },
+    );
+  }
 
   for (final brightness in Brightness.values) {
     testWidgets(
