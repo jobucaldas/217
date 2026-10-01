@@ -15,7 +15,7 @@ class CalendarScreen extends StatefulWidget {
     required this.strings,
     required this.onLogout,
     required this.onOpenSettings,
-    this.palette = AppPalette.forest,
+    this.palette = AppPalette.azure,
   });
 
   final ApiClient api;
@@ -346,69 +346,69 @@ class _MonthGrid extends StatelessWidget {
         : const ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
     final rowCount = ((leading + daysInMonth) / 7).ceil();
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        const hPad = 12.0;
-        const headerH = 28.0;
-        final usableH =
-            (constraints.maxHeight - headerH - bottomInset).clamp(120.0, 4000.0);
-        final usableW = constraints.maxWidth - hPad * 2;
-        final cellW = usableW / 7;
-        final cellH = usableH / rowCount;
-        final aspect = (cellW / cellH).clamp(0.55, 1.35);
+    Widget slot(int index) {
+      if (index < leading || index >= leading + daysInMonth) {
+        return const SizedBox.expand();
+      }
+      final day = index - leading + 1;
+      final date = DateTime(month.year, month.month, day);
+      return _DayCell(
+        day: date,
+        today: today,
+        todayLabel: todayLabel,
+        entry: entries[DateFormat('yyyy-MM-dd').format(date)],
+        onTap: onDayTap,
+        palette: palette,
+      );
+    }
 
-        return Padding(
-          padding: EdgeInsets.fromLTRB(hPad, 4, hPad, bottomInset),
-          child: Column(
-            children: [
-              SizedBox(
-                height: headerH,
-                child: Row(
-                  children: [
-                    for (final label in weekdayLabels)
-                      Expanded(
-                        child: Center(
-                          child: Text(
-                            label,
-                            style: Theme.of(context)
-                                .textTheme
-                                .labelMedium
-                                ?.copyWith(
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .onSurfaceVariant,
-                                ),
-                          ),
-                        ),
+    // Exact-fit rows: each week gets 1/rowCount of remaining height so the
+    // full month never crops on short or ultrawide viewports (GridView
+    // aspect-ratio clamps used to overflow).
+    return Padding(
+      padding: EdgeInsets.fromLTRB(12, 4, 12, bottomInset),
+      child: Column(
+        children: [
+          SizedBox(
+            height: 28,
+            child: Row(
+              children: [
+                for (final label in weekdayLabels)
+                  Expanded(
+                    child: Center(
+                      child: Text(
+                        label,
+                        style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurfaceVariant,
+                            ),
                       ),
-                  ],
-                ),
-              ),
-              Expanded(
-                child: GridView.count(
-                  physics: const NeverScrollableScrollPhysics(),
-                  crossAxisCount: 7,
-                  childAspectRatio: aspect,
-                  children: [
-                    for (var i = 0; i < leading; i++) const SizedBox.shrink(),
-                    for (var day = 1; day <= daysInMonth; day++)
-                      _DayCell(
-                        day: DateTime(month.year, month.month, day),
-                        today: today,
-                        todayLabel: todayLabel,
-                        entry: entries[DateFormat('yyyy-MM-dd').format(
-                          DateTime(month.year, month.month, day),
-                        )],
-                        onTap: onDayTap,
-                        palette: palette,
-                      ),
-                  ],
-                ),
-              ),
-            ],
+                    ),
+                  ),
+              ],
+            ),
           ),
-        );
-      },
+          Expanded(
+            child: Column(
+              children: [
+                for (var row = 0; row < rowCount; row++)
+                  Expanded(
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        for (var col = 0; col < 7; col++)
+                          Expanded(
+                            child: slot(row * 7 + col),
+                          ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -445,7 +445,7 @@ class _DayCell extends StatelessWidget {
         day.day == today.day;
     final isFuture = day.isAfter(today);
     final emptyBg = Color.alphaBlend(
-      scheme.onSurface.withValues(alpha: isFuture ? 0.04 : 0.10),
+      scheme.onSurface.withValues(alpha: isFuture ? 0.05 : 0.08),
       scheme.surface,
     );
     final onCell = bg == null

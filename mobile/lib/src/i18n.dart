@@ -35,7 +35,7 @@ class Strings {
   String get themeLight => pt ? 'Claro' : 'Light';
   String get themeDark => pt ? 'Escuro' : 'Dark';
   String get colorTheme => pt ? 'Cores' : 'Colors';
-  String get paletteForest => pt ? 'Floresta' : 'Forest';
+  String get paletteAzure => pt ? 'Azul' : 'Azure';
   String get paletteMint => pt ? 'Menta' : 'Mint';
   String get palettePlum => pt ? 'Ameixa' : 'Plum';
   String get today => pt ? 'Hoje' : 'Today';

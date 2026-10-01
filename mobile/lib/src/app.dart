@@ -30,7 +30,7 @@ class _App217State extends State<App217> {
   bool _loading = true;
   bool _portuguese = true;
   ThemeMode _themeMode = ThemeMode.system;
-  AppPalette _palette = AppPalette.forest;
+  AppPalette _palette = AppPalette.azure;
   bool _reminderHintDismissed = false;
 
   Strings get _strings => Strings(_portuguese);
@@ -255,8 +255,8 @@ class _SettingsPageState extends State<SettingsPage> {
 
   String _paletteLabel(AppPalette p) {
     switch (p) {
-      case AppPalette.forest:
-        return widget.strings.paletteForest;
+      case AppPalette.azure:
+        return widget.strings.paletteAzure;
       case AppPalette.mint:
         return widget.strings.paletteMint;
       case AppPalette.plum:
