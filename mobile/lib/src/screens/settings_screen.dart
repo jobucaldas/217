@@ -219,22 +219,26 @@ class _SettingsPageState extends State<SettingsPage> {
           _SettingsSection(
             children: [
               Padding(
-                padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
-                child: SegmentedButton<bool>(
-                  showSelectedIcon: false,
-                  segments: [
-                    ButtonSegment(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                child: DropdownMenu<bool>(
+                  key: ValueKey(widget.portuguese),
+                  initialSelection: widget.portuguese,
+                  label: Text(widget.strings.language),
+                  expandedInsets: EdgeInsets.zero,
+                  dropdownMenuEntries: [
+                    DropdownMenuEntry(
                       value: true,
-                      label: Text(widget.strings.languagePortuguese),
+                      label: widget.strings.languagePortuguese,
                     ),
-                    ButtonSegment(
+                    DropdownMenuEntry(
                       value: false,
-                      label: Text(widget.strings.languageEnglish),
+                      label: widget.strings.languageEnglish,
                     ),
                   ],
-                  selected: {widget.portuguese},
-                  onSelectionChanged: (value) =>
-                      widget.onPortugueseChanged(value.first),
+                  onSelected: (value) {
+                    if (value == null) return;
+                    widget.onPortugueseChanged(value);
+                  },
                 ),
               ),
             ],
