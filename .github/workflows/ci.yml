@@ -122,31 +122,22 @@ jobs:
           path: mobile/build/web
           retention-days: 3
 
-  # Main-only: release APK + GHCR images after all CI jobs succeed.
-  nightly-apk:
-    name: Nightly Android APK → GitHub Release
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [backend, mobile, workos-smoke, flutter-web-build]
+  # Deploy-shaped artifact: Android release APK (same toolchain image as other Flutter jobs).
+  mobile-apk-build:
+    name: Flutter Android release APK
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    container:
+      image: ghcr.io/cirruslabs/flutter:stable
     env:
       WORKOS_CLIENT_ID: ${{ secrets.WORKOS_CLIENT_ID }}
       NIGHTLY_API_BASE_URL: ${{ secrets.NIGHTLY_API_BASE_URL }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-      - uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          cache: true
       - name: Build release APK
         working-directory: mobile
         run: |
           set -euo pipefail
+          git config --global --add safe.directory /sdks/flutter || true
           flutter pub get
           CID="${WORKOS_CLIENT_ID:-client_01M3QCMK75B35RPC8EAJA5GREP}"
           # Optional secret; default matches deploy/kustomize APP_BASE_URL (HTTPS Serve).
@@ -155,12 +146,34 @@ jobs:
             --dart-define=API_BASE_URL="$API" \
             --dart-define=WORKOS_CLIENT_ID="$CID"
           test -f build/app/outputs/flutter-apk/app-release.apk
-          cp build/app/outputs/flutter-apk/app-release.apk ../217-nightly.apk
+          cp build/app/outputs/flutter-apk/app-release.apk /github/home/217-nightly.apk
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-nightly-apk
+          path: /github/home/217-nightly.apk
+          retention-days: 3
+
+  # Main-only: attach APK to rolling nightly release after all CI jobs succeed.
+  nightly-apk:
+    name: Nightly Android APK → GitHub Release
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [backend, mobile, workos-smoke, flutter-web-build, mobile-apk-build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download APK
+        uses: actions/download-artifact@v4
+        with:
+          name: android-nightly-apk
+          path: dist
       - name: Publish rolling nightly release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          test -f dist/217-nightly.apk
           SHORT_SHA="${GITHUB_SHA:0:7}"
           NOTES="$(printf '%s\n' \
             "Rolling nightly from \`${SHORT_SHA}\` on \`main\`." \
@@ -177,12 +190,12 @@ jobs:
               --notes "${NOTES}" \
               --prerelease
           fi
-          gh release upload nightly 217-nightly.apk --clobber
+          gh release upload nightly dist/217-nightly.apk --clobber
 
   ghcr-images:
     name: GHCR images (nightly + datetime_sha)
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [backend, mobile, workos-smoke, flutter-web-build]
+    needs: [backend, mobile, workos-smoke, flutter-web-build, mobile-apk-build]
     runs-on: ubuntu-latest
     permissions:
       contents: read
