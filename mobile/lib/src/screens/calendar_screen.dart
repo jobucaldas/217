@@ -240,7 +240,9 @@ class _CalendarScreenState extends State<CalendarScreen>
         initialHeart: existing?.heart ?? false,
         hadEntry: existing != null,
         onCommit: (result) {
-          _persistDay(key, result);
+          _persistDay(key, result).catchError((Object err) {
+            if (mounted) setState(() => _error = err.toString());
+          });
         },
       ),
     );
