@@ -163,6 +163,11 @@ jobs:
     permissions:
       contents: write
     steps:
+      # gh release resolves the repo via git / GH_REPO; without checkout it fails with
+      # "fatal: not a git repository" even though only the APK artifact is published.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
       - name: Download APK
         uses: actions/download-artifact@v4
         with:
@@ -171,6 +176,7 @@ jobs:
       - name: Publish nightly + datetime_sha releases
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           COMMIT_TIMESTAMP: ${{ github.event.head_commit.timestamp }}
         run: |
           set -euo pipefail
