@@ -6,6 +6,7 @@ import '../i18n.dart';
 import '../models.dart';
 import '../theme/app_theme.dart';
 import 'reminder_settings_screen.dart';
+import 'today_nudge.dart';
 
 class CalendarScreen extends StatefulWidget {
   const CalendarScreen({
@@ -30,6 +31,7 @@ class CalendarScreen extends StatefulWidget {
 class _CalendarScreenState extends State<CalendarScreen> {
   late DateTime _month;
   Map<String, Entry> _entries = {};
+  Entry? _todayEntry;
   bool _loading = true;
   String? _error;
   String _reminderSummary = '';
@@ -38,6 +40,8 @@ class _CalendarScreenState extends State<CalendarScreen> {
     final now = DateTime.now();
     return DateTime(now.year, now.month, now.day);
   }
+
+  String get _todayKey => DateFormat('yyyy-MM-dd').format(_today);
 
   @override
   void initState() {
@@ -68,8 +72,28 @@ class _CalendarScreenState extends State<CalendarScreen> {
         // Reminders are optional; calendar still works.
       }
       if (!mounted) return;
+      final map = {for (final e in entries) e.date: e};
+      Entry? todayEntry;
+      final today = _today;
+      if (_month.year == today.year && _month.month == today.month) {
+        todayEntry = map[_todayKey];
+      } else {
+        try {
+          final list = await widget.api.listEntries(today.year, today.month);
+          for (final e in list) {
+            if (e.date == _todayKey) {
+              todayEntry = e;
+              break;
+            }
+          }
+        } catch (_) {
+          todayEntry = _todayEntry;
+        }
+      }
+      if (!mounted) return;
       setState(() {
-        _entries = {for (final e in entries) e.date: e};
+        _entries = map;
+        _todayEntry = todayEntry;
         _reminderSummary = reminder;
         _loading = false;
       });
@@ -84,7 +108,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
 
   Future<void> _openDay(DateTime day) async {
     final key = DateFormat('yyyy-MM-dd').format(day);
-    final existing = _entries[key];
+    final existing = key == _todayKey ? _todayEntry : _entries[key];
     final result = await showModalBottomSheet<_DayEditResult>(
       context: context,
       isScrollControlled: true,
@@ -105,19 +129,18 @@ class _CalendarScreenState extends State<CalendarScreen> {
   Widget build(BuildContext context) {
     final locale = widget.strings.pt ? 'pt_BR' : 'en_US';
     final monthLabel = DateFormat.yMMMM(locale).format(_month);
-    final todayKey = DateFormat('yyyy-MM-dd').format(_today);
-    final todayEntry = _entries[todayKey];
     final scheme = Theme.of(context).colorScheme;
     final text = Theme.of(context).textTheme;
-    final todayStatus = todayEntry == null
+    final brightness = Theme.of(context).brightness;
+    final todayStatus = _todayEntry == null
         ? widget.strings.unrecorded
-        : (todayEntry.taken ? widget.strings.taken : widget.strings.missed);
-    final todayColor = todayEntry == null
+        : (_todayEntry!.taken ? widget.strings.taken : widget.strings.missed);
+    final todayColor = _todayEntry == null
         ? scheme.onSurfaceVariant
-        : (todayEntry.taken ? App217Colors.taken : App217Colors.missed);
+        : (_todayEntry!.taken
+            ? App217Colors.statusTaken(brightness)
+            : App217Colors.statusMissed(brightness));
     final humanDate = DateFormat.MMMMd(locale).format(_today);
-    final primaryLabel =
-        todayEntry == null ? widget.strings.recordToday : widget.strings.updateToday;
 
     return Scaffold(
       appBar: AppBar(
@@ -135,127 +158,144 @@ class _CalendarScreenState extends State<CalendarScreen> {
           ),
         ],
       ),
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+      body: Stack(
         children: [
-          // One job: today's intake — status + single primary action.
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  widget.strings.today,
-                  style: text.labelLarge?.copyWith(
-                    color: scheme.onSurfaceVariant,
-                    letterSpacing: 0.6,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.baseline,
-                  textBaseline: TextBaseline.alphabetic,
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Status only — no mid-screen CTA (nudge is bottom-end).
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Expanded(
-                      child: Text(humanDate, style: text.headlineMedium),
-                    ),
                     Text(
-                      todayStatus,
-                      style: text.titleLarge?.copyWith(color: todayColor),
+                      widget.strings.today,
+                      style: text.labelLarge?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                        letterSpacing: 0.6,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.baseline,
+                      textBaseline: TextBaseline.alphabetic,
+                      children: [
+                        Expanded(
+                          child: Text(humanDate, style: text.headlineMedium),
+                        ),
+                        Text(
+                          todayStatus,
+                          style: text.titleLarge?.copyWith(color: todayColor),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    InkWell(
+                      onTap: () async {
+                        await Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => ReminderSettingsScreen(
+                              api: widget.api,
+                              strings: widget.strings,
+                            ),
+                          ),
+                        );
+                        if (mounted) await _load();
+                      },
+                      child: Text(
+                        _reminderSummary.isEmpty
+                            ? widget.strings.reminderNotReady
+                            : _reminderSummary,
+                        style: text.bodyMedium?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                          decoration: TextDecoration.underline,
+                          decorationColor:
+                              scheme.onSurfaceVariant.withValues(alpha: 0.45),
+                        ),
+                      ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 6),
-                InkWell(
-                  onTap: () async {
-                    await Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => ReminderSettingsScreen(
-                          api: widget.api,
-                          strings: widget.strings,
-                        ),
-                      ),
-                    );
-                    if (mounted) await _load();
-                  },
-                  child: Text(
-                    _reminderSummary.isEmpty
-                        ? widget.strings.reminderNotReady
-                        : _reminderSummary,
-                    style: text.bodyMedium?.copyWith(
-                      decoration: TextDecoration.underline,
-                      decorationColor: scheme.onSurfaceVariant.withValues(alpha: 0.4),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
+                child: Row(
+                  children: [
+                    _LegendDot(
+                      color: App217Colors.statusTaken(brightness),
+                      label: widget.strings.legendTaken,
                     ),
-                  ),
+                    const SizedBox(width: 14),
+                    _LegendDot(
+                      color: App217Colors.statusMissed(brightness),
+                      label: widget.strings.legendMissed,
+                    ),
+                    const SizedBox(width: 14),
+                    _LegendDot(
+                      color: scheme.onSurfaceVariant,
+                      label: widget.strings.legendUnrecorded,
+                      outlined: true,
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 14),
-                FilledButton(
-                  onPressed: () => _openDay(_today),
-                  child: Text(primaryLabel),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: Row(
+                  children: [
+                    IconButton(
+                      tooltip: monthLabel,
+                      onPressed: () {
+                        setState(
+                          () => _month = DateTime(_month.year, _month.month - 1),
+                        );
+                        _load();
+                      },
+                      icon: const Icon(Icons.chevron_left),
+                    ),
+                    Expanded(
+                      child: Text(
+                        monthLabel,
+                        textAlign: TextAlign.center,
+                        style: text.titleLarge,
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () {
+                        setState(
+                          () => _month = DateTime(_month.year, _month.month + 1),
+                        );
+                        _load();
+                      },
+                      icon: const Icon(Icons.chevron_right),
+                    ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+              if (_loading) const LinearProgressIndicator(minHeight: 2),
+              if (_error != null)
+                Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                  child: Text(_error!, style: TextStyle(color: scheme.error)),
+                ),
+              Expanded(
+                child: _MonthGrid(
+                  month: _month,
+                  today: _today,
+                  entries: _entries,
+                  onDayTap: _openDay,
+                  todayLabel: widget.strings.today,
+                  portuguese: widget.strings.pt,
+                ),
+              ),
+            ],
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
-            child: Row(
-              children: [
-                _LegendDot(color: App217Colors.taken, label: widget.strings.legendTaken),
-                const SizedBox(width: 14),
-                _LegendDot(color: App217Colors.missed, label: widget.strings.legendMissed),
-                const SizedBox(width: 14),
-                _LegendDot(
-                  color: scheme.outline,
-                  label: widget.strings.legendUnrecorded,
-                  outlined: true,
-                ),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            child: Row(
-              children: [
-                IconButton(
-                  tooltip: monthLabel,
-                  onPressed: () {
-                    setState(() => _month = DateTime(_month.year, _month.month - 1));
-                    _load();
-                  },
-                  icon: const Icon(Icons.chevron_left),
-                ),
-                Expanded(
-                  child: Text(
-                    monthLabel,
-                    textAlign: TextAlign.center,
-                    style: text.titleLarge,
-                  ),
-                ),
-                IconButton(
-                  onPressed: () {
-                    setState(() => _month = DateTime(_month.year, _month.month + 1));
-                    _load();
-                  },
-                  icon: const Icon(Icons.chevron_right),
-                ),
-              ],
-            ),
-          ),
-          if (_loading) const LinearProgressIndicator(minHeight: 2),
-          if (_error != null)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-              child: Text(_error!, style: TextStyle(color: scheme.error)),
-            ),
-          Expanded(
-            child: _MonthGrid(
-              month: _month,
-              today: _today,
-              entries: _entries,
-              onDayTap: _openDay,
-              todayLabel: widget.strings.today,
-              portuguese: widget.strings.pt,
-            ),
+          TodayNudge(
+            strings: widget.strings,
+            todayEntry: _todayEntry,
+            onRecord: () => _openDay(_today),
           ),
         ],
       ),
@@ -289,7 +329,12 @@ class _LegendDot extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 6),
-        Text(label, style: Theme.of(context).textTheme.labelLarge),
+        Text(
+          label,
+          style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                color: Theme.of(context).colorScheme.onSurface,
+              ),
+        ),
       ],
     );
   }
@@ -336,7 +381,8 @@ class _MonthGrid extends StatelessWidget {
           day: DateTime(month.year, month.month, day),
           today: today,
           todayLabel: todayLabel,
-          entry: entries[DateFormat('yyyy-MM-dd').format(DateTime(month.year, month.month, day))],
+          entry: entries[DateFormat('yyyy-MM-dd')
+              .format(DateTime(month.year, month.month, day))],
           onTap: onDayTap,
         ),
     ];
@@ -366,22 +412,31 @@ class _DayCell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final brightness = Theme.of(context).brightness;
     Color? bg;
     if (entry != null) {
-      bg = entry!.taken ? App217Colors.taken : App217Colors.missed;
+      bg = entry!.taken
+          ? App217Colors.cellTaken(brightness)
+          : App217Colors.cellMissed(brightness);
     }
-    final isToday = day.year == today.year && day.month == today.month && day.day == today.day;
+    final isToday =
+        day.year == today.year && day.month == today.month && day.day == today.day;
     final isFuture = day.isAfter(today);
+    final emptyBg = Color.alphaBlend(
+      scheme.onSurface.withValues(alpha: isFuture ? 0.04 : 0.10),
+      scheme.surface,
+    );
+    final onEmpty = scheme.onSurface;
     return InkWell(
       onTap: isFuture ? null : () => onTap(day),
       borderRadius: BorderRadius.circular(12),
       child: Container(
         margin: const EdgeInsets.all(3),
         decoration: BoxDecoration(
-          color: bg ?? scheme.surface.withValues(alpha: isFuture ? 0.25 : 0.7),
+          color: bg ?? emptyBg,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: isToday ? App217Colors.forest : scheme.outline.withValues(alpha: 0.4),
+            color: isToday ? scheme.primary : scheme.outline.withValues(alpha: 0.55),
             width: isToday ? 2.2 : 1,
           ),
         ),
@@ -391,7 +446,7 @@ class _DayCell extends StatelessWidget {
             Text(
               '${day.day}',
               style: TextStyle(
-                color: bg == null ? scheme.onSurface : Colors.white,
+                color: bg == null ? onEmpty : Colors.white,
                 fontWeight: isToday ? FontWeight.w800 : FontWeight.w500,
               ),
             ),
@@ -401,7 +456,7 @@ class _DayCell extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 9,
                   fontWeight: FontWeight.w800,
-                  color: bg == null ? App217Colors.forest : Colors.white,
+                  color: bg == null ? scheme.primary : Colors.white,
                 ),
               ),
           ],
@@ -436,7 +491,8 @@ class _DayEditor extends StatefulWidget {
 
 class _DayEditorState extends State<_DayEditor> {
   late bool? _taken = widget.initialTaken;
-  late final TextEditingController _notes = TextEditingController(text: widget.initialNotes);
+  late final TextEditingController _notes =
+      TextEditingController(text: widget.initialNotes);
 
   @override
   void dispose() {
@@ -448,6 +504,7 @@ class _DayEditorState extends State<_DayEditor> {
   Widget build(BuildContext context) {
     final locale = widget.strings.pt ? 'pt_BR' : 'en_US';
     final human = DateFormat.yMMMMd(locale).format(DateTime.parse(widget.date));
+    final scheme = Theme.of(context).colorScheme;
     return Padding(
       padding: EdgeInsets.only(
         left: 20,
@@ -463,17 +520,22 @@ class _DayEditorState extends State<_DayEditor> {
           const SizedBox(height: 6),
           Text(
             widget.strings.pickStatus,
-            style: Theme.of(context).textTheme.bodyLarge,
+            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
           ),
           const SizedBox(height: 14),
           SegmentedButton<bool>(
             emptySelectionAllowed: true,
             segments: [
-              ButtonSegment(value: true, label: Text(widget.strings.takenLabel)),
-              ButtonSegment(value: false, label: Text(widget.strings.missedLabel)),
+              ButtonSegment(
+                  value: true, label: Text(widget.strings.takenLabel)),
+              ButtonSegment(
+                  value: false, label: Text(widget.strings.missedLabel)),
             ],
             selected: {if (_taken != null) _taken!},
-            onSelectionChanged: (value) => setState(() => _taken = value.isEmpty ? null : value.first),
+            onSelectionChanged: (value) =>
+                setState(() => _taken = value.isEmpty ? null : value.first),
           ),
           const SizedBox(height: 14),
           TextField(
