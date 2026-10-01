@@ -1,9 +1,6 @@
 # dependencies
 node_modules/
 
-# devcontainer
-.devcontainer/.env
-
 # Build output
 backend/bin/
 backend/server
@@ -12,6 +9,7 @@ backend/server
 .DS_Store
 
 # local env files
+.env
 .env*.local
 
 # generated validation artifacts
@@ -20,9 +18,6 @@ artifacts/screenshots/
 artifacts/test-results/
 artifacts/run-recovery/
 artifacts/android/
-
-# Workspace-local Nix development tools
-.dev-tools/
 
 # Flutter / mobile
 mobile/.dart_tool/
@@ -37,16 +32,8 @@ mobile/**/GeneratedPluginRegistrant.*
 .gomodcache/
 .gocache/
 
-# Legacy Expo tree (not part of this rewrite)
+# Legacy / abandoned local trees (not part of this rewrite)
 217/
-
-# Abandoned Dioxus/wasm recovery snapshots (client is Flutter only)
 .local-recovery/
-
-# web static notice
-# (tracked)
-.env
-frontend/dist/
-frontend/target/
-pi-session-*.html
 *.apk
+pi-session-*.html

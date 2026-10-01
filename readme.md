@@ -1,76 +1,57 @@
 # 217
 
-Private bilingual (Português/English) anticonceptional intake tracker. The **Flutter** client (web + Android) records taken/missed status and notes. The Go API stores each account's data in PostgreSQL and authenticates users with **WorkOS AuthKit** (PKCE). Opaque, revocable server sessions are returned as bearer tokens (Android) or `HttpOnly` cookies (browser).
+Private bilingual (Português/English) anticonceptional intake tracker.
+
+**Flutter** client (web + Android) + **Go** API + PostgreSQL, authenticated with **WorkOS AuthKit** (PKCE). Browser sessions use `HttpOnly` cookies; Android uses bearer tokens.
 
 ## Requirements
 
-Only Podman and podman-compose are required on the host. Go and Flutter tooling run inside containers — do not install project SDKs on the host.
+Podman and podman-compose on the host. Go and Flutter tooling run in containers — do not install project SDKs on the host.
 
-## Start locally
+## Local development
 
-Copy `.env.example` to ignored `.env.local`. Set `WORKOS_API_KEY` from the WorkOS Dashboard (server-only). `WORKOS_CLIENT_ID` is public. In WorkOS, register redirect URIs:
+Copy `.env.example` to ignored `.env.local`. Set `WORKOS_API_KEY` from the WorkOS Dashboard (server-only). `WORKOS_CLIENT_ID` is public. Register redirect URIs:
 
-- `http://localhost:8787/api/auth/workos/callback` (browser cookie flow)
-- `com.jobucaldas.a217://auth/callback` (Flutter Android deep link)
-
-Missing WorkOS configuration is non-fatal at startup; auth endpoints return HTTP 503 until configured.
+- `http://localhost:8787/api/auth/workos/callback` (browser)
+- `com.jobucaldas.a217://auth/callback` (Android)
 
 ```sh
-make dev-up
-make mobile-web
+make dev-up       # postgres + Go API + Caddy (:8787)
+make mobile-web   # Flutter web → mobile/build/web
 ```
 
-Open <http://localhost:8787/> for the Flutter web UI (same origin as `/api/*`). Sign-in uses the browser cookie AuthKit path: Continuar com WorkOS → same-origin **Continue** page (keeps the CSRF cookie; Chromium drops it on automatic redirects) → AuthKit → callback → session cookie. Host bind defaults to **8787** (not 8080) so common local/port-forward clashes are avoided; override with `HTTP_PORT=…` and matching `APP_BASE_URL`.
+Open <http://localhost:8787/>. Stop with `make dev-down`. Override host port with `HTTP_PORT=…` and matching `APP_BASE_URL`.
 
-Stop with `make dev-down`.
-
-## Flutter Android client
+## Android
 
 ```sh
 make test-mobile
 make mobile-apk
 ```
 
-Install `mobile/build/app/outputs/flutter-apk/app-debug.apk` on an emulator/device. Emulator default API base is `http://10.0.2.2:8787` (override with `--dart-define=API_BASE_URL=...`).
+Install `mobile/build/app/outputs/flutter-apk/app-debug.apk`. Emulator API base defaults to `http://10.0.2.2:8787` (`--dart-define=API_BASE_URL=...`).
 
-Sign-in opens WorkOS AuthKit in a Chrome Custom Tab, receives the custom-scheme redirect, and exchanges `code` + `code_verifier` with `POST /api/auth/workos/exchange`. The API key never ships in the APK.
-
-## API
-
-Authentication is WorkOS AuthKit only. The verified WorkOS user id (`user_…`) is the primary identity. Verified emails may auto-link an existing legacy account. Successful exchanges create an opaque, revocable server-side session.
-
-| Method | Path | Purpose |
-|---|---|---|
-| GET | `/api/auth/workos` | Start AuthKit authorization (browser cookie + binding) |
-| GET | `/api/auth/workos/callback` | Browser AuthKit callback |
-| POST | `/api/auth/workos/exchange` | Native PKCE exchange `{code,code_verifier,redirect_uri}` → `{user,session_token}` |
-| GET | `/api/auth/session` | Restore current session (cookie or `Authorization: Bearer`) |
-| POST | `/api/auth/logout` | Revoke current session |
-| GET | `/api/entries?year=YYYY&month=MM` | Month entries |
-| GET/POST | `/api/entries/{YYYY-MM-DD}` | Read/upsert `{taken,notes}` |
-| GET | `/api/stats?year=YYYY&month=MM` | Monthly statistics |
-| GET/PUT | `/api/reminders/preferences` | Reminder preference (legacy Web Push paths retained) |
-| GET | `/api/reminders/vapid-public-key` | Public VAPID status/key |
-| POST/DELETE | `/api/reminders/subscriptions` | Push subscription management |
-
-## Container-only validation
+## Tests
 
 ```sh
 make test-backend
 make test-mobile
-make mobile-web
-make mobile-apk
 ```
 
-## Not verified in this change
+## Home-lab deploy
 
-- Live WorkOS sign-in against a real AuthKit user in a browser/emulator (manual tryout at :8787)
-- Authenticated calendar flow end-to-end with a real session from WorkOS
-- Native Android local notifications / FCM replacement for former Web Push reminders
+Kustomize overlays live under `deploy/kustomize/`. Build images after `make mobile-web`:
 
-## Security notes
+```sh
+podman build -t ghcr.io/jobucaldas/app-217-backend:dev -f backend/Dockerfile.prod backend
+podman build -t ghcr.io/jobucaldas/app-217-frontend:dev -f frontend/Dockerfile.prod .
+kubectl --context home-lab apply -k deploy/kustomize/overlays/dev
+```
 
-- Never commit `WORKOS_API_KEY` or other secrets
-- Flutter receives only `WORKOS_CLIENT_ID` (public) via dart-define / defaults
+See `deploy/kustomize/overlays/dev/README.md`.
+
+## Security
+
+- Never commit `WORKOS_API_KEY`
+- Flutter receives only public `WORKOS_CLIENT_ID`
 - Session tokens are stored as SHA-256 digests in PostgreSQL
-- Mutating requests remain origin-guarded for cookie clients; native clients use bearer tokens
