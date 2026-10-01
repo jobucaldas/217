@@ -7,9 +7,9 @@ import 'package:a217/src/theme/contrast.dart';
 void main() {
   for (final brightness in Brightness.values) {
     test('theme $brightness meets WCAG AA for body and status text', () {
-      final theme = buildApp217Theme(brightness: brightness);
-      final scheme = theme.colorScheme;
-      final scaffold = theme.scaffoldBackgroundColor;
+      // ColorScheme only — avoids Google Fonts needing a Flutter binding.
+      final scheme = buildApp217ColorScheme(brightness);
+      final scaffold = scaffoldBackgroundFor(brightness);
 
       expect(
         meetsBodyContrast(scheme.onSurface, scaffold),

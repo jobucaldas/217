@@ -34,9 +34,10 @@ abstract final class App217Colors {
       b == Brightness.dark ? missedFillDark : missed;
 }
 
-ThemeData buildApp217Theme({required Brightness brightness}) {
+/// Colors only — safe for unit tests (no Google Fonts / binding).
+ColorScheme buildApp217ColorScheme(Brightness brightness) {
   final isDark = brightness == Brightness.dark;
-  final scheme = ColorScheme(
+  return ColorScheme(
     brightness: brightness,
     primary: isDark ? const Color(0xFF7BC4AE) : App217Colors.forest,
     onPrimary: isDark ? App217Colors.ink : Colors.white,
@@ -64,6 +65,16 @@ ThemeData buildApp217Theme({required Brightness brightness}) {
     inversePrimary: App217Colors.moss,
     surfaceTint: App217Colors.forest,
   );
+}
+
+Color scaffoldBackgroundFor(Brightness brightness) =>
+    brightness == Brightness.dark
+        ? const Color(0xFF0C1411)
+        : App217Colors.canvas;
+
+ThemeData buildApp217Theme({required Brightness brightness}) {
+  final isDark = brightness == Brightness.dark;
+  final scheme = buildApp217ColorScheme(brightness);
 
   final display = GoogleFonts.frauncesTextTheme();
   final body = GoogleFonts.sourceSans3TextTheme();
@@ -98,7 +109,7 @@ ThemeData buildApp217Theme({required Brightness brightness}) {
     useMaterial3: true,
     colorScheme: scheme,
     textTheme: textTheme,
-    scaffoldBackgroundColor: isDark ? const Color(0xFF0C1411) : App217Colors.canvas,
+    scaffoldBackgroundColor: scaffoldBackgroundFor(brightness),
     appBarTheme: AppBarTheme(
       backgroundColor: Colors.transparent,
       foregroundColor: scheme.onSurface,
