@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../api/client.dart';
@@ -52,10 +53,15 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen> {
     if (deliverable) {
       return '${widget.strings.reminderReady} · $time';
     }
+    if (local?.status == LocalReminderSyncStatus.failed) {
+      return widget.strings.reminderNeedsPush;
+    }
     if (supportsLocalReminders &&
         local?.status == LocalReminderSyncStatus.unsupported) {
-      // Web Notification API present but no background schedule.
-      return widget.strings.reminderWebNeedsPush;
+      // Web can probe Notification API but cannot schedule background dailies.
+      return kIsWeb
+          ? widget.strings.reminderWebNeedsPush
+          : widget.strings.reminderNeedsPush;
     }
     if (supportsLocalReminders) {
       return widget.strings.reminderNeedsPush;
