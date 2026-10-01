@@ -47,12 +47,24 @@ void main() {
             reason: 'missed status (${palette.name}/$brightness)',
           );
           expect(
+            scaffold,
+            brightness == Brightness.dark
+                ? const Color(0xFF121212)
+                : const Color(0xFFF5F5F4),
+            reason: 'pinned scaffold (${palette.name}/$brightness)',
+          );
+          expect(
             meetsBodyContrast(
               scheme.onPrimaryContainer,
               scheme.primaryContainer,
             ),
             isTrue,
             reason: 'nudge chip (${palette.name}/$brightness)',
+          );
+          expect(
+            meetsLargeContrast(scheme.primary, scaffold),
+            isTrue,
+            reason: 'primary accent on scaffold (${palette.name}/$brightness)',
           );
           expect(
             meetsBodyContrast(

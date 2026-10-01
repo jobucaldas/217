@@ -7,26 +7,26 @@ export 'palette.dart';
 
 /// Status helpers used by calendar chrome (palette-aware).
 abstract final class App217Colors {
-  static Color statusTaken(Brightness b, [AppPalette palette = AppPalette.forest]) =>
+  static Color statusTaken(Brightness b, [AppPalette palette = AppPalette.azure]) =>
       PaletteColors.resolve(palette, b).taken;
 
-  static Color statusMissed(Brightness b, [AppPalette palette = AppPalette.forest]) =>
+  static Color statusMissed(Brightness b, [AppPalette palette = AppPalette.azure]) =>
       PaletteColors.resolve(palette, b).missed;
 
-  static Color cellTaken(Brightness b, [AppPalette palette = AppPalette.forest]) =>
+  static Color cellTaken(Brightness b, [AppPalette palette = AppPalette.azure]) =>
       PaletteColors.resolve(palette, b).takenFill;
 
-  static Color cellMissed(Brightness b, [AppPalette palette = AppPalette.forest]) =>
+  static Color cellMissed(Brightness b, [AppPalette palette = AppPalette.azure]) =>
       PaletteColors.resolve(palette, b).missedFill;
 
-  static Color onFilledCell(Brightness b, [AppPalette palette = AppPalette.forest]) =>
+  static Color onFilledCell(Brightness b, [AppPalette palette = AppPalette.azure]) =>
       PaletteColors.resolve(palette, b).onFilledCell;
 }
 
 /// Colors only — safe for unit tests (no Google Fonts / binding).
 ColorScheme buildApp217ColorScheme(
   Brightness brightness, {
-  AppPalette palette = AppPalette.forest,
+  AppPalette palette = AppPalette.azure,
 }) {
   final c = PaletteColors.resolve(palette, brightness);
   return ColorScheme(
@@ -63,13 +63,13 @@ ColorScheme buildApp217ColorScheme(
 
 Color scaffoldBackgroundFor(
   Brightness brightness, {
-  AppPalette palette = AppPalette.forest,
+  AppPalette palette = AppPalette.azure,
 }) =>
     PaletteColors.resolve(palette, brightness).scaffold;
 
 ThemeData buildApp217Theme({
   required Brightness brightness,
-  AppPalette palette = AppPalette.forest,
+  AppPalette palette = AppPalette.azure,
 }) {
   final scheme = buildApp217ColorScheme(brightness, palette: palette);
   final c = PaletteColors.resolve(palette, brightness);
@@ -139,9 +139,24 @@ ThemeData buildApp217Theme({
         }),
         backgroundColor: WidgetStateProperty.resolveWith((states) {
           if (states.contains(WidgetState.selected)) return scheme.primary;
-          return scheme.surface;
+          return Color.alphaBlend(
+            scheme.onSurface.withValues(alpha: 0.06),
+            scheme.surface,
+          );
         }),
+        side: WidgetStatePropertyAll(
+          BorderSide(color: scheme.outline.withValues(alpha: 0.8)),
+        ),
       ),
+    ),
+    chipTheme: ChipThemeData(
+      backgroundColor: scheme.surface,
+      selectedColor: scheme.primaryContainer,
+      labelStyle: textTheme.labelLarge?.copyWith(color: scheme.onSurface),
+      secondaryLabelStyle:
+          textTheme.labelLarge?.copyWith(color: scheme.onPrimaryContainer),
+      side: BorderSide(color: scheme.outline.withValues(alpha: 0.8)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
