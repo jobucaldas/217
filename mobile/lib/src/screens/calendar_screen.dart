@@ -311,16 +311,17 @@ class _CalendarScreenState extends State<CalendarScreen> {
                   todayLabel: widget.strings.today,
                   portuguese: widget.strings.pt,
                   palette: widget.palette,
-                  bottomInset: nudgeVisible ? 72 : 12,
+                  bottomInset: 12,
                 ),
               ),
             ],
           ),
-          TodayNudge(
-            strings: widget.strings,
-            todayEntry: _todayEntry,
-            onRecord: () => _openDay(_today),
-          ),
+          if (nudgeVisible)
+            TodayNudge(
+              strings: widget.strings,
+              todayEntry: _todayEntry,
+              onRecord: () => _openDay(_today),
+            ),
         ],
       ),
     );

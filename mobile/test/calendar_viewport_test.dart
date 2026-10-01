@@ -10,10 +10,13 @@ import 'package:a217/src/screens/calendar_screen.dart';
 import 'package:a217/src/theme/app_theme.dart';
 
 class _FakeCalendarApi extends ApiClient {
-  _FakeCalendarApi() : super(AppConfig.fromEnvironment());
+  _FakeCalendarApi([this.entries = const []])
+      : super(AppConfig.fromEnvironment());
+
+  final List<Entry> entries;
 
   @override
-  Future<List<Entry>> listEntries(int year, int month) async => const [];
+  Future<List<Entry>> listEntries(int year, int month) async => entries;
 
   @override
   Future<Entry> upsertEntry(
@@ -116,4 +119,57 @@ void main() {
       );
     }
   });
+
+  testWidgets(
+    'record-today FAB is a Positioned overlay (grid keeps 12px inset)',
+    (tester) async {
+      const size = Size(390, 844);
+      await tester.binding.setSurfaceSize(size);
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      const gridPadding = EdgeInsets.fromLTRB(12, 4, 12, 12);
+      final reservedForFab = find.byWidgetPredicate(
+        (w) =>
+            w is Padding &&
+            w.padding == const EdgeInsets.fromLTRB(12, 4, 12, 72),
+      );
+      final overlayInset = find.byWidgetPredicate(
+        (w) => w is Padding && w.padding == gridPadding,
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildApp217Theme(
+            brightness: Brightness.light,
+            palette: AppPalette.azure,
+          ),
+          home: MediaQuery(
+            data: const MediaQueryData(size: size),
+            child: CalendarScreen(
+              api: _FakeCalendarApi(),
+              user: const User(
+                id: 'u1',
+                email: 'shot@example.invalid',
+                name: 'Shot',
+              ),
+              strings: const Strings(false),
+              onLogout: () async {},
+              onOpenSettings: () {},
+              palette: AppPalette.azure,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Record today'), findsOneWidget);
+      expect(find.byType(Positioned), findsWidgets);
+      expect(overlayInset, findsOneWidget);
+      expect(
+        reservedForFab,
+        findsNothing,
+        reason: 'FAB must not inflate month-grid bottomInset',
+      );
+    },
+  );
 }

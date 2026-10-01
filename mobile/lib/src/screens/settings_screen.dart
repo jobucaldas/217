@@ -223,7 +223,6 @@ class _SettingsPageState extends State<SettingsPage> {
                 child: DropdownMenu<bool>(
                   key: ValueKey(widget.portuguese),
                   initialSelection: widget.portuguese,
-                  label: Text(widget.strings.language),
                   expandedInsets: EdgeInsets.zero,
                   dropdownMenuEntries: [
                     DropdownMenuEntry(
