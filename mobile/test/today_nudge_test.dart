@@ -37,10 +37,20 @@ void main() {
       expect(find.byIcon(Icons.add), findsOneWidget);
       expect(find.byIcon(Icons.notifications_active_outlined), findsNothing);
       expect(find.byType(Positioned), findsWidgets);
-      // Control is a horizontal pill+plus, not a lone circular FAB.
-      final size = tester.getSize(find.byKey(const ValueKey('today-nudge-control')));
-      expect(size.width, greaterThan(TodayNudge.height));
+      // Control is a text pill with corner plus, not a lone circular FAB.
+      final size =
+          tester.getSize(find.byKey(const ValueKey('today-nudge-control')));
+      expect(size.width, greaterThan(TodayNudge.pillHeight));
       expect(size.height, TodayNudge.height);
+      // Plus sits on the pill’s top-right corner (higher than pill midline).
+      final plusCenter = tester.getCenter(find.byIcon(Icons.add));
+      final controlTopLeft =
+          tester.getTopLeft(find.byKey(const ValueKey('today-nudge-control')));
+      expect(plusCenter.dy, lessThan(controlTopLeft.dy + TodayNudge.pillHeight / 2));
+      expect(
+        plusCenter.dx,
+        greaterThan(controlTopLeft.dx + size.width * 0.55),
+      );
     });
 
     testWidgets('today nudge shows Update today in English ($brightness)',
@@ -131,7 +141,12 @@ void main() {
       await tester.pumpAndSettle();
 
       final end = tester.getCenter(find.byIcon(Icons.add));
-      expect(end.dx, lessThan(120)); // snapped to left
+      // Plus stays on the pill’s top-right corner; after left snap the whole
+      // control is near the left edge (plus center still inset from left).
+      expect(end.dx, lessThan(start.dx - 80));
+      final controlLeft =
+          tester.getTopLeft(find.byKey(const ValueKey('today-nudge-control'))).dx;
+      expect(controlLeft, lessThan(40));
     });
   }
 }
