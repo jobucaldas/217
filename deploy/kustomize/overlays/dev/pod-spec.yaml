@@ -5,5 +5,7 @@ metadata:
 spec:
   template:
     spec:
+      imagePullSecrets:
+        - name: app-217-ghcr
       nodeSelector:
         kubernetes.io/hostname: app-node

@@ -7,19 +7,22 @@ resources:
   - ../../base
   - namespace.yaml
   - ingress.yaml
+  - nightly-updater.yaml
 
 images:
   - name: app-217-backend
     newName: ghcr.io/jobucaldas/app-217-backend
-    newTag: dev
+    newTag: nightly
   - name: app-217-frontend
     newName: ghcr.io/jobucaldas/app-217-frontend
-    newTag: dev
+    newTag: nightly
 
 patches:
-  - path: node-selector.yaml
+  - path: pod-spec.yaml
     target:
       kind: Deployment
+  - path: pull-always-backend.yaml
+  - path: pull-always-frontend.yaml
 
 configMapGenerator:
   - name: app-217-backend-config
