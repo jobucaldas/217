@@ -135,8 +135,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build release APK
         working-directory: mobile
+        # Flutter container default shell is dash (`sh`); avoid bash-only `pipefail`.
         run: |
-          set -euo pipefail
           git config --global --add safe.directory /sdks/flutter || true
           flutter pub get
           CID="${WORKOS_CLIENT_ID:-client_01M3QCMK75B35RPC8EAJA5GREP}"
