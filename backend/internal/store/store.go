@@ -14,6 +14,7 @@ type Store interface {
 	GetEntry(userID, date string) (*model.Entry, error)
 	ListEntries(userID string, year, month int) ([]*model.Entry, error)
 	UpsertEntry(userID, date string, req model.UpsertRequest) (*model.Entry, error)
+	DeleteEntry(userID, date string) error
 	GetStats(userID string, year, month int) (*model.Stats, error)
 
 	GetReminderPreference(userID string) (*model.ReminderPreference, error)

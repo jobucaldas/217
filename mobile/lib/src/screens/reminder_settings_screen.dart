@@ -2,8 +2,9 @@ import 'package:flutter/material.dart';
 
 import '../api/client.dart';
 import '../i18n.dart';
+import '../notifications/local_reminders.dart';
 
-/// Skim-friendly reminder schedule: on/off + time + one status line.
+/// Reminder schedule: on/off + time + honest platform status.
 class ReminderSettingsScreen extends StatefulWidget {
   const ReminderSettingsScreen({
     super.key,
@@ -49,10 +50,12 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen> {
         _timezone = pref?.timezone ?? 'UTC';
         _vapidConfigured = vapid.configured;
         _status = pref == null
-            ? null
-            : (pref.deliverable
-                ? '${widget.strings.reminderReady} · ${pref.time}'
-                : widget.strings.reminderNotReady);
+            ? widget.strings.reminderNotReady
+            : (pref.enabled
+                ? (pref.deliverable || supportsLocalReminders
+                    ? '${widget.strings.reminderReady} · ${pref.time}'
+                    : widget.strings.reminderNeedsPush)
+                : widget.strings.remindersOff);
         _loading = false;
       });
     } catch (err) {
@@ -86,6 +89,16 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen> {
       _status = null;
     });
     try {
+      // Best-effort local schedule (thin path). Full OS delivery is a follow-on.
+      if (supportsLocalReminders) {
+        await syncLocalDailyReminder(
+          enabled: nextEnabled,
+          timeHhMm: _time,
+          title: '217',
+          body: widget.strings.recordToday,
+        );
+      }
+
       final tz = _timezone.isEmpty ? 'UTC' : _timezone;
       final saved = await widget.api.upsertReminderPreference(
         enabled: nextEnabled,
@@ -97,11 +110,11 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen> {
         _enabled = saved.enabled;
         _time = saved.time;
         _timezone = saved.timezone;
-        _status = saved.deliverable
-            ? '${widget.strings.reminderReady} · ${saved.time}'
-            : (saved.enabled
-                ? widget.strings.reminderNeedsPush
-                : widget.strings.remindersOff);
+        _status = saved.enabled
+            ? ((saved.deliverable || supportsLocalReminders)
+                ? '${widget.strings.reminderReady} · ${saved.time}'
+                : widget.strings.reminderNeedsPush)
+            : widget.strings.remindersOff;
         _saving = false;
       });
       ScaffoldMessenger.of(context).showSnackBar(
@@ -109,15 +122,11 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen> {
       );
     } catch (err) {
       if (!mounted) return;
-      final needsPush = err.toString().contains('needs_push');
       setState(() {
         _saving = false;
-        _enabled = false;
-        _error = needsPush
-            ? widget.strings.reminderNeedsPush
-            : (!_vapidConfigured
-                ? widget.strings.reminderUnavailable
-                : err.toString());
+        _error = (!_vapidConfigured && !supportsLocalReminders)
+            ? widget.strings.reminderUnavailable
+            : err.toString();
       });
     }
   }
@@ -125,6 +134,7 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
     return Scaffold(
       appBar: AppBar(title: Text(widget.strings.reminders)),
       body: _loading
@@ -132,6 +142,20 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen> {
           : ListView(
               padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
               children: [
+                Material(
+                  color: scheme.secondaryContainer,
+                  borderRadius: BorderRadius.circular(12),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Text(
+                      widget.strings.reminderNativeNote,
+                      style: text.bodyMedium?.copyWith(
+                        color: scheme.onSecondaryContainer,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   title: Text(widget.strings.reminderEnable),
@@ -152,18 +176,15 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen> {
                   onTap: _saving ? null : _pickTime,
                 ),
                 const SizedBox(height: 8),
-                if (_status != null)
-                  Text(_status!, style: text.bodyMedium),
+                if (_status != null) Text(_status!, style: text.bodyMedium),
                 if (_error != null) ...[
                   const SizedBox(height: 8),
                   Text(
                     _error!,
-                    style: text.bodyMedium?.copyWith(
-                      color: Theme.of(context).colorScheme.error,
-                    ),
+                    style: text.bodyMedium?.copyWith(color: scheme.error),
                   ),
                 ],
-                if (!_vapidConfigured) ...[
+                if (!_vapidConfigured && !supportsLocalReminders) ...[
                   const SizedBox(height: 8),
                   Text(widget.strings.reminderUnavailable, style: text.bodyMedium),
                 ],

@@ -168,6 +168,24 @@ func (s *PGStore) UpsertEntry(userID, date string, req model.UpsertRequest) (*mo
 	return e, nil
 }
 
+func (s *PGStore) DeleteEntry(userID, date string) error {
+	res, err := s.db.Exec(
+		`DELETE FROM entries WHERE user_id = $1 AND date = $2`,
+		userID, date,
+	)
+	if err != nil {
+		return fmt.Errorf("deleting entry: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("deleting entry rows: %w", err)
+	}
+	if n == 0 {
+		return fmt.Errorf("entry not found")
+	}
+	return nil
+}
+
 func (s *PGStore) GetStats(userID string, year, month int) (*model.Stats, error) {
 	firstDay := fmt.Sprintf("%04d-%02d-01", year, month)
 	lastDay := time.Date(year, time.Month(month)+1, 0, 0, 0, 0, 0, time.UTC).Format("2006-01-02")

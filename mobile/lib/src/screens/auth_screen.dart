@@ -10,6 +10,8 @@ class AuthScreen extends StatelessWidget {
     required this.onSignIn,
     required this.onToggleLanguage,
     required this.onOpenSettings,
+    this.showReminderHint = false,
+    this.onDismissReminderHint,
   });
 
   final Strings strings;
@@ -17,6 +19,8 @@ class AuthScreen extends StatelessWidget {
   final Future<void> Function() onSignIn;
   final VoidCallback onToggleLanguage;
   final VoidCallback onOpenSettings;
+  final bool showReminderHint;
+  final Future<void> Function()? onDismissReminderHint;
 
   @override
   Widget build(BuildContext context) {
@@ -33,7 +37,7 @@ class AuthScreen extends StatelessWidget {
             end: Alignment.bottomRight,
             colors: [
               scheme.surface,
-              scheme.primaryContainer.withValues(alpha: 0.72),
+              scheme.primaryContainer.withValues(alpha: 0.55),
               scheme.surface,
             ],
           ),
@@ -49,7 +53,7 @@ class AuthScreen extends StatelessWidget {
                     IconButton(
                       tooltip: strings.settings,
                       onPressed: onOpenSettings,
-                      icon: const Icon(Icons.settings_outlined),
+                      icon: Icon(Icons.settings_outlined, color: scheme.onSurface),
                     ),
                     const Spacer(),
                     TextButton(
@@ -58,6 +62,35 @@ class AuthScreen extends StatelessWidget {
                     ),
                   ],
                 ),
+                if (showReminderHint && onDismissReminderHint != null) ...[
+                  const SizedBox(height: 8),
+                  Material(
+                    color: scheme.secondaryContainer,
+                    borderRadius: BorderRadius.circular(12),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 10, 4, 10),
+                      child: Row(
+                        children: [
+                          Icon(Icons.info_outline,
+                              color: scheme.onSecondaryContainer, size: 20),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              strings.reminderHint,
+                              style: text.bodyMedium?.copyWith(
+                                color: scheme.onSecondaryContainer,
+                              ),
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: onDismissReminderHint,
+                            child: Text(strings.reminderHintDismiss),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
                 const Spacer(),
                 Text(
                   strings.brand,
@@ -68,14 +101,13 @@ class AuthScreen extends StatelessWidget {
                 Text(
                   strings.signInSubtitle,
                   textAlign: TextAlign.center,
-                  style: text.bodyLarge,
+                  style: text.bodyLarge?.copyWith(color: scheme.onSurfaceVariant),
                 ),
                 const SizedBox(height: 36),
                 FilledButton(
                   onPressed: onSignIn,
                   child: Text(strings.continueWorkOS),
                 ),
-                // apiBaseUrl stays in Settings — not on the first viewport.
                 const Spacer(flex: 2),
               ],
             ),

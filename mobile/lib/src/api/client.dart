@@ -192,6 +192,16 @@ class ApiClient {
     return Entry.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
   }
 
+  Future<void> deleteEntry(String date) async {
+    final response = await _send('DELETE', _uri('/api/entries/$date'));
+    if (response.statusCode == 404) {
+      return; // already cleared
+    }
+    if (response.statusCode != 204 && response.statusCode != 200) {
+      throw StateError('delete entry failed: ${response.body}');
+    }
+  }
+
   Future<ReminderPreference?> getReminderPreference() async {
     final response = await _send('GET', _uri('/api/reminders/preferences'));
     if (response.statusCode == 404) return null;
