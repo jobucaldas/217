@@ -715,8 +715,7 @@ class _DayCell extends StatelessWidget {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       if (hasHeart)
-                        const Icon(Icons.favorite,
-                            size: 11, color: Color(0xFFE11D48)),
+                        Icon(Icons.favorite, size: 11, color: onCell),
                       if (hasHeart && hasNote) const SizedBox(width: 2),
                       if (hasNote)
                         Icon(Icons.sticky_note_2_outlined,
@@ -778,21 +777,20 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
   late String _notes = widget.initialNotes;
   late bool _heart = widget.initialHeart;
 
-  /// True when note/heart changed but status was not re-tapped (Save commits).
-  bool get _noteDirty =>
-      _notes.trim() != widget.initialNotes.trim() ||
-      _heart != widget.initialHeart;
+  DayEditResult _saveResult({
+    required bool taken,
+    required String notes,
+    required bool heart,
+  }) =>
+      DayEditResult.save(taken: taken, notes: notes.trim(), heart: heart);
 
-  bool get _canSaveNotesOnly =>
-      _taken != null && _noteDirty;
-
-  void _commitSave() {
+  void _commitSave({String? notes, bool? heart}) {
     Navigator.pop(
       context,
-      DayEditResult.save(
+      _saveResult(
         taken: _taken!,
-        notes: _notes.trim(),
-        heart: _heart,
+        notes: notes ?? _notes,
+        heart: heart ?? _heart,
       ),
     );
   }
@@ -826,14 +824,19 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
       ),
     );
     if (result == null || !mounted) return;
+    // Prefer live selection; fall back to the entry's existing status so Done
+    // can persist note/heart without re-tapping Taken/Missed.
+    final status = _taken ?? widget.initialTaken;
+    if (status != null) {
+      _taken = status;
+      _commitSave(notes: result.notes, heart: result.heart);
+      return;
+    }
+    // Brand-new day with no status yet: keep note/heart until Taken/Missed.
     setState(() {
       _notes = result.notes;
       _heart = result.heart;
     });
-    // If a status is already chosen, persist note/heart without a second Save.
-    if (_taken != null) {
-      _commitSave();
-    }
   }
 
   @override
@@ -842,6 +845,7 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
     final human = DateFormat.yMMMMd(locale).format(DateTime.parse(widget.date));
     final scheme = Theme.of(context).colorScheme;
     final hasNote = _notes.trim().isNotEmpty;
+    // Outside tap dismisses; no Cancel / Save — Done or Taken/Missed commit.
     return Padding(
       padding: EdgeInsets.only(
         left: 20,
@@ -863,12 +867,13 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
                 ),
               ),
               if (_heart)
-                const Padding(
-                  padding: EdgeInsets.only(right: 4),
-                  child: Icon(Icons.favorite, color: Color(0xFFE11D48), size: 20),
+                Padding(
+                  padding: const EdgeInsets.only(right: 4),
+                  child: Icon(Icons.favorite, color: scheme.primary, size: 20),
                 ),
               IconButton.filledTonal(
-                tooltip: hasNote ? widget.strings.notes : widget.strings.addNote,
+                tooltip:
+                    hasNote ? widget.strings.notes : widget.strings.addNote,
                 onPressed: _editNote,
                 icon: Stack(
                   clipBehavior: Clip.none,
@@ -908,20 +913,6 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
             ],
             selected: {if (_taken != null) _taken!},
             onSelectionChanged: _onStatusChanged,
-          ),
-          // Save only for note/heart edits when status is already set and the
-          // note dialog did not auto-commit (defensive; Done normally commits).
-          if (_canSaveNotesOnly) ...[
-            const SizedBox(height: 16),
-            FilledButton(
-              onPressed: _commitSave,
-              child: Text(widget.strings.save),
-            ),
-          ],
-          const SizedBox(height: 8),
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(widget.strings.cancel),
           ),
         ],
       ),
@@ -1041,10 +1032,7 @@ class _NoteDialogState extends State<_NoteDialog> {
             ),
             child: Text(widget.strings.clearNote),
           ),
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: Text(widget.strings.cancel),
-        ),
+        // No Cancel — barrier / outside tap dismisses without saving.
         FilledButton(
           style: FilledButton.styleFrom(
             minimumSize: const Size(88, 44),

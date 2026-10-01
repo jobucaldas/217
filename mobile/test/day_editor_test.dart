@@ -76,6 +76,8 @@ void main() {
 
         expect(find.byType(AlertDialog), findsOneWidget);
         expect(find.byKey(const ValueKey('note-heart-toggle')), findsOneWidget);
+        // Cancel removed — outside/barrier dismisses.
+        expect(find.text('Cancel'), findsNothing);
 
         final field = tester.widget<TextField>(find.byType(TextField));
         expect(field.style?.color, scheme.onSurface);
@@ -95,8 +97,14 @@ void main() {
         expect(find.byType(AlertDialog), findsNothing);
         expect(find.byIcon(Icons.sticky_note_2), findsOneWidget);
         expect(find.byIcon(Icons.favorite), findsOneWidget);
+        // Sheet heart uses theme primary (not forced red).
+        final sheetHeart = tester.widget<Icon>(find.byIcon(Icons.favorite).first);
+        expect(sheetHeart.color, scheme.primary);
+        expect(sheetHeart.color, isNot(const Color(0xFFE11D48)));
         // No status yet → sheet stays open; Taken/Missed will commit.
         expect(find.text('Taken'), findsOneWidget);
+        expect(find.text('Cancel'), findsNothing);
+        expect(find.text('Save'), findsNothing);
       },
     );
   }
@@ -144,8 +152,8 @@ void main() {
     await tester.tap(find.text('Done'));
     await tester.pumpAndSettle();
 
-    // No Save required — Taken commits everything.
     expect(find.text('Save'), findsNothing);
+    expect(find.text('Cancel'), findsNothing);
     await tester.tap(find.text('Taken'));
     await tester.pumpAndSettle();
 
@@ -190,13 +198,14 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Clear mark'), findsNothing);
+    expect(find.text('Cancel'), findsNothing);
     // Unselect Taken → autosave clear (no Save).
     await tester.tap(find.text('Taken'));
     await tester.pumpAndSettle();
     expect(result?.clear, isTrue);
   });
 
-  testWidgets('note Done with existing status commits heart without Save',
+  testWidgets('note Done with existing status commits note + heart alone',
       (tester) async {
     DayEditResult? result;
     await tester.pumpWidget(
@@ -231,48 +240,73 @@ void main() {
     await tester.tap(find.text('open'));
     await tester.pumpAndSettle();
 
+    expect(find.text('Cancel'), findsNothing);
+
     await tester.tap(find.byTooltip('Add note'));
     await tester.pumpAndSettle();
+    expect(find.text('Cancel'), findsNothing);
+    await tester.enterText(find.byType(TextField), 'solo note');
     await tester.tap(find.byKey(const ValueKey('note-heart-toggle')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Done'));
     await tester.pumpAndSettle();
 
+    // Done alone persists — no Taken/Missed re-tap, no Save.
     expect(result?.clear, isFalse);
-    expect(result?.heart, isTrue);
     expect(result?.taken, isTrue);
+    expect(result?.notes, 'solo note');
+    expect(result?.heart, isTrue);
   });
 
   for (final brightness in Brightness.values) {
-    testWidgets('calendar heart indicator is red ($brightness)', (tester) async {
-      final now = DateTime.now();
-      final date =
-          '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-01';
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: buildApp217Theme(
-            brightness: brightness,
-            palette: AppPalette.azure,
-          ),
-          home: CalendarScreen(
-            api: _HeartCalendarApi([
-              Entry(date: date, taken: true, notes: 'n', heart: true),
-            ]),
-            user: const User(
-              id: 'u1',
-              email: 'shot@example.invalid',
-              name: 'Shot',
+    testWidgets(
+      'calendar heart indicator uses on-cell theme color ($brightness)',
+      (tester) async {
+        final now = DateTime.now();
+        final date =
+            '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-01';
+        final scheme = buildApp217ColorScheme(
+          brightness,
+          palette: AppPalette.azure,
+        );
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: buildApp217Theme(
+              brightness: brightness,
+              palette: AppPalette.azure,
             ),
-            strings: const Strings(false),
-            onOpenSettings: () {},
-            palette: AppPalette.azure,
+            home: CalendarScreen(
+              api: _HeartCalendarApi([
+                Entry(date: date, taken: true, notes: 'n', heart: true),
+              ]),
+              user: const User(
+                id: 'u1',
+                email: 'shot@example.invalid',
+                name: 'Shot',
+              ),
+              strings: const Strings(false),
+              onOpenSettings: () {},
+              palette: AppPalette.azure,
+            ),
           ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      final heart = tester.widget<Icon>(find.byIcon(Icons.favorite).first);
-      expect(heart.color, const Color(0xFFE11D48));
-    });
+        );
+        await tester.pumpAndSettle();
+        final heart = tester.widget<Icon>(find.byIcon(Icons.favorite).first);
+        // Pre-#25 red: heart matches filled-cell on-color, not #E11D48.
+        expect(heart.color, isNot(const Color(0xFFE11D48)));
+        expect(
+          heart.color,
+          App217Colors.onFilledCell(brightness, AppPalette.azure),
+        );
+        // Readable against the taken cell fill.
+        final cell = App217Colors.cellTaken(brightness, AppPalette.azure);
+        final contrast =
+            (heart.color!.computeLuminance() - cell.computeLuminance()).abs();
+        expect(contrast, greaterThan(0.2));
+        // scheme.primary is used on the sheet; cell uses onFilledCell.
+        expect(scheme.primary, isNot(const Color(0xFFE11D48)));
+      },
+    );
   }
 }
 
