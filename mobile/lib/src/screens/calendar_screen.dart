@@ -5,7 +5,6 @@ import '../api/client.dart';
 import '../i18n.dart';
 import '../models.dart';
 import '../theme/app_theme.dart';
-import 'reminder_settings_screen.dart';
 import 'today_nudge.dart';
 
 class CalendarScreen extends StatefulWidget {
@@ -16,6 +15,7 @@ class CalendarScreen extends StatefulWidget {
     required this.strings,
     required this.onLogout,
     required this.onOpenSettings,
+    this.palette = AppPalette.forest,
   });
 
   final ApiClient api;
@@ -23,6 +23,7 @@ class CalendarScreen extends StatefulWidget {
   final Strings strings;
   final Future<void> Function() onLogout;
   final VoidCallback onOpenSettings;
+  final AppPalette palette;
 
   @override
   State<CalendarScreen> createState() => _CalendarScreenState();
@@ -34,7 +35,6 @@ class _CalendarScreenState extends State<CalendarScreen> {
   Entry? _todayEntry;
   bool _loading = true;
   String? _error;
-  String _reminderSummary = '';
 
   DateTime get _today {
     final now = DateTime.now();
@@ -58,19 +58,6 @@ class _CalendarScreenState extends State<CalendarScreen> {
     });
     try {
       final entries = await widget.api.listEntries(_month.year, _month.month);
-      String reminder = widget.strings.reminderNotReady;
-      try {
-        final pref = await widget.api.getReminderPreference();
-        if (pref != null) {
-          reminder = pref.enabled
-              ? (pref.deliverable
-                  ? '${widget.strings.remindersOn} · ${pref.time}'
-                  : widget.strings.reminderNotReady)
-              : widget.strings.remindersOff;
-        }
-      } catch (_) {
-        // Reminders are optional; calendar still works.
-      }
       if (!mounted) return;
       final map = {for (final e in entries) e.date: e};
       Entry? todayEntry;
@@ -94,7 +81,6 @@ class _CalendarScreenState extends State<CalendarScreen> {
       setState(() {
         _entries = map;
         _todayEntry = todayEntry;
-        _reminderSummary = reminder;
         _loading = false;
       });
     } catch (err) {
@@ -118,10 +104,19 @@ class _CalendarScreenState extends State<CalendarScreen> {
         date: key,
         initialTaken: existing?.taken,
         initialNotes: existing?.notes ?? '',
+        hadEntry: existing != null,
       ),
     );
     if (result == null) return;
-    await widget.api.upsertEntry(key, taken: result.taken, notes: result.notes);
+    if (result.clear) {
+      await widget.api.deleteEntry(key);
+    } else {
+      await widget.api.upsertEntry(
+        key,
+        taken: result.taken!,
+        notes: result.notes,
+      );
+    }
     await _load();
   }
 
@@ -138,9 +133,10 @@ class _CalendarScreenState extends State<CalendarScreen> {
     final todayColor = _todayEntry == null
         ? scheme.onSurfaceVariant
         : (_todayEntry!.taken
-            ? App217Colors.statusTaken(brightness)
-            : App217Colors.statusMissed(brightness));
+            ? App217Colors.statusTaken(brightness, widget.palette)
+            : App217Colors.statusMissed(brightness, widget.palette));
     final humanDate = DateFormat.MMMMd(locale).format(_today);
+    final nudgeVisible = TodayNudge.isVisible(_todayEntry);
 
     return Scaffold(
       appBar: AppBar(
@@ -163,7 +159,6 @@ class _CalendarScreenState extends State<CalendarScreen> {
           Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Status only — no mid-screen CTA (nudge is bottom-end).
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
                 child: Column(
@@ -190,31 +185,6 @@ class _CalendarScreenState extends State<CalendarScreen> {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 6),
-                    InkWell(
-                      onTap: () async {
-                        await Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => ReminderSettingsScreen(
-                              api: widget.api,
-                              strings: widget.strings,
-                            ),
-                          ),
-                        );
-                        if (mounted) await _load();
-                      },
-                      child: Text(
-                        _reminderSummary.isEmpty
-                            ? widget.strings.reminderNotReady
-                            : _reminderSummary,
-                        style: text.bodyMedium?.copyWith(
-                          color: scheme.onSurfaceVariant,
-                          decoration: TextDecoration.underline,
-                          decorationColor:
-                              scheme.onSurfaceVariant.withValues(alpha: 0.45),
-                        ),
-                      ),
-                    ),
                   ],
                 ),
               ),
@@ -223,12 +193,13 @@ class _CalendarScreenState extends State<CalendarScreen> {
                 child: Row(
                   children: [
                     _LegendDot(
-                      color: App217Colors.statusTaken(brightness),
+                      color: App217Colors.statusTaken(brightness, widget.palette),
                       label: widget.strings.legendTaken,
                     ),
                     const SizedBox(width: 14),
                     _LegendDot(
-                      color: App217Colors.statusMissed(brightness),
+                      color:
+                          App217Colors.statusMissed(brightness, widget.palette),
                       label: widget.strings.legendMissed,
                     ),
                     const SizedBox(width: 14),
@@ -248,7 +219,8 @@ class _CalendarScreenState extends State<CalendarScreen> {
                       tooltip: monthLabel,
                       onPressed: () {
                         setState(
-                          () => _month = DateTime(_month.year, _month.month - 1),
+                          () =>
+                              _month = DateTime(_month.year, _month.month - 1),
                         );
                         _load();
                       },
@@ -264,7 +236,8 @@ class _CalendarScreenState extends State<CalendarScreen> {
                     IconButton(
                       onPressed: () {
                         setState(
-                          () => _month = DateTime(_month.year, _month.month + 1),
+                          () =>
+                              _month = DateTime(_month.year, _month.month + 1),
                         );
                         _load();
                       },
@@ -288,6 +261,8 @@ class _CalendarScreenState extends State<CalendarScreen> {
                   onDayTap: _openDay,
                   todayLabel: widget.strings.today,
                   portuguese: widget.strings.pt,
+                  palette: widget.palette,
+                  bottomInset: nudgeVisible ? 72 : 12,
                 ),
               ),
             ],
@@ -348,6 +323,8 @@ class _MonthGrid extends StatelessWidget {
     required this.onDayTap,
     required this.todayLabel,
     required this.portuguese,
+    required this.palette,
+    required this.bottomInset,
   });
 
   final DateTime month;
@@ -356,6 +333,8 @@ class _MonthGrid extends StatelessWidget {
   final Future<void> Function(DateTime day) onDayTap;
   final String todayLabel;
   final bool portuguese;
+  final AppPalette palette;
+  final double bottomInset;
 
   @override
   Widget build(BuildContext context) {
@@ -365,31 +344,71 @@ class _MonthGrid extends StatelessWidget {
     final weekdayLabels = portuguese
         ? const ['D', 'S', 'T', 'Q', 'Q', 'S', 'S']
         : const ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
-    final cells = <Widget>[
-      for (final label in weekdayLabels)
-        Center(
-          child: Text(
-            label,
-            style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+    final rowCount = ((leading + daysInMonth) / 7).ceil();
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        const hPad = 12.0;
+        const headerH = 28.0;
+        final usableH =
+            (constraints.maxHeight - headerH - bottomInset).clamp(120.0, 4000.0);
+        final usableW = constraints.maxWidth - hPad * 2;
+        final cellW = usableW / 7;
+        final cellH = usableH / rowCount;
+        final aspect = (cellW / cellH).clamp(0.55, 1.35);
+
+        return Padding(
+          padding: EdgeInsets.fromLTRB(hPad, 4, hPad, bottomInset),
+          child: Column(
+            children: [
+              SizedBox(
+                height: headerH,
+                child: Row(
+                  children: [
+                    for (final label in weekdayLabels)
+                      Expanded(
+                        child: Center(
+                          child: Text(
+                            label,
+                            style: Theme.of(context)
+                                .textTheme
+                                .labelMedium
+                                ?.copyWith(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant,
+                                ),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
+              ),
+              Expanded(
+                child: GridView.count(
+                  physics: const NeverScrollableScrollPhysics(),
+                  crossAxisCount: 7,
+                  childAspectRatio: aspect,
+                  children: [
+                    for (var i = 0; i < leading; i++) const SizedBox.shrink(),
+                    for (var day = 1; day <= daysInMonth; day++)
+                      _DayCell(
+                        day: DateTime(month.year, month.month, day),
+                        today: today,
+                        todayLabel: todayLabel,
+                        entry: entries[DateFormat('yyyy-MM-dd').format(
+                          DateTime(month.year, month.month, day),
+                        )],
+                        onTap: onDayTap,
+                        palette: palette,
+                      ),
+                  ],
+                ),
+              ),
+            ],
           ),
-        ),
-      for (var i = 0; i < leading; i++) const SizedBox.shrink(),
-      for (var day = 1; day <= daysInMonth; day++)
-        _DayCell(
-          day: DateTime(month.year, month.month, day),
-          today: today,
-          todayLabel: todayLabel,
-          entry: entries[DateFormat('yyyy-MM-dd')
-              .format(DateTime(month.year, month.month, day))],
-          onTap: onDayTap,
-        ),
-    ];
-    return GridView.count(
-      padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
-      crossAxisCount: 7,
-      children: cells,
+        );
+      },
     );
   }
 }
@@ -401,6 +420,7 @@ class _DayCell extends StatelessWidget {
     required this.todayLabel,
     required this.entry,
     required this.onTap,
+    required this.palette,
   });
 
   final DateTime day;
@@ -408,6 +428,7 @@ class _DayCell extends StatelessWidget {
   final String todayLabel;
   final Entry? entry;
   final Future<void> Function(DateTime day) onTap;
+  final AppPalette palette;
 
   @override
   Widget build(BuildContext context) {
@@ -416,50 +437,66 @@ class _DayCell extends StatelessWidget {
     Color? bg;
     if (entry != null) {
       bg = entry!.taken
-          ? App217Colors.cellTaken(brightness)
-          : App217Colors.cellMissed(brightness);
+          ? App217Colors.cellTaken(brightness, palette)
+          : App217Colors.cellMissed(brightness, palette);
     }
-    final isToday =
-        day.year == today.year && day.month == today.month && day.day == today.day;
+    final isToday = day.year == today.year &&
+        day.month == today.month &&
+        day.day == today.day;
     final isFuture = day.isAfter(today);
     final emptyBg = Color.alphaBlend(
       scheme.onSurface.withValues(alpha: isFuture ? 0.04 : 0.10),
       scheme.surface,
     );
-    final onEmpty = scheme.onSurface;
+    final onCell = bg == null
+        ? scheme.onSurface
+        : App217Colors.onFilledCell(brightness, palette);
+    final hasNote = entry != null && entry!.notes.trim().isNotEmpty;
+
     return InkWell(
       onTap: isFuture ? null : () => onTap(day),
       borderRadius: BorderRadius.circular(12),
       child: Container(
-        margin: const EdgeInsets.all(3),
+        margin: const EdgeInsets.all(2),
         decoration: BoxDecoration(
           color: bg ?? emptyBg,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: isToday ? scheme.primary : scheme.outline.withValues(alpha: 0.55),
+            color:
+                isToday ? scheme.primary : scheme.outline.withValues(alpha: 0.55),
             width: isToday ? 2.2 : 1,
           ),
         ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(
-              '${day.day}',
-              style: TextStyle(
-                color: bg == null ? onEmpty : Colors.white,
-                fontWeight: isToday ? FontWeight.w800 : FontWeight.w500,
-              ),
-            ),
-            if (isToday)
-              Text(
-                todayLabel,
-                style: TextStyle(
-                  fontSize: 9,
-                  fontWeight: FontWeight.w800,
-                  color: bg == null ? scheme.primary : Colors.white,
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  '${day.day}',
+                  style: TextStyle(
+                    color: onCell,
+                    fontWeight: isToday ? FontWeight.w800 : FontWeight.w600,
+                    fontSize: 15,
+                  ),
                 ),
-              ),
-          ],
+                if (isToday)
+                  Text(
+                    todayLabel,
+                    style: TextStyle(
+                      fontSize: 9,
+                      fontWeight: FontWeight.w800,
+                      color: bg == null ? scheme.primary : onCell,
+                    ),
+                  ),
+                if (hasNote)
+                  Icon(Icons.sticky_note_2_outlined, size: 11, color: onCell),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -467,8 +504,15 @@ class _DayCell extends StatelessWidget {
 }
 
 class _DayEditResult {
-  const _DayEditResult({required this.taken, required this.notes});
-  final bool taken;
+  const _DayEditResult.save({required this.taken, required this.notes})
+      : clear = false;
+  const _DayEditResult.clear()
+      : clear = true,
+        taken = null,
+        notes = '';
+
+  final bool clear;
+  final bool? taken;
   final String notes;
 }
 
@@ -478,12 +522,14 @@ class _DayEditor extends StatefulWidget {
     required this.date,
     required this.initialTaken,
     required this.initialNotes,
+    required this.hadEntry,
   });
 
   final Strings strings;
   final String date;
   final bool? initialTaken;
   final String initialNotes;
+  final bool hadEntry;
 
   @override
   State<_DayEditor> createState() => _DayEditorState();
@@ -493,6 +539,8 @@ class _DayEditorState extends State<_DayEditor> {
   late bool? _taken = widget.initialTaken;
   late final TextEditingController _notes =
       TextEditingController(text: widget.initialNotes);
+  late bool _showNotes =
+      widget.initialNotes.trim().isNotEmpty;
 
   @override
   void dispose() {
@@ -529,33 +577,77 @@ class _DayEditorState extends State<_DayEditor> {
             emptySelectionAllowed: true,
             segments: [
               ButtonSegment(
-                  value: true, label: Text(widget.strings.takenLabel)),
+                value: true,
+                label: Text(widget.strings.takenLabel),
+              ),
               ButtonSegment(
-                  value: false, label: Text(widget.strings.missedLabel)),
+                value: false,
+                label: Text(widget.strings.missedLabel),
+              ),
             ],
             selected: {if (_taken != null) _taken!},
             onSelectionChanged: (value) =>
                 setState(() => _taken = value.isEmpty ? null : value.first),
           ),
-          const SizedBox(height: 14),
-          TextField(
-            controller: _notes,
-            maxLines: 2,
-            decoration: InputDecoration(
-              labelText: widget.strings.notes,
-              border: const OutlineInputBorder(),
-            ),
+          const SizedBox(height: 12),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: _showNotes
+                ? const SizedBox.shrink()
+                : IconButton.filledTonal(
+                    tooltip: widget.strings.addNote,
+                    onPressed: () => setState(() => _showNotes = true),
+                    icon: const Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        Icon(Icons.sticky_note_2_outlined),
+                        Positioned(
+                          right: -4,
+                          top: -4,
+                          child: Icon(Icons.add_circle, size: 14),
+                        ),
+                      ],
+                    ),
+                  ),
           ),
-          const SizedBox(height: 16),
+          if (_showNotes) ...[
+            TextField(
+              controller: _notes,
+              maxLines: 3,
+              autofocus: widget.initialNotes.isEmpty,
+              decoration: InputDecoration(
+                labelText: widget.strings.notes,
+                border: const OutlineInputBorder(),
+                suffixIcon: IconButton(
+                  tooltip: widget.strings.cancel,
+                  onPressed: () => setState(() {
+                    _showNotes = false;
+                    _notes.clear();
+                  }),
+                  icon: const Icon(Icons.close),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
           FilledButton(
             onPressed: _taken == null
                 ? null
                 : () => Navigator.pop(
                       context,
-                      _DayEditResult(taken: _taken!, notes: _notes.text.trim()),
+                      _DayEditResult.save(
+                        taken: _taken!,
+                        notes: _notes.text.trim(),
+                      ),
                     ),
             child: Text(widget.strings.save),
           ),
+          if (widget.hadEntry)
+            TextButton(
+              onPressed: () =>
+                  Navigator.pop(context, const _DayEditResult.clear()),
+              child: Text(widget.strings.clearMark),
+            ),
           TextButton(
             onPressed: () => Navigator.pop(context),
             child: Text(widget.strings.cancel),

@@ -18,7 +18,9 @@ class TodayNudge extends StatelessWidget {
   final VoidCallback onRecord;
 
   /// Mid-screen hero CTA is never used; chip only when still open.
-  bool get visible => todayEntry == null;
+  static bool isVisible(Entry? todayEntry) => todayEntry == null;
+
+  bool get visible => isVisible(todayEntry);
 
   @override
   Widget build(BuildContext context) {

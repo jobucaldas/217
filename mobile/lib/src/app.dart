@@ -5,6 +5,7 @@ import 'auth/sign_in.dart';
 import 'config.dart';
 import 'i18n.dart';
 import 'models.dart';
+import 'prefs.dart';
 import 'screens/auth_screen.dart';
 import 'screens/calendar_screen.dart';
 import 'screens/reminder_settings_screen.dart';
@@ -21,12 +22,16 @@ class App217 extends StatefulWidget {
 
 class _App217State extends State<App217> {
   late final ApiClient _api = ApiClient(widget.config);
+  late final AppearancePrefs _prefs = AppearancePrefs();
   final GlobalKey<NavigatorState> _navKey = GlobalKey<NavigatorState>();
-  final GlobalKey<ScaffoldMessengerState> _messengerKey = GlobalKey<ScaffoldMessengerState>();
+  final GlobalKey<ScaffoldMessengerState> _messengerKey =
+      GlobalKey<ScaffoldMessengerState>();
   User? _user;
   bool _loading = true;
   bool _portuguese = true;
-  ThemeMode _themeMode = ThemeMode.light;
+  ThemeMode _themeMode = ThemeMode.system;
+  AppPalette _palette = AppPalette.forest;
+  bool _reminderHintDismissed = false;
 
   Strings get _strings => Strings(_portuguese);
 
@@ -38,10 +43,15 @@ class _App217State extends State<App217> {
 
   Future<void> _bootstrap() async {
     try {
+      final appearance = await _prefs.load();
+      final hintGone = await _prefs.reminderHintDismissed();
       await _api.loadPersistedApiBase();
       final user = await _api.currentUser();
       if (!mounted) return;
       setState(() {
+        _themeMode = appearance.mode;
+        _palette = appearance.palette;
+        _reminderHintDismissed = hintGone;
         _user = user;
         _loading = false;
       });
@@ -54,12 +64,21 @@ class _App217State extends State<App217> {
     }
   }
 
+  Future<void> _setThemeMode(ThemeMode mode) async {
+    setState(() => _themeMode = mode);
+    await _prefs.saveThemeMode(mode);
+  }
+
+  Future<void> _setPalette(AppPalette palette) async {
+    setState(() => _palette = palette);
+    await _prefs.savePalette(palette);
+  }
+
   Future<void> _signIn() async {
     setState(() => _loading = true);
     try {
       final user = await beginWorkOSSignIn(_api);
       if (!mounted) return;
-      // Web cookie flow navigates away; mobile returns a user here.
       if (user != null) {
         setState(() {
           _user = user;
@@ -89,15 +108,21 @@ class _App217State extends State<App217> {
           strings: _strings,
           portuguese: _portuguese,
           themeMode: _themeMode,
+          palette: _palette,
           onToggleLanguage: () => setState(() => _portuguese = !_portuguese),
-          onToggleTheme: () => setState(() {
-            _themeMode = _themeMode == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark;
-          }),
+          onThemeModeChanged: _setThemeMode,
+          onPaletteChanged: _setPalette,
           onLogout: _user == null ? null : _logout,
           onApiBaseChanged: () => setState(() {}),
         ),
       ),
     );
+  }
+
+  Future<void> _dismissReminderHint() async {
+    await _prefs.dismissReminderHint();
+    if (!mounted) return;
+    setState(() => _reminderHintDismissed = true);
   }
 
   @override
@@ -108,14 +133,22 @@ class _App217State extends State<App217> {
       scaffoldMessengerKey: _messengerKey,
       debugShowCheckedModeBanner: false,
       themeMode: _themeMode,
-      theme: buildApp217Theme(brightness: Brightness.light),
-      darkTheme: buildApp217Theme(brightness: Brightness.dark),
+      theme: buildApp217Theme(
+        brightness: Brightness.light,
+        palette: _palette,
+      ),
+      darkTheme: buildApp217Theme(
+        brightness: Brightness.dark,
+        palette: _palette,
+      ),
       home: _loading
-          ? Scaffold(
-              body: Center(
-                child: Text(
-                  _strings.loading,
-                  style: Theme.of(context).textTheme.titleLarge,
+          ? Builder(
+              builder: (context) => Scaffold(
+                body: Center(
+                  child: Text(
+                    _strings.loading,
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
                 ),
               ),
             )
@@ -126,13 +159,17 @@ class _App217State extends State<App217> {
                       ? 'same-origin'
                       : _api.config.apiBaseUrl,
                   onSignIn: _signIn,
-                  onToggleLanguage: () => setState(() => _portuguese = !_portuguese),
+                  onToggleLanguage: () =>
+                      setState(() => _portuguese = !_portuguese),
                   onOpenSettings: _openSettings,
+                  showReminderHint: !_reminderHintDismissed,
+                  onDismissReminderHint: _dismissReminderHint,
                 )
               : CalendarScreen(
                   api: _api,
                   user: _user!,
                   strings: _strings,
+                  palette: _palette,
                   onLogout: _logout,
                   onOpenSettings: _openSettings,
                 ),
@@ -147,8 +184,10 @@ class SettingsPage extends StatefulWidget {
     required this.strings,
     required this.portuguese,
     required this.themeMode,
+    required this.palette,
     required this.onToggleLanguage,
-    required this.onToggleTheme,
+    required this.onThemeModeChanged,
+    required this.onPaletteChanged,
     required this.onApiBaseChanged,
     this.onLogout,
   });
@@ -157,8 +196,10 @@ class SettingsPage extends StatefulWidget {
   final Strings strings;
   final bool portuguese;
   final ThemeMode themeMode;
+  final AppPalette palette;
   final VoidCallback onToggleLanguage;
-  final VoidCallback onToggleTheme;
+  final ValueChanged<ThemeMode> onThemeModeChanged;
+  final ValueChanged<AppPalette> onPaletteChanged;
   final VoidCallback onApiBaseChanged;
   final Future<void> Function()? onLogout;
 
@@ -201,15 +242,31 @@ class _SettingsPageState extends State<SettingsPage> {
       final ok = await widget.api.ping();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(ok ? widget.strings.connectionOk : widget.strings.connectionFail)),
+        SnackBar(
+          content: Text(
+            ok ? widget.strings.connectionOk : widget.strings.connectionFail,
+          ),
+        ),
       );
     } finally {
       if (mounted) setState(() => _testing = false);
     }
   }
 
+  String _paletteLabel(AppPalette p) {
+    switch (p) {
+      case AppPalette.forest:
+        return widget.strings.paletteForest;
+      case AppPalette.mint:
+        return widget.strings.paletteMint;
+      case AppPalette.plum:
+        return widget.strings.palettePlum;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Scaffold(
       appBar: AppBar(title: Text(widget.strings.settings)),
       body: ListView(
@@ -234,20 +291,64 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
             const Divider(height: 28),
           ],
+          Text(widget.strings.appearance,
+              style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 8),
+          SegmentedButton<ThemeMode>(
+            segments: [
+              ButtonSegment(
+                value: ThemeMode.system,
+                label: Text(widget.strings.themeSystem),
+                icon: const Icon(Icons.brightness_auto, size: 18),
+              ),
+              ButtonSegment(
+                value: ThemeMode.light,
+                label: Text(widget.strings.themeLight),
+                icon: const Icon(Icons.light_mode_outlined, size: 18),
+              ),
+              ButtonSegment(
+                value: ThemeMode.dark,
+                label: Text(widget.strings.themeDark),
+                icon: const Icon(Icons.dark_mode_outlined, size: 18),
+              ),
+            ],
+            selected: {widget.themeMode},
+            onSelectionChanged: (value) =>
+                widget.onThemeModeChanged(value.first),
+          ),
+          const SizedBox(height: 20),
+          Text(widget.strings.colorTheme,
+              style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              for (final p in AppPalette.values)
+                ChoiceChip(
+                  avatar: CircleAvatar(backgroundColor: p.swatch, radius: 8),
+                  label: Text(_paletteLabel(p)),
+                  selected: widget.palette == p,
+                  onSelected: (_) => widget.onPaletteChanged(p),
+                  selectedColor: scheme.primaryContainer,
+                  labelStyle: TextStyle(
+                    color: widget.palette == p
+                        ? scheme.onPrimaryContainer
+                        : scheme.onSurface,
+                  ),
+                ),
+            ],
+          ),
+          const Divider(height: 32),
           ListTile(
             contentPadding: EdgeInsets.zero,
             title: Text(widget.strings.language),
             subtitle: Text(widget.portuguese ? 'Português' : 'English'),
             onTap: widget.onToggleLanguage,
           ),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: Text(widget.strings.darkMode),
-            value: widget.themeMode == ThemeMode.dark,
-            onChanged: (_) => widget.onToggleTheme(),
-          ),
           const Divider(height: 28),
-          Text(widget.strings.apiBaseUrl, style: Theme.of(context).textTheme.titleMedium),
+          Text(widget.strings.apiBaseUrl,
+              style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 8),
           TextField(
             controller: _apiBase,
@@ -260,7 +361,10 @@ class _SettingsPageState extends State<SettingsPage> {
           const SizedBox(height: 8),
           Row(
             children: [
-              FilledButton(onPressed: _saveApiBase, child: Text(widget.strings.save)),
+              FilledButton(
+                onPressed: _saveApiBase,
+                child: Text(widget.strings.save),
+              ),
               const SizedBox(width: 8),
               OutlinedButton(
                 onPressed: _testing ? null : _testConnection,
