@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../api/client.dart';
 import '../i18n.dart';
+import '../models.dart';
 import '../theme/app_theme.dart';
 import 'reminder_settings_screen.dart';
+import 'share_screens.dart';
 
 /// Grouped inset settings (Material 3 / iOS Settings style).
 class SettingsPage extends StatefulWidget {
@@ -18,6 +20,10 @@ class SettingsPage extends StatefulWidget {
     required this.onThemeModeChanged,
     required this.onPaletteChanged,
     required this.onApiBaseChanged,
+    this.user,
+    this.share,
+    this.onShareChanged,
+    this.onAccountDeleted,
     this.onLogout,
   });
 
@@ -30,6 +36,10 @@ class SettingsPage extends StatefulWidget {
   final ValueChanged<ThemeMode> onThemeModeChanged;
   final ValueChanged<AppPalette> onPaletteChanged;
   final VoidCallback onApiBaseChanged;
+  final User? user;
+  final ShareState? share;
+  final ValueChanged<ShareState>? onShareChanged;
+  final VoidCallback? onAccountDeleted;
   final Future<void> Function()? onLogout;
 
   @override
@@ -209,22 +219,26 @@ class _SettingsPageState extends State<SettingsPage> {
           _SettingsSection(
             children: [
               Padding(
-                padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
-                child: SegmentedButton<bool>(
-                  showSelectedIcon: false,
-                  segments: [
-                    ButtonSegment(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                child: DropdownMenu<bool>(
+                  key: ValueKey(widget.portuguese),
+                  initialSelection: widget.portuguese,
+                  label: Text(widget.strings.language),
+                  expandedInsets: EdgeInsets.zero,
+                  dropdownMenuEntries: [
+                    DropdownMenuEntry(
                       value: true,
-                      label: Text(widget.strings.languagePortuguese),
+                      label: widget.strings.languagePortuguese,
                     ),
-                    ButtonSegment(
+                    DropdownMenuEntry(
                       value: false,
-                      label: Text(widget.strings.languageEnglish),
+                      label: widget.strings.languageEnglish,
                     ),
                   ],
-                  selected: {widget.portuguese},
-                  onSelectionChanged: (value) =>
-                      widget.onPortugueseChanged(value.first),
+                  onSelected: (value) {
+                    if (value == null) return;
+                    widget.onPortugueseChanged(value);
+                  },
                 ),
               ),
             ],
@@ -306,6 +320,23 @@ class _SettingsPageState extends State<SettingsPage> {
               ],
             ],
           ),
+          if (widget.user != null &&
+              widget.share != null &&
+              widget.onShareChanged != null &&
+              widget.onAccountDeleted != null) ...[
+            const SizedBox(height: 28),
+            ShareSettingsSection(
+              api: widget.api,
+              strings: widget.strings,
+              user: widget.user!,
+              share: widget.share!,
+              onShareChanged: widget.onShareChanged!,
+              onAccountDeleted: () {
+                widget.onAccountDeleted!();
+                if (context.mounted) Navigator.of(context).pop();
+              },
+            ),
+          ],
           if (widget.onLogout != null) ...[
             const SizedBox(height: 28),
             _SettingsSection(

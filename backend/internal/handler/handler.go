@@ -227,12 +227,12 @@ func (h *Handler) CurrentSession(w http.ResponseWriter, r *http.Request) {
 	if token, ok := h.sessionTokenFromRequest(r); ok {
 		user, err := h.store.GetUserBySession(token)
 		if err == nil {
-			writeJSON(w, http.StatusOK, map[string]interface{}{"user": user})
+			writeJSON(w, http.StatusOK, h.sessionPayload(user))
 			return
 		}
 		http.SetCookie(w, h.clearSessionCookie())
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"user": nil})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"user": nil, "share": nil})
 }
 
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
@@ -456,20 +456,27 @@ func (h *Handler) ExchangeWorkOS(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"cannot create session"}`, http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"user": user, "session_token": sessionToken})
+	payload := h.sessionPayload(user)
+	payload["session_token"] = sessionToken
+	writeJSON(w, http.StatusOK, payload)
 }
 
 // --- Entry handlers ---
 
 func (h *Handler) ListEntries(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r)
+	subjectID, err := h.calendarSubject(userID)
+	if err != nil {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "share inactive"})
+		return
+	}
 	year, month := parseYearMonth(r)
 	if year == 0 {
 		now := time.Now().UTC()
 		year, month = now.Year(), int(now.Month())
 	}
 
-	entries, err := h.store.ListEntries(userID, year, month)
+	entries, err := h.store.ListEntries(subjectID, year, month)
 	if err != nil {
 		log.Printf("list entries error: %v", err)
 		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
@@ -486,6 +493,11 @@ func (h *Handler) ListEntries(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) GetEntry(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r)
+	subjectID, err := h.calendarSubject(userID)
+	if err != nil {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "share inactive"})
+		return
+	}
 	date := r.PathValue("date")
 	if date == "" {
 		http.Error(w, `{"error":"missing date"}`, http.StatusBadRequest)
@@ -497,7 +509,7 @@ func (h *Handler) GetEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	entry, err := h.store.GetEntry(userID, date)
+	entry, err := h.store.GetEntry(subjectID, date)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "entry not found"})
 		return
@@ -507,6 +519,10 @@ func (h *Handler) GetEntry(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) UpsertEntry(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r)
+	if !h.requireCalendarEdit(userID) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "calendar is read-only"})
+		return
+	}
 	date := r.PathValue("date")
 	if date == "" {
 		http.Error(w, `{"error":"missing date"}`, http.StatusBadRequest)
@@ -535,6 +551,10 @@ func (h *Handler) UpsertEntry(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) DeleteEntry(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r)
+	if !h.requireCalendarEdit(userID) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "calendar is read-only"})
+		return
+	}
 	date := r.PathValue("date")
 	if date == "" {
 		http.Error(w, `{"error":"missing date"}`, http.StatusBadRequest)
@@ -558,13 +578,18 @@ func (h *Handler) DeleteEntry(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) GetStats(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r)
+	subjectID, err := h.calendarSubject(userID)
+	if err != nil {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "share inactive"})
+		return
+	}
 	year, month := parseYearMonth(r)
 	if year == 0 {
 		now := time.Now().UTC()
 		year, month = now.Year(), int(now.Month())
 	}
 
-	stats, err := h.store.GetStats(userID, year, month)
+	stats, err := h.store.GetStats(subjectID, year, month)
 	if err != nil {
 		log.Printf("stats error: %v", err)
 		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
