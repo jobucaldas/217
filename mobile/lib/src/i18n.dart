@@ -30,8 +30,10 @@ class Strings {
   String get connectionOk => pt ? 'API acessível' : 'API reachable';
   String get connectionFail => pt ? 'API inacessível' : 'API unreachable';
   String get advanced => pt ? 'Avançado' : 'Advanced';
-  String get showMore => pt ? 'Mostrar mais' : 'Show more';
-  String get showLess => pt ? 'Mostrar menos' : 'Show less';
+  String get showMore =>
+      pt ? 'Opções avançadas' : 'Advanced options';
+  String get showLess =>
+      pt ? 'Ocultar opções avançadas' : 'Hide advanced options';
   String get languagePortuguese => 'Português';
   String get languageEnglish => 'English';
   String get done => pt ? 'Pronto' : 'Done';

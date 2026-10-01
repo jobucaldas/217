@@ -83,36 +83,38 @@ class _TodayNudgeState extends State<TodayNudge> {
     final bottom = _ready ? _bottom.clamp(8.0, maxBottom) : 16.0;
 
     return Positioned(
-      left: _right ? null : 12,
-      right: _right ? 12 : null,
+      left: _right ? null : 16,
+      right: _right ? 16 : null,
       bottom: bottom + media.padding.bottom,
       child: GestureDetector(
         onPanUpdate: (d) => _onPanUpdate(d, maxBottom),
         onPanEnd: (_) => _onPanEnd(media.size.width),
         child: Material(
-          elevation: 4,
+          elevation: 10,
           color: scheme.primaryContainer,
-          shadowColor: scheme.shadow.withValues(alpha: 0.4),
+          shadowColor: scheme.shadow.withValues(alpha: 0.55),
+          surfaceTintColor: scheme.primary.withValues(alpha: 0.12),
           shape: const StadiumBorder(),
           child: InkWell(
             onTap: widget.onRecord,
             customBorder: const StadiumBorder(),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(
                     Icons.notifications_active_outlined,
                     color: scheme.onPrimaryContainer,
-                    size: 20,
+                    size: 22,
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: 10),
                   Text(
                     widget.strings.recordToday,
                     style: Theme.of(context).textTheme.labelLarge?.copyWith(
                           color: scheme.onPrimaryContainer,
                           fontWeight: FontWeight.w700,
+                          letterSpacing: 0.2,
                         ),
                   ),
                 ],
