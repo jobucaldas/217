@@ -258,11 +258,16 @@ class ApiClient {
     return entries;
   }
 
-  Future<Entry> upsertEntry(String date, {required bool taken, String notes = ''}) async {
+  Future<Entry> upsertEntry(
+    String date, {
+    required bool taken,
+    String notes = '',
+    bool heart = false,
+  }) async {
     final response = await _send(
       'POST',
       _uri('/api/entries/$date'),
-      body: {'taken': taken, 'notes': notes},
+      body: {'taken': taken, 'notes': notes, 'heart': heart},
     );
     if (response.statusCode != 200) {
       throw StateError('upsert entry failed: ${response.body}');

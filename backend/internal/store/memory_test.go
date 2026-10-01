@@ -56,9 +56,12 @@ func TestMemoryStore_UpsertAndGetEntry(t *testing.T) {
 	s := NewMemoryStore()
 	user, _ := s.CreateUser("u@t.com", "U", "testpass123")
 
-	entry, err := s.UpsertEntry(user.ID, "2026-05-13", model.UpsertRequest{Taken: true, Notes: "ok"})
+	entry, err := s.UpsertEntry(user.ID, "2026-05-13", model.UpsertRequest{Taken: true, Notes: "ok", Heart: true})
 	if err != nil {
 		t.Fatalf("UpsertEntry failed: %v", err)
+	}
+	if !entry.Heart {
+		t.Fatalf("expected heart=true on upsert")
 	}
 	if entry.Date != "2026-05-13" {
 		t.Errorf("expected date 2026-05-13, got %s", entry.Date)

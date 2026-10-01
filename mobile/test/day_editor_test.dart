@@ -15,9 +15,13 @@ class _FakeApi extends ApiClient {
   final Map<String, Entry> store = {};
 
   @override
-  Future<Entry> upsertEntry(String date,
-      {required bool taken, String notes = ''}) async {
-    final e = Entry(date: date, taken: taken, notes: notes);
+  Future<Entry> upsertEntry(
+    String date, {
+    required bool taken,
+    String notes = '',
+    bool heart = false,
+  }) async {
+    final e = Entry(date: date, taken: taken, notes: notes, heart: heart);
     store[date] = e;
     return e;
   }
@@ -31,51 +35,69 @@ class _FakeApi extends ApiClient {
 void main() {
   test('deleteEntry clears a stored day mark', () async {
     final api = _FakeApi();
-    await api.upsertEntry('2026-10-01', taken: true, notes: 'x');
+    await api.upsertEntry('2026-10-01', taken: true, notes: 'x', heart: true);
     expect(api.store.containsKey('2026-10-01'), isTrue);
+    expect(api.store['2026-10-01']!.heart, isTrue);
     await api.deleteEntry('2026-10-01');
     expect(api.store.containsKey('2026-10-01'), isFalse);
   });
 
-  testWidgets('note icon sits on date row and opens dialog', (tester) async {
-    final strings = const Strings(false);
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: buildApp217Theme(
-          brightness: Brightness.light,
+  for (final brightness in Brightness.values) {
+    testWidgets(
+      'note dialog text readable + heart toggle ($brightness)',
+      (tester) async {
+        final scheme = buildApp217ColorScheme(
+          brightness,
           palette: AppPalette.azure,
-        ),
-        home: Scaffold(
-          body: DayEditorSheet(
-            strings: strings,
-            date: '2026-10-01',
-            initialTaken: null,
-            initialNotes: '',
-            hadEntry: false,
+        );
+        final strings = const Strings(false);
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: buildApp217Theme(
+              brightness: brightness,
+              palette: AppPalette.azure,
+            ),
+            home: Scaffold(
+              body: DayEditorSheet(
+                strings: strings,
+                date: '2026-10-01',
+                initialTaken: null,
+                initialNotes: '',
+                initialHeart: false,
+                hadEntry: false,
+              ),
+            ),
           ),
-        ),
-      ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byTooltip('Add note'));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(AlertDialog), findsOneWidget);
+        expect(find.byKey(const ValueKey('note-heart-toggle')), findsOneWidget);
+
+        final field = tester.widget<TextField>(find.byType(TextField));
+        expect(field.style?.color, scheme.onSurface);
+        final contrast = (field.style!.color!.computeLuminance() -
+                scheme.surface.computeLuminance())
+            .abs();
+        expect(contrast, greaterThan(0.25));
+
+        await tester.enterText(find.byType(TextField), 'hello note');
+        await tester.tap(find.byKey(const ValueKey('note-heart-toggle')));
+        await tester.pumpAndSettle();
+        expect(find.byIcon(Icons.favorite), findsWidgets);
+
+        await tester.tap(find.text('Done'));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(AlertDialog), findsNothing);
+        expect(find.byIcon(Icons.sticky_note_2), findsOneWidget);
+        expect(find.byIcon(Icons.favorite), findsOneWidget);
+      },
     );
-    await tester.pumpAndSettle();
-
-    expect(find.text('October 1, 2026'), findsOneWidget);
-    // No orphan inline note field before opening the dialog.
-    expect(find.byType(TextField), findsNothing);
-
-    await tester.tap(find.byTooltip('Add note'));
-    await tester.pumpAndSettle();
-
-    expect(find.byType(AlertDialog), findsOneWidget);
-    expect(find.byType(TextField), findsOneWidget);
-
-    await tester.enterText(find.byType(TextField), 'hello note');
-    await tester.tap(find.text('Done'));
-    await tester.pumpAndSettle();
-
-    expect(find.byType(AlertDialog), findsNothing);
-    // Note affordance stays on the date row (filled icon after write).
-    expect(find.byIcon(Icons.sticky_note_2), findsOneWidget);
-  });
+  }
 
   testWidgets('unselecting status keeps Save to clear existing mark',
       (tester) async {
@@ -97,6 +119,7 @@ void main() {
                     date: '2026-10-01',
                     initialTaken: true,
                     initialNotes: '',
+                    initialHeart: true,
                     hadEntry: true,
                   ),
                 );
@@ -111,7 +134,6 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Clear mark'), findsNothing);
-    // Unselect Taken in the segmented control.
     await tester.tap(find.text('Taken'));
     await tester.pumpAndSettle();
 
@@ -123,5 +145,53 @@ void main() {
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
     expect(result?.clear, isTrue);
+  });
+
+  testWidgets('saving persists heart from note dialog', (tester) async {
+    DayEditResult? result;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildApp217Theme(
+          brightness: Brightness.dark,
+          palette: AppPalette.azure,
+        ),
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => TextButton(
+              onPressed: () async {
+                result = await showModalBottomSheet<DayEditResult>(
+                  context: context,
+                  isScrollControlled: true,
+                  builder: (_) => const DayEditorSheet(
+                    strings: Strings(false),
+                    date: '2026-10-01',
+                    initialTaken: true,
+                    initialNotes: '',
+                    initialHeart: false,
+                    hadEntry: true,
+                  ),
+                );
+              },
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Add note'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('note-heart-toggle')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Done'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(result?.clear, isFalse);
+    expect(result?.heart, isTrue);
+    expect(result?.taken, isTrue);
   });
 }

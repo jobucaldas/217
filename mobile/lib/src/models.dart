@@ -123,17 +123,20 @@ class Entry {
     required this.date,
     required this.taken,
     required this.notes,
+    this.heart = false,
   });
 
   final String date;
   final bool taken;
   final String notes;
+  final bool heart;
 
   factory Entry.fromJson(Map<String, dynamic> json) {
     return Entry(
       date: json['date'] as String,
       taken: json['taken'] as bool? ?? false,
       notes: (json['notes'] as String?) ?? '',
+      heart: json['heart'] as bool? ?? false,
     );
   }
 }

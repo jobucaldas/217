@@ -25,8 +25,9 @@ class _FakeCalendarApi extends ApiClient {
     String date, {
     required bool taken,
     String notes = '',
+    bool heart = false,
   }) async =>
-      Entry(date: date, taken: taken, notes: notes);
+      Entry(date: date, taken: taken, notes: notes, heart: heart);
 
   @override
   Future<void> deleteEntry(String date) async {}

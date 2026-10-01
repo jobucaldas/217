@@ -103,10 +103,10 @@ func (s *PGStore) GetEntry(userID, date string) (*model.Entry, error) {
 	e := &model.Entry{}
 	var dateVal time.Time
 	err := s.db.QueryRow(
-		`SELECT id, user_id, date, taken, notes, created_at, updated_at
+		`SELECT id, user_id, date, taken, notes, heart, created_at, updated_at
 		 FROM entries WHERE user_id = $1 AND date = $2`,
 		userID, date,
-	).Scan(&e.ID, &e.UserID, &dateVal, &e.Taken, &e.Notes, &e.CreatedAt, &e.UpdatedAt)
+	).Scan(&e.ID, &e.UserID, &dateVal, &e.Taken, &e.Notes, &e.Heart, &e.CreatedAt, &e.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("entry not found")
 	}
@@ -122,7 +122,7 @@ func (s *PGStore) ListEntries(userID string, year, month int) ([]*model.Entry, e
 	lastDay := time.Date(year, time.Month(month)+1, 0, 0, 0, 0, 0, time.UTC).Format("2006-01-02")
 
 	rows, err := s.db.Query(
-		`SELECT id, user_id, date, taken, notes, created_at, updated_at
+		`SELECT id, user_id, date, taken, notes, heart, created_at, updated_at
 		 FROM entries WHERE user_id = $1 AND date >= $2 AND date <= $3
 		 ORDER BY date ASC`,
 		userID, firstDay, lastDay,
@@ -136,7 +136,7 @@ func (s *PGStore) ListEntries(userID string, year, month int) ([]*model.Entry, e
 	for rows.Next() {
 		e := &model.Entry{}
 		var dateVal time.Time
-		if err := rows.Scan(&e.ID, &e.UserID, &dateVal, &e.Taken, &e.Notes, &e.CreatedAt, &e.UpdatedAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.UserID, &dateVal, &e.Taken, &e.Notes, &e.Heart, &e.CreatedAt, &e.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scanning entry: %w", err)
 		}
 		e.Date = dateVal.Format("2006-01-02")
@@ -152,15 +152,16 @@ func (s *PGStore) UpsertEntry(userID, date string, req model.UpsertRequest) (*mo
 	e := &model.Entry{}
 	var dateVal time.Time
 	err := s.db.QueryRow(
-		`INSERT INTO entries (user_id, date, taken, notes)
-		 VALUES ($1, $2, $3, $4)
+		`INSERT INTO entries (user_id, date, taken, notes, heart)
+		 VALUES ($1, $2, $3, $4, $5)
 		 ON CONFLICT (user_id, date) DO UPDATE SET
 		   taken = EXCLUDED.taken,
 		   notes = EXCLUDED.notes,
+		   heart = EXCLUDED.heart,
 		   updated_at = NOW()
-		 RETURNING id, user_id, date, taken, notes, created_at, updated_at`,
-		userID, date, req.Taken, req.Notes,
-	).Scan(&e.ID, &e.UserID, &dateVal, &e.Taken, &e.Notes, &e.CreatedAt, &e.UpdatedAt)
+		 RETURNING id, user_id, date, taken, notes, heart, created_at, updated_at`,
+		userID, date, req.Taken, req.Notes, req.Heart,
+	).Scan(&e.ID, &e.UserID, &dateVal, &e.Taken, &e.Notes, &e.Heart, &e.CreatedAt, &e.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("upserting entry: %w", err)
 	}
