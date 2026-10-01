@@ -242,6 +242,19 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
             ],
           ),
+          if (widget.user != null &&
+              widget.user!.isOwner &&
+              widget.share != null &&
+              widget.onShareChanged != null) ...[
+            const SizedBox(height: 20),
+            ShareSettingsSection(
+              api: widget.api,
+              strings: widget.strings,
+              user: widget.user!,
+              share: widget.share!,
+              onShareChanged: widget.onShareChanged!,
+            ),
+          ],
           const SizedBox(height: 20),
           _SettingsSection(
             children: [
@@ -319,39 +332,38 @@ class _SettingsPageState extends State<SettingsPage> {
               ],
             ],
           ),
-          if (widget.user != null &&
-              widget.share != null &&
-              widget.onShareChanged != null &&
-              widget.onAccountDeleted != null) ...[
-            const SizedBox(height: 28),
-            ShareSettingsSection(
-              api: widget.api,
-              strings: widget.strings,
-              user: widget.user!,
-              share: widget.share!,
-              onShareChanged: widget.onShareChanged!,
-              onAccountDeleted: () {
-                widget.onAccountDeleted!();
-                if (context.mounted) Navigator.of(context).pop();
-              },
-            ),
-          ],
-          if (widget.onLogout != null) ...[
-            const SizedBox(height: 28),
-            _SettingsSection(
-              children: [
-                ListTile(
-                  title: Text(
-                    widget.strings.logout,
-                    style: text.titleMedium?.copyWith(color: scheme.error),
+          // Account actions: pull away from prefs above; keep delete + logout tight.
+          if (widget.onAccountDeleted != null || widget.onLogout != null) ...[
+            const SizedBox(height: 40),
+            if (widget.onAccountDeleted != null)
+              DeleteAccountSection(
+                api: widget.api,
+                strings: widget.strings,
+                onAccountDeleted: () {
+                  widget.onAccountDeleted!();
+                  if (context.mounted) Navigator.of(context).pop();
+                },
+              ),
+            if (widget.onAccountDeleted != null && widget.onLogout != null)
+              const SizedBox(height: 10),
+            if (widget.onLogout != null)
+              _SettingsSection(
+                children: [
+                  ListTile(
+                    title: Text(
+                      widget.strings.logout,
+                      style: text.bodyLarge?.copyWith(
+                        color: kLogoutActionColor,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    onTap: () async {
+                      await widget.onLogout!();
+                      if (context.mounted) Navigator.of(context).pop();
+                    },
                   ),
-                  onTap: () async {
-                    await widget.onLogout!();
-                    if (context.mounted) Navigator.of(context).pop();
-                  },
-                ),
-              ],
-            ),
+                ],
+              ),
           ],
         ],
       ),

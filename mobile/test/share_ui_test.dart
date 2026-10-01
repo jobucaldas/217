@@ -55,17 +55,9 @@ void main() {
             palette: AppPalette.azure,
           ),
           home: Scaffold(
-            body: ShareSettingsSection(
+            body: DeleteAccountSection(
               api: api,
               strings: const Strings(false),
-              user: const User(
-                id: '1',
-                email: 'a@b.c',
-                name: 'Owner',
-                role: 'owner',
-              ),
-              share: const ShareState(status: 'none'),
-              onShareChanged: (_) {},
               onAccountDeleted: () {},
             ),
           ),

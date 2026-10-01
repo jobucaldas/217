@@ -5,7 +5,7 @@ import '../api/client.dart';
 import '../i18n.dart';
 import '../models.dart';
 
-/// Owner settings for invite code + revoke, and delete-account control.
+/// Owner settings for invite code + revoke (no delete — that sits with logout).
 class ShareSettingsSection extends StatefulWidget {
   const ShareSettingsSection({
     super.key,
@@ -14,7 +14,6 @@ class ShareSettingsSection extends StatefulWidget {
     required this.user,
     required this.share,
     required this.onShareChanged,
-    required this.onAccountDeleted,
   });
 
   final ApiClient api;
@@ -22,7 +21,6 @@ class ShareSettingsSection extends StatefulWidget {
   final User user;
   final ShareState share;
   final ValueChanged<ShareState> onShareChanged;
-  final VoidCallback onAccountDeleted;
 
   @override
   State<ShareSettingsSection> createState() => _ShareSettingsSectionState();
@@ -45,8 +43,138 @@ class _ShareSettingsSectionState extends State<ShareSettingsSection> {
     }
   }
 
-  Future<void> _confirmDelete() async {
+  @override
+  Widget build(BuildContext context) {
+    if (!widget.user.isOwner) return const SizedBox.shrink();
+
     final scheme = Theme.of(context).colorScheme;
+    final text = Theme.of(context).textTheme;
+    final share = widget.share;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          widget.strings.shareCalendar.toUpperCase(),
+          style: text.labelMedium?.copyWith(
+            color: scheme.onSurfaceVariant,
+            letterSpacing: 0.6,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Material(
+          color: scheme.surface,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: BorderSide(color: scheme.outline.withValues(alpha: 0.45)),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            children: [
+              if (share.isNone)
+                ListTile(
+                  title: Text(widget.strings.shareEnable),
+                  trailing: _busy
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : Icon(Icons.person_add_alt_1, color: scheme.primary),
+                  onTap: _busy
+                      ? null
+                      : () => _run(() async {
+                            final next = await widget.api.enableShare();
+                            widget.onShareChanged(next);
+                          }),
+                )
+              else ...[
+                ListTile(
+                  title: Text(widget.strings.shareInviteCode),
+                  subtitle: Text(
+                    share.inviteCode,
+                    style: text.headlineSmall?.copyWith(
+                      letterSpacing: 2,
+                      fontWeight: FontWeight.w700,
+                      color: scheme.onSurface,
+                    ),
+                  ),
+                  trailing: IconButton(
+                    tooltip: widget.strings.shareCopyCode,
+                    onPressed: share.inviteCode.isEmpty
+                        ? null
+                        : () async {
+                            await Clipboard.setData(
+                              ClipboardData(text: share.inviteCode),
+                            );
+                            if (!context.mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(widget.strings.shareCopyCode),
+                              ),
+                            );
+                          },
+                    icon: const Icon(Icons.copy_outlined),
+                  ),
+                ),
+                const Divider(height: 1, indent: 16, endIndent: 16),
+                ListTile(
+                  title: Text(
+                    share.isActive
+                        ? '${widget.strings.shareActiveWith} ${share.partnerName.isEmpty ? share.partnerEmail : share.partnerName}'
+                        : widget.strings.shareWaiting,
+                  ),
+                ),
+                const Divider(height: 1, indent: 16, endIndent: 16),
+                ListTile(
+                  title: Text(
+                    widget.strings.shareRevoke,
+                    style: text.titleMedium?.copyWith(color: scheme.error),
+                  ),
+                  onTap: _busy
+                      ? null
+                      : () => _run(() async {
+                            final next = await widget.api.revokeShare();
+                            widget.onShareChanged(next);
+                          }),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Bright danger red for irreversible account deletion.
+const kDeleteAccountColor = Color(0xFFDC2626);
+
+/// Softer orangey-red for logout (okay action, less alarming than delete).
+const kLogoutActionColor = Color(0xFFEA580C);
+
+/// Destructive account control — grouped with logout in Settings.
+class DeleteAccountSection extends StatefulWidget {
+  const DeleteAccountSection({
+    super.key,
+    required this.api,
+    required this.strings,
+    required this.onAccountDeleted,
+  });
+
+  final ApiClient api;
+  final Strings strings;
+  final VoidCallback onAccountDeleted;
+
+  @override
+  State<DeleteAccountSection> createState() => _DeleteAccountSectionState();
+}
+
+class _DeleteAccountSectionState extends State<DeleteAccountSection> {
+  bool _busy = false;
+
+  Future<void> _confirmDelete() async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -59,8 +187,8 @@ class _ShareSettingsSectionState extends State<ShareSettingsSection> {
           ),
           FilledButton(
             style: FilledButton.styleFrom(
-              backgroundColor: scheme.error,
-              foregroundColor: scheme.onError,
+              backgroundColor: kDeleteAccountColor,
+              foregroundColor: Colors.white,
             ),
             onPressed: () => Navigator.pop(context, true),
             child: Text(widget.strings.deleteAccountConfirm),
@@ -69,130 +197,43 @@ class _ShareSettingsSectionState extends State<ShareSettingsSection> {
       ),
     );
     if (ok != true) return;
-    await _run(() async {
+    setState(() => _busy = true);
+    try {
       await widget.api.deleteAccount();
       widget.onAccountDeleted();
-    });
+    } catch (err) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$err')),
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final text = Theme.of(context).textTheme;
-    final share = widget.share;
-    final isOwner = widget.user.isOwner;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        if (isOwner) ...[
-          Text(
-            widget.strings.shareCalendar.toUpperCase(),
-            style: text.labelMedium?.copyWith(
-              color: scheme.onSurfaceVariant,
-              letterSpacing: 0.6,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Material(
-            color: scheme.surface,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-              side: BorderSide(color: scheme.outline.withValues(alpha: 0.45)),
-            ),
-            clipBehavior: Clip.antiAlias,
-            child: Column(
-              children: [
-                if (share.isNone)
-                  ListTile(
-                    title: Text(widget.strings.shareEnable),
-                    trailing: _busy
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : Icon(Icons.person_add_alt_1, color: scheme.primary),
-                    onTap: _busy
-                        ? null
-                        : () => _run(() async {
-                              final next = await widget.api.enableShare();
-                              widget.onShareChanged(next);
-                            }),
-                  )
-                else ...[
-                  ListTile(
-                    title: Text(widget.strings.shareInviteCode),
-                    subtitle: Text(
-                      share.inviteCode,
-                      style: text.headlineSmall?.copyWith(
-                        letterSpacing: 2,
-                        fontWeight: FontWeight.w700,
-                        color: scheme.onSurface,
-                      ),
-                    ),
-                    trailing: IconButton(
-                      tooltip: widget.strings.shareCopyCode,
-                      onPressed: share.inviteCode.isEmpty
-                          ? null
-                          : () async {
-                              await Clipboard.setData(
-                                ClipboardData(text: share.inviteCode),
-                              );
-                              if (!context.mounted) return;
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(widget.strings.shareCopyCode),
-                                ),
-                              );
-                            },
-                      icon: const Icon(Icons.copy_outlined),
-                    ),
-                  ),
-                  const Divider(height: 1, indent: 16, endIndent: 16),
-                  ListTile(
-                    title: Text(
-                      share.isActive
-                          ? '${widget.strings.shareActiveWith} ${share.partnerName.isEmpty ? share.partnerEmail : share.partnerName}'
-                          : widget.strings.shareWaiting,
-                    ),
-                  ),
-                  const Divider(height: 1, indent: 16, endIndent: 16),
-                  ListTile(
-                    title: Text(
-                      widget.strings.shareRevoke,
-                      style: text.titleMedium?.copyWith(color: scheme.error),
-                    ),
-                    onTap: _busy
-                        ? null
-                        : () => _run(() async {
-                              final next = await widget.api.revokeShare();
-                              widget.onShareChanged(next);
-                            }),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          const SizedBox(height: 20),
-        ],
-        Material(
-          color: scheme.surface,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-            side: BorderSide(color: scheme.outline.withValues(alpha: 0.45)),
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: ListTile(
-            title: Text(
-              widget.strings.deleteAccount,
-              style: text.titleMedium?.copyWith(color: scheme.error),
-            ),
-            onTap: _busy ? null : _confirmDelete,
+    return Material(
+      color: scheme.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(
+          color: kDeleteAccountColor.withValues(alpha: 0.45),
+        ),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: ListTile(
+        title: Text(
+          widget.strings.deleteAccount,
+          style: text.titleMedium?.copyWith(
+            color: kDeleteAccountColor,
+            fontWeight: FontWeight.w600,
           ),
         ),
-      ],
+        onTap: _busy ? null : _confirmDelete,
+      ),
     );
   }
 }
