@@ -460,7 +460,7 @@ func TestProtectedRoutesStillTrackEntriesWithCookieAuth(t *testing.T) {
 	}
 	cookie := sessionCookie(t, s, user.ID)
 
-	upsertBody := `{"taken":true,"notes":"testado"}`
+	upsertBody := `{"taken":true,"notes":"testado","heart":true}`
 	req := authedRequest(http.MethodPost, "/api/entries/2026-05-13", cookie, []byte(upsertBody))
 	req.SetPathValue("date", "2026-05-13")
 	w := httptest.NewRecorder()
@@ -482,6 +482,9 @@ func TestProtectedRoutesStillTrackEntriesWithCookieAuth(t *testing.T) {
 	}
 	if entry.Notes != "testado" {
 		t.Fatalf("expected notes to round-trip, got %#v", entry)
+	}
+	if !entry.Heart {
+		t.Fatalf("expected heart to round-trip, got %#v", entry)
 	}
 }
 

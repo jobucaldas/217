@@ -8,6 +8,7 @@ type Entry struct {
 	Date      string    `json:"date"`
 	Taken     bool      `json:"taken"`
 	Notes     string    `json:"notes"`
+	Heart     bool      `json:"heart"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -15,6 +16,7 @@ type Entry struct {
 type UpsertRequest struct {
 	Taken bool   `json:"taken"`
 	Notes string `json:"notes"`
+	Heart bool   `json:"heart"`
 }
 
 type MonthEntries struct {

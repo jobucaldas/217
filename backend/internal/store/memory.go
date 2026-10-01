@@ -173,6 +173,7 @@ func (s *MemoryStore) UpsertEntry(userID, date string, req model.UpsertRequest) 
 	if existing, ok := s.entries[key]; ok {
 		existing.Taken = req.Taken
 		existing.Notes = req.Notes
+		existing.Heart = req.Heart
 		existing.UpdatedAt = now
 		return existing, nil
 	}
@@ -183,6 +184,7 @@ func (s *MemoryStore) UpsertEntry(userID, date string, req model.UpsertRequest) 
 		Date:      date,
 		Taken:     req.Taken,
 		Notes:     req.Notes,
+		Heart:     req.Heart,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}

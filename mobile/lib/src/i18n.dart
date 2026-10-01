@@ -15,6 +15,8 @@ class Strings {
   String get unrecorded => pt ? 'Em aberto' : 'Open';
   String get notes => pt ? 'Nota' : 'Note';
   String get addNote => pt ? 'Adicionar nota' : 'Add note';
+  String get heartMark => pt ? 'Marcar intimidade' : 'Mark intimacy';
+  String get heartMarked => pt ? 'Intimidade marcada' : 'Intimacy marked';
   String get save => pt ? 'Salvar' : 'Save';
   String get cancel => pt ? 'Cancelar' : 'Cancel';
   String get clearMark => pt ? 'Remover marcação' : 'Clear mark';

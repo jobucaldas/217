@@ -222,6 +222,7 @@ class _CalendarScreenState extends State<CalendarScreen>
         date: key,
         initialTaken: existing?.taken,
         initialNotes: existing?.notes ?? '',
+        initialHeart: existing?.heart ?? false,
         hadEntry: existing != null,
       ),
     );
@@ -233,6 +234,7 @@ class _CalendarScreenState extends State<CalendarScreen>
         key,
         taken: result.taken!,
         notes: result.notes,
+        heart: result.heart,
       );
     }
     await _load();
@@ -674,6 +676,7 @@ class _DayCell extends StatelessWidget {
         ? scheme.onSurface
         : App217Colors.onFilledCell(brightness, palette);
     final hasNote = entry != null && entry!.notes.trim().isNotEmpty;
+    final hasHeart = entry != null && entry!.heart;
 
     return InkWell(
       onTap: isFuture ? null : () => onTap(day),
@@ -714,8 +717,18 @@ class _DayCell extends StatelessWidget {
                       color: bg == null ? scheme.primary : onCell,
                     ),
                   ),
-                if (hasNote)
-                  Icon(Icons.sticky_note_2_outlined, size: 11, color: onCell),
+                if (hasNote || hasHeart)
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (hasHeart)
+                        Icon(Icons.favorite, size: 11, color: onCell),
+                      if (hasHeart && hasNote) const SizedBox(width: 2),
+                      if (hasNote)
+                        Icon(Icons.sticky_note_2_outlined,
+                            size: 11, color: onCell),
+                    ],
+                  ),
               ],
             ),
           ),
@@ -726,16 +739,21 @@ class _DayCell extends StatelessWidget {
 }
 
 class DayEditResult {
-  const DayEditResult.save({required this.taken, required this.notes})
-      : clear = false;
+  const DayEditResult.save({
+    required this.taken,
+    required this.notes,
+    this.heart = false,
+  }) : clear = false;
   const DayEditResult.clear()
       : clear = true,
         taken = null,
-        notes = '';
+        notes = '',
+        heart = false;
 
   final bool clear;
   final bool? taken;
   final String notes;
+  final bool heart;
 }
 
 /// Day mark bottom sheet: status + note affordance aligned with the date.
@@ -747,12 +765,14 @@ class DayEditorSheet extends StatefulWidget {
     required this.initialTaken,
     required this.initialNotes,
     required this.hadEntry,
+    this.initialHeart = false,
   });
 
   final Strings strings;
   final String date;
   final bool? initialTaken;
   final String initialNotes;
+  final bool initialHeart;
   final bool hadEntry;
 
   @override
@@ -762,20 +782,25 @@ class DayEditorSheet extends StatefulWidget {
 class _DayEditorSheetState extends State<DayEditorSheet> {
   late bool? _taken = widget.initialTaken;
   late String _notes = widget.initialNotes;
+  late bool _heart = widget.initialHeart;
 
   /// Save when a status is chosen, or when clearing an existing mark.
   bool get _canSave => _taken != null || widget.hadEntry;
 
   Future<void> _editNote() async {
-    final result = await showDialog<String>(
+    final result = await showDialog<_NoteDialogResult>(
       context: context,
       builder: (context) => _NoteDialog(
         strings: widget.strings,
         initialNotes: _notes,
+        initialHeart: _heart,
       ),
     );
     if (result == null || !mounted) return;
-    setState(() => _notes = result);
+    setState(() {
+      _notes = result.notes;
+      _heart = result.heart;
+    });
   }
 
   @override
@@ -804,6 +829,11 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
                   style: Theme.of(context).textTheme.headlineMedium,
                 ),
               ),
+              if (_heart)
+                Padding(
+                  padding: const EdgeInsets.only(right: 4),
+                  child: Icon(Icons.favorite, color: scheme.primary, size: 20),
+                ),
               IconButton.filledTonal(
                 tooltip: hasNote ? widget.strings.notes : widget.strings.addNote,
                 onPressed: _editNote,
@@ -860,6 +890,7 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
                         DayEditResult.save(
                           taken: _taken!,
                           notes: _notes.trim(),
+                          heart: _heart,
                         ),
                       );
                     }
@@ -876,14 +907,23 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
   }
 }
 
+class _NoteDialogResult {
+  const _NoteDialogResult({required this.notes, required this.heart});
+
+  final String notes;
+  final bool heart;
+}
+
 class _NoteDialog extends StatefulWidget {
   const _NoteDialog({
     required this.strings,
     required this.initialNotes,
+    required this.initialHeart,
   });
 
   final Strings strings;
   final String initialNotes;
+  final bool initialHeart;
 
   @override
   State<_NoteDialog> createState() => _NoteDialogState();
@@ -892,6 +932,7 @@ class _NoteDialog extends StatefulWidget {
 class _NoteDialogState extends State<_NoteDialog> {
   late final TextEditingController _controller =
       TextEditingController(text: widget.initialNotes);
+  late bool _heart = widget.initialHeart;
 
   @override
   void initState() {
@@ -908,26 +949,74 @@ class _NoteDialogState extends State<_NoteDialog> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
     final hasText = _controller.text.trim().isNotEmpty;
+    final onField = scheme.onSurface;
+    final fieldFill = Color.alphaBlend(
+      scheme.onSurface.withValues(alpha: 0.06),
+      scheme.surface,
+    );
     return AlertDialog(
-      title: Text(widget.strings.notes),
+      backgroundColor: scheme.surface,
+      title: Row(
+        children: [
+          Expanded(
+            child: Text(
+              widget.strings.notes,
+              style: textTheme.titleLarge?.copyWith(color: scheme.onSurface),
+            ),
+          ),
+          IconButton(
+            key: const ValueKey('note-heart-toggle'),
+            tooltip:
+                _heart ? widget.strings.heartMarked : widget.strings.heartMark,
+            onPressed: () => setState(() => _heart = !_heart),
+            icon: Icon(
+              _heart ? Icons.favorite : Icons.favorite_border,
+              color: _heart ? scheme.primary : scheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
       content: TextField(
         controller: _controller,
         autofocus: true,
         maxLines: 5,
         minLines: 3,
-        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-              color: scheme.onSurface,
-            ),
+        cursorColor: scheme.primary,
+        style: textTheme.bodyLarge?.copyWith(
+          color: onField,
+          fontSize: 17,
+          height: 1.35,
+        ),
         decoration: InputDecoration(
           hintText: widget.strings.addNote,
-          border: const OutlineInputBorder(),
+          hintStyle: textTheme.bodyLarge?.copyWith(
+            color: scheme.onSurfaceVariant.withValues(alpha: 0.75),
+          ),
+          filled: true,
+          fillColor: fieldFill,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: scheme.outline),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: scheme.outline),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: scheme.primary, width: 1.6),
+          ),
         ),
       ),
       actions: [
         if (hasText)
           TextButton(
-            onPressed: () => Navigator.pop(context, ''),
+            onPressed: () => Navigator.pop(
+              context,
+              _NoteDialogResult(notes: '', heart: _heart),
+            ),
             child: Text(widget.strings.clearNote),
           ),
         TextButton(
@@ -938,7 +1027,10 @@ class _NoteDialogState extends State<_NoteDialog> {
           style: FilledButton.styleFrom(
             minimumSize: const Size(88, 44),
           ),
-          onPressed: () => Navigator.pop(context, _controller.text.trim()),
+          onPressed: () => Navigator.pop(
+            context,
+            _NoteDialogResult(notes: _controller.text.trim(), heart: _heart),
+          ),
           child: Text(widget.strings.done),
         ),
       ],
