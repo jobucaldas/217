@@ -63,8 +63,6 @@ class Strings {
   String get legendUnrecorded => pt ? 'Em aberto' : 'Open';
   String get takenLabel => pt ? 'Tomei' : 'Taken';
   String get missedLabel => pt ? 'Perdi' : 'Missed';
-  String get pickStatus =>
-      pt ? 'Como foi a tomada?' : 'How did intake go?';
   String get reminders => pt ? 'Lembrete' : 'Reminder';
   String get reminderTime => pt ? 'Horário' : 'Time';
   String get reminderEnable => pt ? 'Lembrar todo dia' : 'Remind me daily';
@@ -88,4 +86,36 @@ class Strings {
   String get reminderWebNeedsPush => pt
       ? 'Neste navegador, entrega em segundo plano precisa de push do servidor.'
       : 'In this browser, background delivery needs server push.';
+
+  // Account / share
+  String get deleteAccount => pt ? 'Excluir conta' : 'Delete account';
+  String get deleteAccountWarn => pt
+      ? 'Isso apaga permanentemente seus dados. Não dá para desfazer.'
+      : 'This permanently deletes your data. This cannot be undone.';
+  String get deleteAccountConfirm => pt ? 'Excluir definitivamente' : 'Delete permanently';
+  String get shareCalendar =>
+      pt ? 'Compartilhar calendário com namorado' : 'Share calendar with boyfriend';
+  String get shareInviteCode => pt ? 'Código do convite' : 'Invite code';
+  String get shareCopyCode => pt ? 'Copiar código' : 'Copy code';
+  String get shareEnable => pt ? 'Gerar convite' : 'Create invite';
+  String get shareRevoke => pt ? 'Revogar acesso' : 'Revoke access';
+  String get shareActiveWith => pt ? 'Compartilhado com' : 'Shared with';
+  String get shareWaiting =>
+      pt ? 'Aguardando o namorado entrar com o código.' : 'Waiting for boyfriend to join with the code.';
+  String get inbox => pt ? 'Caixa de entrada' : 'Inbox';
+  String get inboxEmpty => pt ? 'Nenhuma nota ainda.' : 'No notes yet.';
+  String get leaveNote => pt ? 'Deixar uma nota' : 'Leave a note';
+  String get sendNote => pt ? 'Enviar' : 'Send';
+  String get partnerRevokedTitle => pt
+      ? 'Você não está convidado ao calendário 217 dela'
+      : 'You are not invited to her 217 calendar';
+  String get partnerRevokedBody => pt
+      ? 'Quer adicionar o código dela ou excluir esta conta?'
+      : 'Add her code, or delete this account?';
+  String get addHerCode => pt ? 'Adicionar código' : 'Add her code';
+  String get enterInviteCode => pt ? 'Código do convite' : 'Invite code';
+  String get joinCalendar => pt ? 'Entrar' : 'Join';
+  String get readOnlyCalendar =>
+      pt ? 'Calendário em modo leitura' : 'Read-only calendar';
+  String get accountDeleted => pt ? 'Conta excluída' : 'Account deleted';
 }

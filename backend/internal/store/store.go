@@ -9,7 +9,9 @@ import (
 type Store interface {
 	CreateUser(email, name, password string) (*model.User, error)
 	GetUserByEmail(email string) (*model.User, error)
+	GetUserByID(userID string) (*model.User, error)
 	LinkWorkOSIdentity(subject, verifiedEmail, name string, authoritative bool) (*model.User, error)
+	DeleteUser(userID string) error
 
 	GetEntry(userID, date string) (*model.Entry, error)
 	ListEntries(userID string, year, month int) ([]*model.Entry, error)
@@ -35,6 +37,18 @@ type Store interface {
 	GetUserBySession(sessionID string) (*model.User, error)
 	DeleteSession(sessionID string) error
 	DeleteAllSessionsForUser(userID string) error
+
+	// Calendar sharing (owner ↔ partner)
+	GetShareState(userID string) (*model.ShareState, error)
+	EnableShare(ownerID string) (*model.ShareState, error)
+	RevokeShare(ownerID string) (*model.ShareState, error)
+	AcceptShare(partnerID, inviteCode string) (*model.ShareState, error)
+	CalendarSubjectID(userID string) (string, error)
+
+	// Partner → owner inbox notes
+	ListInboxNotes(ownerID string) ([]*model.PartnerNote, error)
+	CreatePartnerNote(partnerID, body string) (*model.PartnerNote, error)
+	MarkInboxNoteRead(ownerID, noteID string) error
 
 	Close() error
 }

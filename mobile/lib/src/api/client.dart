@@ -91,18 +91,22 @@ class ApiClient {
     }
   }
 
-  Future<User?> currentUser() async {
+  Future<SessionSnapshot> currentSession() async {
     final response = await _send('GET', _uri('/api/auth/session'));
     if (response.statusCode != 200) {
-      return null;
+      return const SessionSnapshot();
     }
     final decoded = jsonDecode(response.body) as Map<String, dynamic>;
-    final user = decoded['user'];
-    if (user == null) {
+    final snapshot = SessionSnapshot.fromJson(decoded);
+    if (snapshot.user == null) {
       await clearSession();
-      return null;
     }
-    return User.fromJson(user as Map<String, dynamic>);
+    return snapshot;
+  }
+
+  Future<User?> currentUser() async {
+    final snapshot = await currentSession();
+    return snapshot.user;
   }
 
   Future<User> signInWithWorkOS() async {
@@ -159,6 +163,80 @@ class ApiClient {
       await _send('POST', _uri('/api/auth/logout'), body: {});
     } finally {
       await clearSession();
+    }
+  }
+
+  Future<void> deleteAccount() async {
+    final response = await _send('DELETE', _uri('/api/account'));
+    await clearSession();
+    if (response.statusCode != 204 && response.statusCode != 200) {
+      throw StateError('delete account failed: ${response.body}');
+    }
+  }
+
+  Future<ShareState> getShare() async {
+    final response = await _send('GET', _uri('/api/share'));
+    if (response.statusCode != 200) {
+      throw StateError('get share failed: ${response.body}');
+    }
+    return ShareState.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
+  Future<ShareState> enableShare() async {
+    final response = await _send('POST', _uri('/api/share/enable'), body: {});
+    if (response.statusCode != 200) {
+      throw StateError('enable share failed: ${response.body}');
+    }
+    return ShareState.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
+  Future<ShareState> revokeShare() async {
+    final response = await _send('POST', _uri('/api/share/revoke'), body: {});
+    if (response.statusCode != 200) {
+      throw StateError('revoke share failed: ${response.body}');
+    }
+    return ShareState.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
+  Future<ShareState> acceptShare(String code) async {
+    final response = await _send(
+      'POST',
+      _uri('/api/share/accept'),
+      body: {'code': code},
+    );
+    if (response.statusCode != 200) {
+      throw StateError('accept share failed: ${response.body}');
+    }
+    return ShareState.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
+  Future<List<PartnerNote>> listInbox() async {
+    final response = await _send('GET', _uri('/api/inbox'));
+    if (response.statusCode != 200) {
+      throw StateError('inbox failed: ${response.body}');
+    }
+    final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+    return (decoded['notes'] as List<dynamic>? ?? const [])
+        .map((e) => PartnerNote.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<PartnerNote> createPartnerNote(String body) async {
+    final response = await _send(
+      'POST',
+      _uri('/api/partner-notes'),
+      body: {'body': body},
+    );
+    if (response.statusCode != 201 && response.statusCode != 200) {
+      throw StateError('partner note failed: ${response.body}');
+    }
+    return PartnerNote.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
+  Future<void> markInboxNoteRead(String id) async {
+    final response = await _send('POST', _uri('/api/inbox/$id/read'), body: {});
+    if (response.statusCode != 204 && response.statusCode != 200) {
+      throw StateError('mark note read failed: ${response.body}');
     }
   }
 

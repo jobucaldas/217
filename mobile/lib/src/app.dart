@@ -9,6 +9,7 @@ import 'prefs.dart';
 import 'screens/auth_screen.dart';
 import 'screens/calendar_screen.dart';
 import 'screens/settings_screen.dart';
+import 'screens/share_screens.dart';
 import 'theme/app_theme.dart';
 
 class App217 extends StatefulWidget {
@@ -27,6 +28,7 @@ class _App217State extends State<App217> {
   final GlobalKey<ScaffoldMessengerState> _messengerKey =
       GlobalKey<ScaffoldMessengerState>();
   User? _user;
+  ShareState _share = const ShareState(status: 'none');
   bool _loading = true;
   bool _portuguese = true;
   ThemeMode _themeMode = ThemeMode.system;
@@ -46,22 +48,33 @@ class _App217State extends State<App217> {
       final appearance = await _prefs.load();
       final hintGone = await _prefs.reminderHintDismissed();
       await _api.loadPersistedApiBase();
-      final user = await _api.currentUser();
+      final session = await _api.currentSession();
       if (!mounted) return;
       setState(() {
         _themeMode = appearance.mode;
         _palette = appearance.palette;
         _reminderHintDismissed = hintGone;
-        _user = user;
+        _user = session.user;
+        _share = session.share ?? const ShareState(status: 'none');
         _loading = false;
       });
     } catch (_) {
       if (!mounted) return;
       setState(() {
         _user = null;
+        _share = const ShareState(status: 'none');
         _loading = false;
       });
     }
+  }
+
+  Future<void> _refreshSession() async {
+    final session = await _api.currentSession();
+    if (!mounted) return;
+    setState(() {
+      _user = session.user;
+      _share = session.share ?? const ShareState(status: 'none');
+    });
   }
 
   Future<void> _setThemeMode(ThemeMode mode) async {
@@ -80,10 +93,15 @@ class _App217State extends State<App217> {
       final user = await beginWorkOSSignIn(_api);
       if (!mounted) return;
       if (user != null) {
+        final session = await _api.currentSession();
+        if (!mounted) return;
         setState(() {
-          _user = user;
+          _user = session.user ?? user;
+          _share = session.share ?? const ShareState(status: 'none');
           _loading = false;
         });
+      } else {
+        setState(() => _loading = false);
       }
     } catch (err) {
       if (!mounted) return;
@@ -97,7 +115,20 @@ class _App217State extends State<App217> {
   Future<void> _logout() async {
     await _api.logout();
     if (!mounted) return;
-    setState(() => _user = null);
+    setState(() {
+      _user = null;
+      _share = const ShareState(status: 'none');
+    });
+  }
+
+  void _onAccountDeleted() {
+    setState(() {
+      _user = null;
+      _share = const ShareState(status: 'none');
+    });
+    _messengerKey.currentState?.showSnackBar(
+      SnackBar(content: Text(_strings.accountDeleted)),
+    );
   }
 
   void _openSettings() {
@@ -109,9 +140,13 @@ class _App217State extends State<App217> {
           portuguese: _portuguese,
           themeMode: _themeMode,
           palette: _palette,
+          user: _user,
+          share: _share,
           onPortugueseChanged: (pt) => setState(() => _portuguese = pt),
           onThemeModeChanged: _setThemeMode,
           onPaletteChanged: _setPalette,
+          onShareChanged: (share) => setState(() => _share = share),
+          onAccountDeleted: _onAccountDeleted,
           onLogout: _user == null ? null : _logout,
           onApiBaseChanged: () => setState(() {}),
         ),
@@ -123,6 +158,56 @@ class _App217State extends State<App217> {
     await _prefs.dismissReminderHint();
     if (!mounted) return;
     setState(() => _reminderHintDismissed = true);
+  }
+
+  Widget _home() {
+    if (_loading) {
+      return Builder(
+        builder: (context) => Scaffold(
+          body: Center(
+            child: Text(
+              _strings.loading,
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+          ),
+        ),
+      );
+    }
+    if (_user == null) {
+      return AuthScreen(
+        strings: _strings,
+        apiBaseUrl: _api.config.apiBaseUrl.isEmpty
+            ? 'same-origin'
+            : _api.config.apiBaseUrl,
+        onSignIn: _signIn,
+        onToggleLanguage: () => setState(() => _portuguese = !_portuguese),
+        onOpenSettings: _openSettings,
+        showReminderHint: !_reminderHintDismissed,
+        onDismissReminderHint: _dismissReminderHint,
+      );
+    }
+    if (_user!.isPartner && _share.isRevoked) {
+      return PartnerRevokedScreen(
+        api: _api,
+        strings: _strings,
+        onJoined: (share) {
+          setState(() => _share = share);
+          _refreshSession();
+        },
+        onAccountDeleted: _onAccountDeleted,
+        onOpenSettings: _openSettings,
+      );
+    }
+    return CalendarScreen(
+      api: _api,
+      user: _user!,
+      share: _share,
+      strings: _strings,
+      palette: _palette,
+      onLogout: _logout,
+      onOpenSettings: _openSettings,
+      onShareChanged: (share) => setState(() => _share = share),
+    );
   }
 
   @override
@@ -141,38 +226,7 @@ class _App217State extends State<App217> {
         brightness: Brightness.dark,
         palette: _palette,
       ),
-      home: _loading
-          ? Builder(
-              builder: (context) => Scaffold(
-                body: Center(
-                  child: Text(
-                    _strings.loading,
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                ),
-              ),
-            )
-          : _user == null
-              ? AuthScreen(
-                  strings: _strings,
-                  apiBaseUrl: _api.config.apiBaseUrl.isEmpty
-                      ? 'same-origin'
-                      : _api.config.apiBaseUrl,
-                  onSignIn: _signIn,
-                  onToggleLanguage: () =>
-                      setState(() => _portuguese = !_portuguese),
-                  onOpenSettings: _openSettings,
-                  showReminderHint: !_reminderHintDismissed,
-                  onDismissReminderHint: _dismissReminderHint,
-                )
-              : CalendarScreen(
-                  api: _api,
-                  user: _user!,
-                  strings: _strings,
-                  palette: _palette,
-                  onLogout: _logout,
-                  onOpenSettings: _openSettings,
-                ),
+      home: _home(),
     );
   }
 }

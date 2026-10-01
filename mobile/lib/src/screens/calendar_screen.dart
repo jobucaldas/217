@@ -5,6 +5,7 @@ import '../api/client.dart';
 import '../i18n.dart';
 import '../models.dart';
 import '../theme/app_theme.dart';
+import 'share_screens.dart';
 import 'today_nudge.dart';
 
 class CalendarScreen extends StatefulWidget {
@@ -15,14 +16,18 @@ class CalendarScreen extends StatefulWidget {
     required this.strings,
     required this.onLogout,
     required this.onOpenSettings,
+    this.share = const ShareState(status: 'none'),
+    this.onShareChanged,
     this.palette = AppPalette.azure,
   });
 
   final ApiClient api;
   final User user;
+  final ShareState share;
   final Strings strings;
   final Future<void> Function() onLogout;
   final VoidCallback onOpenSettings;
+  final ValueChanged<ShareState>? onShareChanged;
   final AppPalette palette;
 
   @override
@@ -93,6 +98,9 @@ class _CalendarScreenState extends State<CalendarScreen> {
   }
 
   Future<void> _openDay(DateTime day) async {
+    if (!widget.share.canEditCalendar) {
+      return;
+    }
     final key = DateFormat('yyyy-MM-dd').format(day);
     final existing = key == _todayKey ? _todayEntry : _entries[key];
     final result = await showModalBottomSheet<DayEditResult>(
@@ -136,12 +144,42 @@ class _CalendarScreenState extends State<CalendarScreen> {
             ? App217Colors.statusTaken(brightness, widget.palette)
             : App217Colors.statusMissed(brightness, widget.palette));
     final humanDate = DateFormat.MMMMd(locale).format(_today);
-    final nudgeVisible = TodayNudge.isVisible(_todayEntry);
+    final nudgeVisible =
+        TodayNudge.isVisible(_todayEntry) && widget.share.canEditCalendar;
 
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.strings.brand),
         actions: [
+          if (widget.user.isOwner)
+            IconButton(
+              tooltip: widget.strings.inbox,
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => InboxScreen(
+                      api: widget.api,
+                      strings: widget.strings,
+                    ),
+                  ),
+                );
+              },
+              icon: Badge(
+                isLabelVisible: widget.share.unreadNotes > 0,
+                label: Text('${widget.share.unreadNotes}'),
+                child: const Icon(Icons.inbox_outlined),
+              ),
+            ),
+          if (widget.user.isPartner && widget.share.isActive)
+            IconButton(
+              tooltip: widget.strings.leaveNote,
+              onPressed: () => showPartnerNoteDialog(
+                context: context,
+                api: widget.api,
+                strings: widget.strings,
+              ),
+              icon: const Icon(Icons.edit_note_outlined),
+            ),
           IconButton(
             tooltip: widget.strings.settings,
             onPressed: widget.onOpenSettings,
@@ -159,6 +197,17 @@ class _CalendarScreenState extends State<CalendarScreen> {
           Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              if (!widget.share.canEditCalendar)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+                  child: Text(
+                    widget.strings.readOnlyCalendar,
+                    style: text.labelLarge?.copyWith(
+                      color: scheme.primary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
                 child: Column(
@@ -607,13 +656,6 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
                 ),
               ),
             ],
-          ),
-          const SizedBox(height: 6),
-          Text(
-            widget.strings.pickStatus,
-            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                  color: scheme.onSurfaceVariant,
-                ),
           ),
           const SizedBox(height: 14),
           SegmentedButton<bool>(

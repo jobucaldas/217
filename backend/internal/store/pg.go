@@ -42,9 +42,9 @@ func (s *PGStore) CreateUser(email, name, password string) (*model.User, error) 
 	user := &model.User{}
 	err = s.db.QueryRow(
 		`INSERT INTO users (email, name, api_key, password_hash) VALUES ($1, $2, $3, $4)
-		 RETURNING id, email, name, api_key, created_at, updated_at`,
+		 RETURNING id, email, name, COALESCE(role, 'owner'), api_key, created_at, updated_at`,
 		email, name, apiKey, string(hash),
-	).Scan(&user.ID, &user.Email, &user.Name, &user.APIKey, &user.CreatedAt, &user.UpdatedAt)
+	).Scan(&user.ID, &user.Email, &user.Name, &user.Role, &user.APIKey, &user.CreatedAt, &user.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("creating user: %w", err)
 	}
@@ -276,11 +276,11 @@ func (s *PGStore) LinkWorkOSIdentity(subject, verifiedEmail, name string, author
 	}
 
 	user := &model.User{}
-	err = tx.QueryRow(`SELECT u.id, u.email, u.name, u.api_key, u.password_hash, u.created_at, u.updated_at
+	err = tx.QueryRow(`SELECT u.id, u.email, u.name, COALESCE(u.role, 'owner'), u.api_key, u.password_hash, u.created_at, u.updated_at
 		FROM workos_identities gi
 		JOIN users u ON u.id = gi.user_id
 		WHERE gi.subject = $1`, subject).
-		Scan(&user.ID, &user.Email, &user.Name, &user.APIKey, &user.PasswordHash, &user.CreatedAt, &user.UpdatedAt)
+		Scan(&user.ID, &user.Email, &user.Name, &user.Role, &user.APIKey, &user.PasswordHash, &user.CreatedAt, &user.UpdatedAt)
 	if err == nil {
 		if err := tx.Commit(); err != nil {
 			return nil, fmt.Errorf("committing workos identity lookup: %w", err)
@@ -312,17 +312,17 @@ func (s *PGStore) LinkWorkOSIdentity(subject, verifiedEmail, name string, author
 		}
 	}
 
-	err = tx.QueryRow(`SELECT id, email, name, api_key, password_hash, created_at, updated_at
+	err = tx.QueryRow(`SELECT id, email, name, COALESCE(role, 'owner'), api_key, password_hash, created_at, updated_at
 		FROM users WHERE LOWER(email) = $1 FOR UPDATE`, normalizedEmail).
-		Scan(&user.ID, &user.Email, &user.Name, &user.APIKey, &user.PasswordHash, &user.CreatedAt, &user.UpdatedAt)
+		Scan(&user.ID, &user.Email, &user.Name, &user.Role, &user.APIKey, &user.PasswordHash, &user.CreatedAt, &user.UpdatedAt)
 	if err == sql.ErrNoRows {
 		if name == "" {
 			name = normalizedEmail
 		}
 		err = tx.QueryRow(`INSERT INTO users (email, name, api_key, password_hash)
-			VALUES ($1, $2, $3, '') RETURNING id, email, name, api_key, password_hash, created_at, updated_at`,
+			VALUES ($1, $2, $3, '') RETURNING id, email, name, COALESCE(role, 'owner'), api_key, password_hash, created_at, updated_at`,
 			normalizedEmail, name, generateAPIKey()).
-			Scan(&user.ID, &user.Email, &user.Name, &user.APIKey, &user.PasswordHash, &user.CreatedAt, &user.UpdatedAt)
+			Scan(&user.ID, &user.Email, &user.Name, &user.Role, &user.APIKey, &user.PasswordHash, &user.CreatedAt, &user.UpdatedAt)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("finding user for workos identity: %w", err)
@@ -556,9 +556,9 @@ func (s *PGStore) GetUserBySession(sessionID string) (*model.User, error) {
 	hash := hashString(sessionID)
 	user := &model.User{}
 	var expires sql.NullTime
-	err := s.db.QueryRow(`SELECT u.id, u.email, u.name, u.api_key, u.password_hash, u.created_at, u.updated_at, s.expires_at
+	err := s.db.QueryRow(`SELECT u.id, u.email, u.name, COALESCE(u.role, 'owner'), u.api_key, u.password_hash, u.created_at, u.updated_at, s.expires_at
 		FROM sessions s JOIN users u ON u.id = s.user_id
-		WHERE s.id = $1`, hash).Scan(&user.ID, &user.Email, &user.Name, &user.APIKey, &user.PasswordHash, &user.CreatedAt, &user.UpdatedAt, &expires)
+		WHERE s.id = $1`, hash).Scan(&user.ID, &user.Email, &user.Name, &user.Role, &user.APIKey, &user.PasswordHash, &user.CreatedAt, &user.UpdatedAt, &expires)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("session not found")
 	}

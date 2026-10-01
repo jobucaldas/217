@@ -153,6 +153,15 @@ func StartWithPush(addr, databaseURL, appBaseURL string, push PushConfig, workos
 	mux.HandleFunc("DELETE /api/entries/{date}", h.AuthMiddleware(h.DeleteEntry))
 	mux.HandleFunc("GET /api/stats", h.AuthMiddleware(h.GetStats))
 
+	mux.HandleFunc("DELETE /api/account", h.AuthMiddleware(h.DeleteAccount))
+	mux.HandleFunc("GET /api/share", h.AuthMiddleware(h.GetShare))
+	mux.HandleFunc("POST /api/share/enable", h.AuthMiddleware(h.EnableShare))
+	mux.HandleFunc("POST /api/share/revoke", h.AuthMiddleware(h.RevokeShare))
+	mux.HandleFunc("POST /api/share/accept", h.AuthMiddleware(h.AcceptShare))
+	mux.HandleFunc("GET /api/inbox", h.AuthMiddleware(h.ListInbox))
+	mux.HandleFunc("POST /api/inbox/{id}/read", h.AuthMiddleware(h.MarkInboxNoteRead))
+	mux.HandleFunc("POST /api/partner-notes", h.AuthMiddleware(h.CreatePartnerNote))
+
 	mux.HandleFunc("GET /api/reminders/preferences", h.AuthMiddleware(h.GetReminderPreference))
 	mux.HandleFunc("PUT /api/reminders/preferences", h.AuthMiddleware(h.UpsertReminderPreference))
 	mux.HandleFunc("GET /api/reminders/vapid-public-key", h.AuthMiddleware(h.VAPIDPublicKey))

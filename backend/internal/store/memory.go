@@ -42,6 +42,8 @@ type MemoryStore struct {
 	workosSubjects map[string]string // subject -> userID
 	oauthAttempts  map[string]memoryOAuthAttempt
 	sessions       map[string]memorySession // keyed by hashed session id (sha256 hex)
+	shares         map[string]*model.CalendarShare
+	partnerNotes   map[string]*model.PartnerNote
 }
 
 func NewMemoryStore() *MemoryStore {
@@ -54,6 +56,8 @@ func NewMemoryStore() *MemoryStore {
 		workosSubjects: make(map[string]string),
 		oauthAttempts:  make(map[string]memoryOAuthAttempt),
 		sessions:       make(map[string]memorySession),
+		shares:         make(map[string]*model.CalendarShare),
+		partnerNotes:   make(map[string]*model.PartnerNote),
 	}
 }
 
@@ -77,6 +81,7 @@ func (s *MemoryStore) CreateUser(email, name, password string) (*model.User, err
 		ID:           generateID(),
 		Email:        email,
 		Name:         name,
+		Role:         model.RoleOwner,
 		PasswordHash: string(hash),
 		APIKey:       generateAPIKey(),
 		CreatedAt:    now,
@@ -301,6 +306,7 @@ func (s *MemoryStore) LinkWorkOSIdentity(subject, verifiedEmail, name string, au
 		ID:        generateID(),
 		Email:     normalizedEmail,
 		Name:      name,
+		Role:      model.RoleOwner,
 		APIKey:    generateAPIKey(),
 		CreatedAt: now,
 		UpdatedAt: now,
