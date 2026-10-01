@@ -121,7 +121,7 @@ void main() {
   });
 
   testWidgets(
-    'record-today FAB is a Positioned overlay (grid keeps 12px inset)',
+    'record-today chip is a Positioned overlay (grid keeps 12px inset)',
     (tester) async {
       const size = Size(390, 844);
       await tester.binding.setSurfaceSize(size);
@@ -163,18 +163,19 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byIcon(Icons.add), findsOneWidget);
-      expect(find.text('Record today'), findsNothing);
+      expect(find.text('Update today'), findsOneWidget);
       expect(find.byType(Positioned), findsWidgets);
-      expect(overlayInset, findsOneWidget);
+      // Carousel keeps three month pages; each uses the 12px bottom inset.
+      expect(overlayInset, findsNWidgets(3));
       expect(
         reservedForFab,
         findsNothing,
-        reason: 'FAB must not inflate month-grid bottomInset',
+        reason: 'chip must not inflate month-grid bottomInset',
       );
     },
   );
 
-  testWidgets('horizontal swipe changes month with animation', (tester) async {
+  testWidgets('horizontal carousel swipe changes month with snap', (tester) async {
     const size = Size(390, 844);
     await tester.binding.setSurfaceSize(size);
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -202,7 +203,7 @@ void main() {
         ),
       ),
     );
-    // FAB settle bounce (~860ms) + load.
+    // Chip settle bounce (~860ms) + load.
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 900));
     await tester.pumpAndSettle();
@@ -211,19 +212,20 @@ void main() {
     final labelBefore = find.textContaining('${now.year}');
     expect(labelBefore, findsWidgets);
 
-    expect(find.byType(AnimatedSwitcher), findsOneWidget);
+    // Carousel uses Transform.translate pages, not AnimatedSwitcher.
+    expect(find.byType(AnimatedSwitcher), findsNothing);
+    expect(find.byType(ClipRect), findsWidgets);
+
     await tester.fling(
-      find.byType(AnimatedSwitcher),
+      find.byType(ClipRect).first,
       const Offset(-420, 0),
       1400,
     );
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 240));
+    await tester.pump(const Duration(milliseconds: 320));
     await tester.pumpAndSettle();
 
     final next = DateTime(now.year, now.month + 1);
     expect(find.textContaining('${next.year}'), findsWidgets);
-    // Swiped into a different month header than the starting month number.
-    expect(find.byType(AnimatedSwitcher), findsOneWidget);
   });
 }

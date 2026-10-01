@@ -1,11 +1,11 @@
 {
-    "name": "a217",
-    "short_name": "a217",
+    "name": "217",
+    "short_name": "217",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#172554",
+    "theme_color": "#1D4ED8",
+    "description": "217 anticonceptional intake tracker",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

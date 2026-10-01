@@ -12,7 +12,8 @@ void main() {
   GoogleFonts.config.allowRuntimeFetching = false;
 
   for (final brightness in Brightness.values) {
-    testWidgets('today nudge is circular plus when unrecorded ($brightness)',
+    testWidgets(
+        'today nudge is text pill with connected plus when unrecorded ($brightness)',
         (tester) async {
       await tester.pumpWidget(
         MaterialApp(
@@ -32,14 +33,38 @@ void main() {
       );
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 50));
-      expect(find.text('Registrar hoje'), findsNothing);
+      expect(find.text('Atualizar hoje'), findsOneWidget);
       expect(find.byIcon(Icons.add), findsOneWidget);
       expect(find.byIcon(Icons.notifications_active_outlined), findsNothing);
-      expect(find.byType(Positioned), findsOneWidget);
-      expect(
-        tester.getSize(find.byType(InkWell)),
-        const Size(TodayNudge.size, TodayNudge.size),
+      expect(find.byType(Positioned), findsWidgets);
+      // Control is a horizontal pill+plus, not a lone circular FAB.
+      final size = tester.getSize(find.byKey(const ValueKey('today-nudge-control')));
+      expect(size.width, greaterThan(TodayNudge.height));
+      expect(size.height, TodayNudge.height);
+    });
+
+    testWidgets('today nudge shows Update today in English ($brightness)',
+        (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildApp217Theme(brightness: brightness),
+          home: Scaffold(
+            body: Stack(
+              children: [
+                TodayNudge(
+                  strings: const Strings(false),
+                  todayEntry: null,
+                  onRecord: () {},
+                ),
+              ],
+            ),
+          ),
+        ),
       );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(find.text('Update today'), findsOneWidget);
+      expect(find.byIcon(Icons.add), findsOneWidget);
     });
 
     testWidgets('today nudge hidden after registration ($brightness)',

@@ -5,8 +5,8 @@ import '../i18n.dart';
 import '../models.dart';
 import '../prefs.dart';
 
-/// Floating “record today” control: circular plus, idle settle bounce,
-/// magnetic edge snap, persists side + bottom inset.
+/// Floating “update today” control: text pill + connected plus accessory,
+/// idle settle bounce, magnetic edge snap, persists side + bottom inset.
 class TodayNudge extends StatefulWidget {
   const TodayNudge({
     super.key,
@@ -24,8 +24,25 @@ class TodayNudge extends StatefulWidget {
   /// Mid-screen hero CTA is never used; chip only when still open.
   static bool isVisible(Entry? todayEntry) => todayEntry == null;
 
-  /// Circular hit target diameter (logical px).
-  static const double size = 64;
+  /// Pill height (logical px).
+  static const double height = 48;
+
+  /// Plus accessory diameter (logical px).
+  static const double plusSize = 34;
+
+  /// How far the plus overlaps the pill (connected look).
+  static const double plusOverlap = 10;
+
+  /// Horizontal padding inside the text pill.
+  static const double pillPadX = 16;
+
+  /// Approximate control width for the longer locale label.
+  static double widthFor(Strings strings) {
+    // "Atualizar hoje" / "Update today" — keep magnet math stable.
+    final label = strings.updateToday;
+    final textW = label.length * 8.2;
+    return pillPadX * 2 + textW + plusSize - plusOverlap;
+  }
 
   @override
   State<TodayNudge> createState() => _TodayNudgeState();
@@ -45,6 +62,8 @@ class _TodayNudgeState extends State<TodayNudge> with TickerProviderStateMixin {
   Animation<double>? _snapSide;
 
   bool get visible => TodayNudge.isVisible(widget.todayEntry);
+
+  double get _width => TodayNudge.widthFor(widget.strings);
 
   @override
   void initState() {
@@ -128,7 +147,7 @@ class _TodayNudgeState extends State<TodayNudge> with TickerProviderStateMixin {
 
   void _onPanEnd(double viewWidth) {
     final minLeft = 16.0;
-    final maxLeft = (viewWidth - 16 - TodayNudge.size).clamp(minLeft, viewWidth);
+    final maxLeft = (viewWidth - 16 - _width).clamp(minLeft, viewWidth);
     final base = _right ? maxLeft : minLeft;
     final currentLeft = (base + _dragDx).clamp(minLeft, maxLeft);
     final mid = (minLeft + maxLeft) / 2;
@@ -156,7 +175,7 @@ class _TodayNudgeState extends State<TodayNudge> with TickerProviderStateMixin {
 
   double _leftFor(double viewWidth) {
     final minLeft = 16.0;
-    final maxLeft = (viewWidth - 16 - TodayNudge.size).clamp(minLeft, viewWidth);
+    final maxLeft = (viewWidth - 16 - _width).clamp(minLeft, viewWidth);
     if (_dragging) {
       final base = _right ? maxLeft : minLeft;
       return (base + _dragDx).clamp(minLeft, maxLeft);
@@ -176,6 +195,9 @@ class _TodayNudgeState extends State<TodayNudge> with TickerProviderStateMixin {
         .clamp(48.0, media.size.height);
     final bottom = _ready ? _bottom.clamp(8.0, maxBottom) : 16.0;
     final floatDy = _dragging ? 0.0 : _floatDy.value;
+    final label = widget.strings.updateToday;
+    // Plus sits on the outer edge (toward screen edge), connected to the pill.
+    final plusOnRight = _right;
 
     return AnimatedBuilder(
       animation: Listenable.merge([_float, _snap]),
@@ -188,27 +210,82 @@ class _TodayNudgeState extends State<TodayNudge> with TickerProviderStateMixin {
             onPanUpdate: (d) => _onPanUpdate(d, maxBottom),
             onPanEnd: (_) => _onPanEnd(media.size.width),
             child: Tooltip(
-              message: widget.strings.recordToday,
-              child: Material(
-                elevation: 12,
-                color: scheme.primaryContainer,
-                shadowColor: scheme.shadow.withValues(alpha: 0.55),
-                surfaceTintColor: scheme.primary.withValues(alpha: 0.14),
-                shape: const CircleBorder(),
-                clipBehavior: Clip.antiAlias,
-                child: InkWell(
-                  onTap: widget.onRecord,
-                  customBorder: const CircleBorder(),
-                  child: SizedBox(
-                    width: TodayNudge.size,
-                    height: TodayNudge.size,
-                    child: Icon(
-                      Icons.add,
-                      color: scheme.onPrimaryContainer,
-                      size: 30,
-                      semanticLabel: widget.strings.recordToday,
+              message: label,
+              child: SizedBox(
+                key: const ValueKey('today-nudge-control'),
+                width: _width,
+                height: TodayNudge.height,
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  alignment: Alignment.center,
+                  children: [
+                    Positioned(
+                      left: plusOnRight ? 0 : TodayNudge.plusSize - TodayNudge.plusOverlap,
+                      right: plusOnRight ? TodayNudge.plusSize - TodayNudge.plusOverlap : 0,
+                      top: 0,
+                      bottom: 0,
+                      child: Material(
+                        elevation: 10,
+                        color: scheme.primaryContainer,
+                        shadowColor: scheme.shadow.withValues(alpha: 0.5),
+                        surfaceTintColor: scheme.primary.withValues(alpha: 0.12),
+                        shape: const StadiumBorder(),
+                        clipBehavior: Clip.antiAlias,
+                        child: InkWell(
+                          onTap: widget.onRecord,
+                          customBorder: const StadiumBorder(),
+                          child: Padding(
+                            padding: EdgeInsets.only(
+                              left: plusOnRight
+                                  ? TodayNudge.pillPadX
+                                  : TodayNudge.pillPadX + 4,
+                              right: plusOnRight
+                                  ? TodayNudge.pillPadX + 4
+                                  : TodayNudge.pillPadX,
+                            ),
+                            child: Center(
+                              child: Text(
+                                label,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                                      color: scheme.onPrimaryContainer,
+                                      fontWeight: FontWeight.w700,
+                                      letterSpacing: 0.1,
+                                    ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
+                    Positioned(
+                      left: plusOnRight ? null : 0,
+                      right: plusOnRight ? 0 : null,
+                      top: (TodayNudge.height - TodayNudge.plusSize) / 2,
+                      child: Material(
+                        elevation: 14,
+                        color: scheme.primary,
+                        shadowColor: scheme.shadow.withValues(alpha: 0.55),
+                        shape: const CircleBorder(),
+                        clipBehavior: Clip.antiAlias,
+                        child: InkWell(
+                          onTap: widget.onRecord,
+                          customBorder: const CircleBorder(),
+                          child: SizedBox(
+                            width: TodayNudge.plusSize,
+                            height: TodayNudge.plusSize,
+                            child: Icon(
+                              Icons.add,
+                              color: scheme.onPrimary,
+                              size: 22,
+                              semanticLabel: label,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
