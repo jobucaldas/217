@@ -14,11 +14,30 @@ abstract final class App217Colors {
   static const taken = Color(0xFF1B7A4A);
   static const missed = Color(0xFFB42318);
   static const missedSoft = Color(0xFFFCE8E6);
+
+  /// Status / cell fills — lighter in dark mode so labels stay readable.
+  static const takenDark = Color(0xFF3DDC8A);
+  static const missedDark = Color(0xFFFF8A80);
+  static const takenFillDark = Color(0xFF145C38);
+  static const missedFillDark = Color(0xFF8B1E18);
+
+  static Color statusTaken(Brightness b) =>
+      b == Brightness.dark ? takenDark : taken;
+
+  static Color statusMissed(Brightness b) =>
+      b == Brightness.dark ? missedDark : missed;
+
+  static Color cellTaken(Brightness b) =>
+      b == Brightness.dark ? takenFillDark : taken;
+
+  static Color cellMissed(Brightness b) =>
+      b == Brightness.dark ? missedFillDark : missed;
 }
 
-ThemeData buildApp217Theme({required Brightness brightness}) {
+/// Colors only — safe for unit tests (no Google Fonts / binding).
+ColorScheme buildApp217ColorScheme(Brightness brightness) {
   final isDark = brightness == Brightness.dark;
-  final scheme = ColorScheme(
+  return ColorScheme(
     brightness: brightness,
     primary: isDark ? const Color(0xFF7BC4AE) : App217Colors.forest,
     onPrimary: isDark ? App217Colors.ink : Colors.white,
@@ -46,6 +65,15 @@ ThemeData buildApp217Theme({required Brightness brightness}) {
     inversePrimary: App217Colors.moss,
     surfaceTint: App217Colors.forest,
   );
+}
+
+Color scaffoldBackgroundFor(Brightness brightness) =>
+    brightness == Brightness.dark
+        ? const Color(0xFF0C1411)
+        : App217Colors.canvas;
+
+ThemeData buildApp217Theme({required Brightness brightness}) {
+  final scheme = buildApp217ColorScheme(brightness);
 
   final display = GoogleFonts.frauncesTextTheme();
   final body = GoogleFonts.sourceSans3TextTheme();
@@ -80,7 +108,7 @@ ThemeData buildApp217Theme({required Brightness brightness}) {
     useMaterial3: true,
     colorScheme: scheme,
     textTheme: textTheme,
-    scaffoldBackgroundColor: isDark ? const Color(0xFF0C1411) : App217Colors.canvas,
+    scaffoldBackgroundColor: scaffoldBackgroundFor(brightness),
     appBarTheme: AppBarTheme(
       backgroundColor: Colors.transparent,
       foregroundColor: scheme.onSurface,
