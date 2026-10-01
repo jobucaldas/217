@@ -29,12 +29,18 @@ class Strings {
   String get testConnection => pt ? 'Testar conexão' : 'Test connection';
   String get connectionOk => pt ? 'API acessível' : 'API reachable';
   String get connectionFail => pt ? 'API inacessível' : 'API unreachable';
+  String get advanced => pt ? 'Avançado' : 'Advanced';
+  String get advancedHint => pt
+      ? 'URL da API e diagnóstico'
+      : 'API URL and diagnostics';
+  String get done => pt ? 'Pronto' : 'Done';
+  String get clearNote => pt ? 'Limpar nota' : 'Clear note';
   String get darkMode => pt ? 'Tema escuro' : 'Dark theme';
   String get appearance => pt ? 'Aparência' : 'Appearance';
   String get themeSystem => pt ? 'Sistema' : 'System';
   String get themeLight => pt ? 'Claro' : 'Light';
   String get themeDark => pt ? 'Escuro' : 'Dark';
-  String get colorTheme => pt ? 'Cores' : 'Colors';
+  String get colorTheme => pt ? 'Cor de destaque' : 'Accent';
   String get paletteAzure => pt ? 'Azul' : 'Azure';
   String get paletteMint => pt ? 'Menta' : 'Mint';
   String get palettePlum => pt ? 'Ameixa' : 'Plum';

@@ -95,11 +95,11 @@ class _CalendarScreenState extends State<CalendarScreen> {
   Future<void> _openDay(DateTime day) async {
     final key = DateFormat('yyyy-MM-dd').format(day);
     final existing = key == _todayKey ? _todayEntry : _entries[key];
-    final result = await showModalBottomSheet<_DayEditResult>(
+    final result = await showModalBottomSheet<DayEditResult>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (context) => _DayEditor(
+      builder: (context) => DayEditorSheet(
         strings: widget.strings,
         date: key,
         initialTaken: existing?.taken,
@@ -503,10 +503,10 @@ class _DayCell extends StatelessWidget {
   }
 }
 
-class _DayEditResult {
-  const _DayEditResult.save({required this.taken, required this.notes})
+class DayEditResult {
+  const DayEditResult.save({required this.taken, required this.notes})
       : clear = false;
-  const _DayEditResult.clear()
+  const DayEditResult.clear()
       : clear = true,
         taken = null,
         notes = '';
@@ -516,8 +516,10 @@ class _DayEditResult {
   final String notes;
 }
 
-class _DayEditor extends StatefulWidget {
-  const _DayEditor({
+/// Day mark bottom sheet: status + note affordance aligned with the date.
+class DayEditorSheet extends StatefulWidget {
+  const DayEditorSheet({
+    super.key,
     required this.strings,
     required this.date,
     required this.initialTaken,
@@ -532,20 +534,23 @@ class _DayEditor extends StatefulWidget {
   final bool hadEntry;
 
   @override
-  State<_DayEditor> createState() => _DayEditorState();
+  State<DayEditorSheet> createState() => _DayEditorSheetState();
 }
 
-class _DayEditorState extends State<_DayEditor> {
+class _DayEditorSheetState extends State<DayEditorSheet> {
   late bool? _taken = widget.initialTaken;
-  late final TextEditingController _notes =
-      TextEditingController(text: widget.initialNotes);
-  late bool _showNotes =
-      widget.initialNotes.trim().isNotEmpty;
+  late String _notes = widget.initialNotes;
 
-  @override
-  void dispose() {
-    _notes.dispose();
-    super.dispose();
+  Future<void> _editNote() async {
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => _NoteDialog(
+        strings: widget.strings,
+        initialNotes: _notes,
+      ),
+    );
+    if (result == null || !mounted) return;
+    setState(() => _notes = result);
   }
 
   @override
@@ -553,6 +558,7 @@ class _DayEditorState extends State<_DayEditor> {
     final locale = widget.strings.pt ? 'pt_BR' : 'en_US';
     final human = DateFormat.yMMMMd(locale).format(DateTime.parse(widget.date));
     final scheme = Theme.of(context).colorScheme;
+    final hasNote = _notes.trim().isNotEmpty;
     return Padding(
       padding: EdgeInsets.only(
         left: 20,
@@ -564,7 +570,41 @@ class _DayEditorState extends State<_DayEditor> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(human, style: Theme.of(context).textTheme.headlineMedium),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(
+                child: Text(
+                  human,
+                  style: Theme.of(context).textTheme.headlineMedium,
+                ),
+              ),
+              IconButton.filledTonal(
+                tooltip: hasNote ? widget.strings.notes : widget.strings.addNote,
+                onPressed: _editNote,
+                icon: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Icon(
+                      hasNote
+                          ? Icons.sticky_note_2
+                          : Icons.sticky_note_2_outlined,
+                    ),
+                    if (!hasNote)
+                      Positioned(
+                        right: -4,
+                        top: -4,
+                        child: Icon(
+                          Icons.add_circle,
+                          size: 14,
+                          color: scheme.primary,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
           const SizedBox(height: 6),
           Text(
             widget.strings.pickStatus,
@@ -589,55 +629,15 @@ class _DayEditorState extends State<_DayEditor> {
             onSelectionChanged: (value) =>
                 setState(() => _taken = value.isEmpty ? null : value.first),
           ),
-          const SizedBox(height: 12),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: _showNotes
-                ? const SizedBox.shrink()
-                : IconButton.filledTonal(
-                    tooltip: widget.strings.addNote,
-                    onPressed: () => setState(() => _showNotes = true),
-                    icon: const Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        Icon(Icons.sticky_note_2_outlined),
-                        Positioned(
-                          right: -4,
-                          top: -4,
-                          child: Icon(Icons.add_circle, size: 14),
-                        ),
-                      ],
-                    ),
-                  ),
-          ),
-          if (_showNotes) ...[
-            TextField(
-              controller: _notes,
-              maxLines: 3,
-              autofocus: widget.initialNotes.isEmpty,
-              decoration: InputDecoration(
-                labelText: widget.strings.notes,
-                border: const OutlineInputBorder(),
-                suffixIcon: IconButton(
-                  tooltip: widget.strings.cancel,
-                  onPressed: () => setState(() {
-                    _showNotes = false;
-                    _notes.clear();
-                  }),
-                  icon: const Icon(Icons.close),
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-          ],
+          const SizedBox(height: 16),
           FilledButton(
             onPressed: _taken == null
                 ? null
                 : () => Navigator.pop(
                       context,
-                      _DayEditResult.save(
+                      DayEditResult.save(
                         taken: _taken!,
-                        notes: _notes.text.trim(),
+                        notes: _notes.trim(),
                       ),
                     ),
             child: Text(widget.strings.save),
@@ -645,7 +645,7 @@ class _DayEditorState extends State<_DayEditor> {
           if (widget.hadEntry)
             TextButton(
               onPressed: () =>
-                  Navigator.pop(context, const _DayEditResult.clear()),
+                  Navigator.pop(context, const DayEditResult.clear()),
               child: Text(widget.strings.clearMark),
             ),
           TextButton(
@@ -654,6 +654,76 @@ class _DayEditorState extends State<_DayEditor> {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _NoteDialog extends StatefulWidget {
+  const _NoteDialog({
+    required this.strings,
+    required this.initialNotes,
+  });
+
+  final Strings strings;
+  final String initialNotes;
+
+  @override
+  State<_NoteDialog> createState() => _NoteDialogState();
+}
+
+class _NoteDialogState extends State<_NoteDialog> {
+  late final TextEditingController _controller =
+      TextEditingController(text: widget.initialNotes);
+
+  @override
+  void initState() {
+    super.initState();
+    _controller.addListener(() => setState(() {}));
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final hasText = _controller.text.trim().isNotEmpty;
+    return AlertDialog(
+      title: Text(widget.strings.notes),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        maxLines: 5,
+        minLines: 3,
+        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+              color: scheme.onSurface,
+            ),
+        decoration: InputDecoration(
+          hintText: widget.strings.addNote,
+          border: const OutlineInputBorder(),
+        ),
+      ),
+      actions: [
+        if (hasText)
+          TextButton(
+            onPressed: () => Navigator.pop(context, ''),
+            child: Text(widget.strings.clearNote),
+          ),
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text(widget.strings.cancel),
+        ),
+        FilledButton(
+          style: FilledButton.styleFrom(
+            minimumSize: const Size(88, 44),
+          ),
+          onPressed: () => Navigator.pop(context, _controller.text.trim()),
+          child: Text(widget.strings.done),
+        ),
+      ],
     );
   }
 }

@@ -1,8 +1,12 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:a217/src/api/client.dart';
 import 'package:a217/src/config.dart';
+import 'package:a217/src/i18n.dart';
 import 'package:a217/src/models.dart';
+import 'package:a217/src/screens/calendar_screen.dart';
+import 'package:a217/src/theme/app_theme.dart';
 
 /// Lightweight fake covering clear-mark API path used by the day editor.
 class _FakeApi extends ApiClient {
@@ -31,5 +35,45 @@ void main() {
     expect(api.store.containsKey('2026-10-01'), isTrue);
     await api.deleteEntry('2026-10-01');
     expect(api.store.containsKey('2026-10-01'), isFalse);
+  });
+
+  testWidgets('note icon sits on date row and opens dialog', (tester) async {
+    final strings = const Strings(false);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildApp217Theme(
+          brightness: Brightness.light,
+          palette: AppPalette.azure,
+        ),
+        home: Scaffold(
+          body: DayEditorSheet(
+            strings: strings,
+            date: '2026-10-01',
+            initialTaken: null,
+            initialNotes: '',
+            hadEntry: false,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('October 1, 2026'), findsOneWidget);
+    // No orphan inline note field before opening the dialog.
+    expect(find.byType(TextField), findsNothing);
+
+    await tester.tap(find.byTooltip('Add note'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(AlertDialog), findsOneWidget);
+    expect(find.byType(TextField), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField), 'hello note');
+    await tester.tap(find.text('Done'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(AlertDialog), findsNothing);
+    // Note affordance stays on the date row (filled icon after write).
+    expect(find.byIcon(Icons.sticky_note_2), findsOneWidget);
   });
 }
