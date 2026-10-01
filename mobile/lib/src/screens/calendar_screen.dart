@@ -14,7 +14,6 @@ class CalendarScreen extends StatefulWidget {
     required this.api,
     required this.user,
     required this.strings,
-    required this.onLogout,
     required this.onOpenSettings,
     this.share = const ShareState(status: 'none'),
     this.onShareChanged,
@@ -25,7 +24,6 @@ class CalendarScreen extends StatefulWidget {
   final User user;
   final ShareState share;
   final Strings strings;
-  final Future<void> Function() onLogout;
   final VoidCallback onOpenSettings;
   final ValueChanged<ShareState>? onShareChanged;
   final AppPalette palette;
@@ -296,11 +294,6 @@ class _CalendarScreenState extends State<CalendarScreen>
             tooltip: widget.strings.settings,
             onPressed: widget.onOpenSettings,
             icon: const Icon(Icons.settings_outlined),
-          ),
-          IconButton(
-            tooltip: widget.strings.logout,
-            onPressed: widget.onLogout,
-            icon: const Icon(Icons.logout),
           ),
         ],
       ),
@@ -722,7 +715,8 @@ class _DayCell extends StatelessWidget {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       if (hasHeart)
-                        Icon(Icons.favorite, size: 11, color: onCell),
+                        const Icon(Icons.favorite,
+                            size: 11, color: Color(0xFFE11D48)),
                       if (hasHeart && hasNote) const SizedBox(width: 2),
                       if (hasNote)
                         Icon(Icons.sticky_note_2_outlined,
@@ -784,8 +778,43 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
   late String _notes = widget.initialNotes;
   late bool _heart = widget.initialHeart;
 
-  /// Save when a status is chosen, or when clearing an existing mark.
-  bool get _canSave => _taken != null || widget.hadEntry;
+  /// True when note/heart changed but status was not re-tapped (Save commits).
+  bool get _noteDirty =>
+      _notes.trim() != widget.initialNotes.trim() ||
+      _heart != widget.initialHeart;
+
+  bool get _canSaveNotesOnly =>
+      _taken != null && _noteDirty;
+
+  void _commitSave() {
+    Navigator.pop(
+      context,
+      DayEditResult.save(
+        taken: _taken!,
+        notes: _notes.trim(),
+        heart: _heart,
+      ),
+    );
+  }
+
+  void _commitClear() {
+    Navigator.pop(context, const DayEditResult.clear());
+  }
+
+  void _onStatusChanged(Set<bool> value) {
+    if (value.isEmpty) {
+      // Unselect — clear existing day mark (and note/heart) immediately.
+      if (widget.hadEntry) {
+        _commitClear();
+      } else {
+        setState(() => _taken = null);
+      }
+      return;
+    }
+    // Taken / Missed commits status + current note/heart and closes.
+    _taken = value.first;
+    _commitSave();
+  }
 
   Future<void> _editNote() async {
     final result = await showDialog<_NoteDialogResult>(
@@ -801,6 +830,10 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
       _notes = result.notes;
       _heart = result.heart;
     });
+    // If a status is already chosen, persist note/heart without a second Save.
+    if (_taken != null) {
+      _commitSave();
+    }
   }
 
   @override
@@ -830,9 +863,9 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
                 ),
               ),
               if (_heart)
-                Padding(
-                  padding: const EdgeInsets.only(right: 4),
-                  child: Icon(Icons.favorite, color: scheme.primary, size: 20),
+                const Padding(
+                  padding: EdgeInsets.only(right: 4),
+                  child: Icon(Icons.favorite, color: Color(0xFFE11D48), size: 20),
                 ),
               IconButton.filledTonal(
                 tooltip: hasNote ? widget.strings.notes : widget.strings.addNote,
@@ -874,29 +907,18 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
               ),
             ],
             selected: {if (_taken != null) _taken!},
-            onSelectionChanged: (value) =>
-                setState(() => _taken = value.isEmpty ? null : value.first),
+            onSelectionChanged: _onStatusChanged,
           ),
-          const SizedBox(height: 16),
-          FilledButton(
-            onPressed: !_canSave
-                ? null
-                : () {
-                    if (_taken == null) {
-                      Navigator.pop(context, const DayEditResult.clear());
-                    } else {
-                      Navigator.pop(
-                        context,
-                        DayEditResult.save(
-                          taken: _taken!,
-                          notes: _notes.trim(),
-                          heart: _heart,
-                        ),
-                      );
-                    }
-                  },
-            child: Text(widget.strings.save),
-          ),
+          // Save only for note/heart edits when status is already set and the
+          // note dialog did not auto-commit (defensive; Done normally commits).
+          if (_canSaveNotesOnly) ...[
+            const SizedBox(height: 16),
+            FilledButton(
+              onPressed: _commitSave,
+              child: Text(widget.strings.save),
+            ),
+          ],
+          const SizedBox(height: 8),
           TextButton(
             onPressed: () => Navigator.pop(context),
             child: Text(widget.strings.cancel),

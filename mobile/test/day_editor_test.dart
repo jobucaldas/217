@@ -95,11 +95,67 @@ void main() {
         expect(find.byType(AlertDialog), findsNothing);
         expect(find.byIcon(Icons.sticky_note_2), findsOneWidget);
         expect(find.byIcon(Icons.favorite), findsOneWidget);
+        // No status yet → sheet stays open; Taken/Missed will commit.
+        expect(find.text('Taken'), findsOneWidget);
       },
     );
   }
 
-  testWidgets('unselecting status keeps Save to clear existing mark',
+  testWidgets('tapping Taken commits status + notes + heart immediately',
+      (tester) async {
+    DayEditResult? result;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildApp217Theme(
+          brightness: Brightness.light,
+          palette: AppPalette.azure,
+        ),
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => TextButton(
+              onPressed: () async {
+                result = await showModalBottomSheet<DayEditResult>(
+                  context: context,
+                  isScrollControlled: true,
+                  builder: (_) => const DayEditorSheet(
+                    strings: Strings(false),
+                    date: '2026-10-01',
+                    initialTaken: null,
+                    initialNotes: '',
+                    initialHeart: false,
+                    hadEntry: false,
+                  ),
+                );
+              },
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Add note'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'with note');
+    await tester.tap(find.byKey(const ValueKey('note-heart-toggle')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Done'));
+    await tester.pumpAndSettle();
+
+    // No Save required — Taken commits everything.
+    expect(find.text('Save'), findsNothing);
+    await tester.tap(find.text('Taken'));
+    await tester.pumpAndSettle();
+
+    expect(result?.clear, isFalse);
+    expect(result?.taken, isTrue);
+    expect(result?.notes, 'with note');
+    expect(result?.heart, isTrue);
+  });
+
+  testWidgets('unselecting status clears existing mark immediately',
       (tester) async {
     DayEditResult? result;
     await tester.pumpWidget(
@@ -134,20 +190,14 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Clear mark'), findsNothing);
+    // Unselect Taken → autosave clear (no Save).
     await tester.tap(find.text('Taken'));
-    await tester.pumpAndSettle();
-
-    final save = tester.widget<FilledButton>(
-      find.widgetWithText(FilledButton, 'Save'),
-    );
-    expect(save.onPressed, isNotNull);
-
-    await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
     expect(result?.clear, isTrue);
   });
 
-  testWidgets('saving persists heart from note dialog', (tester) async {
+  testWidgets('note Done with existing status commits heart without Save',
+      (tester) async {
     DayEditResult? result;
     await tester.pumpWidget(
       MaterialApp(
@@ -188,10 +238,61 @@ void main() {
     await tester.tap(find.text('Done'));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Save'));
-    await tester.pumpAndSettle();
     expect(result?.clear, isFalse);
     expect(result?.heart, isTrue);
     expect(result?.taken, isTrue);
   });
+
+  for (final brightness in Brightness.values) {
+    testWidgets('calendar heart indicator is red ($brightness)', (tester) async {
+      final now = DateTime.now();
+      final date =
+          '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-01';
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildApp217Theme(
+            brightness: brightness,
+            palette: AppPalette.azure,
+          ),
+          home: CalendarScreen(
+            api: _HeartCalendarApi([
+              Entry(date: date, taken: true, notes: 'n', heart: true),
+            ]),
+            user: const User(
+              id: 'u1',
+              email: 'shot@example.invalid',
+              name: 'Shot',
+            ),
+            strings: const Strings(false),
+            onOpenSettings: () {},
+            palette: AppPalette.azure,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final heart = tester.widget<Icon>(find.byIcon(Icons.favorite).first);
+      expect(heart.color, const Color(0xFFE11D48));
+    });
+  }
+}
+
+class _HeartCalendarApi extends ApiClient {
+  _HeartCalendarApi(this.entries) : super(AppConfig.fromEnvironment());
+
+  final List<Entry> entries;
+
+  @override
+  Future<List<Entry>> listEntries(int year, int month) async => entries;
+
+  @override
+  Future<Entry> upsertEntry(
+    String date, {
+    required bool taken,
+    String notes = '',
+    bool heart = false,
+  }) async =>
+      Entry(date: date, taken: taken, notes: notes, heart: heart);
+
+  @override
+  Future<void> deleteEntry(String date) async {}
 }

@@ -32,7 +32,8 @@ void main() {
       expect(find.text('Como foi a tomada?'), findsNothing);
       expect(find.text('Taken'), findsOneWidget);
       expect(find.text('Missed'), findsOneWidget);
-      expect(find.text('Save'), findsOneWidget);
+      // Autosave: Save only appears for note/heart dirty with status set.
+      expect(find.text('Save'), findsNothing);
     });
   }
 }

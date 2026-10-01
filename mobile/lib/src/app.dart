@@ -203,7 +203,6 @@ class _App217State extends State<App217> {
       share: _share,
       strings: _strings,
       palette: _palette,
-      onLogout: _logout,
       onOpenSettings: _openSettings,
       onShareChanged: (share) => setState(() => _share = share),
     );
