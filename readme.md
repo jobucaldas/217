@@ -35,6 +35,10 @@ make mobile-apk
 
 Install `mobile/build/app/outputs/flutter-apk/app-debug.apk`. Emulator API base defaults to `http://10.0.2.2:8787` (`--dart-define=API_BASE_URL=...` to override).
 
+Every push to `main` (after CI is green) publishes APK + GHCR with the same dual names:
+- **nightly** — rolling GitHub Release (`217-nightly.apk`) and GHCR tags `:nightly` / `:dev`
+- **datetime_sha** — immutable GitHub Release `YYYYMMDDHHMMSS_<shortsha>` (`217-<tag>.apk`) and matching GHCR tags
+
 ## Layout
 
 | Path | Role |

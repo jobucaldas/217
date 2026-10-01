@@ -114,3 +114,164 @@ jobs:
           flutter build web --release --no-web-resources-cdn \
             --dart-define=WORKOS_CLIENT_ID="$CID"
           test -f build/web/index.html
+      - name: Upload web bundle for GHCR frontend image
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: flutter-web-release
+          path: mobile/build/web
+          retention-days: 3
+
+  # Deploy-shaped artifact: Android release APK (same toolchain image as other Flutter jobs).
+  mobile-apk-build:
+    name: Flutter Android release APK
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/cirruslabs/flutter:stable
+    env:
+      WORKOS_CLIENT_ID: ${{ secrets.WORKOS_CLIENT_ID }}
+      NIGHTLY_API_BASE_URL: ${{ secrets.NIGHTLY_API_BASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build release APK
+        working-directory: mobile
+        # Flutter container default shell is dash (`sh`); avoid bash-only `pipefail`.
+        run: |
+          git config --global --add safe.directory /sdks/flutter || true
+          flutter pub get
+          CID="${WORKOS_CLIENT_ID:-client_01M3QCMK75B35RPC8EAJA5GREP}"
+          # Optional secret; default matches deploy/kustomize APP_BASE_URL (HTTPS Serve).
+          API="${NIGHTLY_API_BASE_URL:-https://encom.tailbe71e1.ts.net:8443}"
+          flutter build apk --release \
+            --dart-define=API_BASE_URL="$API" \
+            --dart-define=WORKOS_CLIENT_ID="$CID"
+          test -f build/app/outputs/flutter-apk/app-release.apk
+          cp build/app/outputs/flutter-apk/app-release.apk "${GITHUB_WORKSPACE}/217-nightly.apk"
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-nightly-apk
+          path: 217-nightly.apk
+          retention-days: 3
+
+  # Main-only: APK to rolling nightly + immutable datetime_sha GitHub Releases.
+  nightly-apk:
+    name: Android APK → GitHub Releases (nightly + datetime_sha)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [backend, mobile, workos-smoke, flutter-web-build, mobile-apk-build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download APK
+        uses: actions/download-artifact@v4
+        with:
+          name: android-nightly-apk
+          path: dist
+      - name: Publish nightly + datetime_sha releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT_TIMESTAMP: ${{ github.event.head_commit.timestamp }}
+        run: |
+          set -euo pipefail
+          test -f dist/217-nightly.apk
+          SHORT_SHA="${GITHUB_SHA:0:7}"
+          if [ -n "${COMMIT_TIMESTAMP}" ]; then
+            DT="$(date -u -d "${COMMIT_TIMESTAMP}" +%Y%m%d%H%M%S)"
+          else
+            DT="$(date -u +%Y%m%d%H%M%S)"
+          fi
+          DATETIME_SHA="${DT}_${SHORT_SHA}"
+          BUILT_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          COMMIT_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}"
+
+          cp dist/217-nightly.apk "dist/217-${DATETIME_SHA}.apk"
+
+          NIGHTLY_NOTES="$(printf '%s\n' \
+            "Rolling nightly from \`${SHORT_SHA}\` on \`main\`." \
+            "" \
+            "- Built: ${BUILT_AT}" \
+            "- Also published as release \`${DATETIME_SHA}\`" \
+            "- Asset: \`217-nightly.apk\` (release build; debug-signed for sideload tryouts)" \
+            "- Commit: ${COMMIT_URL}")"
+          if gh release view nightly >/dev/null 2>&1; then
+            gh release edit nightly --target "${GITHUB_SHA}" --notes "${NIGHTLY_NOTES}" --prerelease
+          else
+            gh release create nightly \
+              --title "Nightly" \
+              --target "${GITHUB_SHA}" \
+              --notes "${NIGHTLY_NOTES}" \
+              --prerelease
+          fi
+          gh release upload nightly dist/217-nightly.apk --clobber
+
+          DATED_NOTES="$(printf '%s\n' \
+            "Immutable main deploy from \`${SHORT_SHA}\`." \
+            "" \
+            "- Built: ${BUILT_AT}" \
+            "- Tag: \`${DATETIME_SHA}\`" \
+            "- Asset: \`217-${DATETIME_SHA}.apk\`" \
+            "- Rolling pointer: release \`nightly\`" \
+            "- Commit: ${COMMIT_URL}")"
+          gh release create "${DATETIME_SHA}" \
+            --title "${DATETIME_SHA}" \
+            --target "${GITHUB_SHA}" \
+            --notes "${DATED_NOTES}" \
+            --prerelease \
+            "dist/217-${DATETIME_SHA}.apk"
+
+  ghcr-images:
+    name: GHCR images (nightly + datetime_sha)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [backend, mobile, workos-smoke, flutter-web-build, mobile-apk-build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download Flutter web bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: flutter-web-release
+          path: mobile/build/web
+      - name: Compute image tags
+        id: tags
+        env:
+          COMMIT_TIMESTAMP: ${{ github.event.head_commit.timestamp }}
+        run: |
+          set -euo pipefail
+          SHORT_SHA="${GITHUB_SHA:0:7}"
+          if [ -n "${COMMIT_TIMESTAMP}" ]; then
+            DT="$(date -u -d "${COMMIT_TIMESTAMP}" +%Y%m%d%H%M%S)"
+          else
+            DT="$(date -u +%Y%m%d%H%M%S)"
+          fi
+          echo "datetime_sha=${DT}_${SHORT_SHA}" >> "${GITHUB_OUTPUT}"
+          echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> "${GITHUB_OUTPUT}"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push backend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile.prod
+          push: true
+          tags: |
+            ghcr.io/${{ steps.tags.outputs.owner }}/app-217-backend:nightly
+            ghcr.io/${{ steps.tags.outputs.owner }}/app-217-backend:${{ steps.tags.outputs.datetime_sha }}
+            ghcr.io/${{ steps.tags.outputs.owner }}/app-217-backend:dev
+      - name: Build and push frontend
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./frontend/Dockerfile.prod
+          push: true
+          tags: |
+            ghcr.io/${{ steps.tags.outputs.owner }}/app-217-frontend:nightly
+            ghcr.io/${{ steps.tags.outputs.owner }}/app-217-frontend:${{ steps.tags.outputs.datetime_sha }}
+            ghcr.io/${{ steps.tags.outputs.owner }}/app-217-frontend:dev
