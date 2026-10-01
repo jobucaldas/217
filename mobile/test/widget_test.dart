@@ -4,26 +4,83 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:a217/src/config.dart';
 import 'package:a217/src/i18n.dart';
 import 'package:a217/src/screens/auth_screen.dart';
+import 'package:a217/src/theme/app_theme.dart';
 
 void main() {
-  testWidgets('auth screen shows brand and single sign-in CTA', (tester) async {
+  for (final brightness in Brightness.values) {
+    testWidgets(
+      'auth screen brand + CTA readable ($brightness)',
+      (tester) async {
+        final scheme = buildApp217ColorScheme(
+          brightness,
+          palette: AppPalette.azure,
+        );
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: ThemeData(
+              useMaterial3: true,
+              brightness: brightness,
+              colorScheme: scheme,
+              scaffoldBackgroundColor: scaffoldBackgroundFor(
+                brightness,
+                palette: AppPalette.azure,
+              ),
+            ),
+            home: AuthScreen(
+              strings: const Strings(true),
+              apiBaseUrl: 'http://10.0.2.2:8787',
+              onSignIn: () async {},
+              onOpenSettings: () {},
+            ),
+          ),
+        );
+
+        expect(find.text('217'), findsOneWidget);
+        expect(find.text('Entrar'), findsOneWidget);
+        expect(find.text('calendário de anticoncepcional'), findsOneWidget);
+        expect(find.textContaining('tomada'), findsNothing);
+        expect(find.text('EN'), findsNothing);
+        expect(find.text('PT'), findsNothing);
+        expect(find.byKey(const ValueKey('auth-settings')), findsOneWidget);
+        // API base URL stays in Settings, not on the first viewport.
+        expect(find.text('http://10.0.2.2:8787'), findsNothing);
+
+        final brand = tester.widget<Text>(find.text('217'));
+        final cta = tester.widget<Text>(find.text('Entrar'));
+        final tagline =
+            tester.widget<Text>(find.text('calendário de anticoncepcional'));
+        expect(brand.style?.color, scheme.onSurface);
+        expect(tagline.style?.color, scheme.onSurfaceVariant);
+        // FilledButton paints primary; label uses onPrimary via button theme.
+        expect(cta.data, 'Entrar');
+
+        // Settings sits where language used to (trailing / top-right).
+        final settingsCenter =
+            tester.getCenter(find.byKey(const ValueKey('auth-settings')));
+        expect(settingsCenter.dx, greaterThan(300));
+
+        // Brand cluster is visually centered (not top-weighted).
+        final brandCenter = tester.getCenter(find.text('217'));
+        final size = tester.getSize(find.byType(Scaffold).first);
+        expect(brandCenter.dy, greaterThan(size.height * 0.28));
+        expect(brandCenter.dy, lessThan(size.height * 0.62));
+      },
+    );
+  }
+
+  testWidgets('auth screen English tagline has no trailing period', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
         home: AuthScreen(
-          strings: const Strings(true),
-          apiBaseUrl: 'http://10.0.2.2:8787',
+          strings: const Strings(false),
+          apiBaseUrl: '',
           onSignIn: () async {},
-          onToggleLanguage: () {},
           onOpenSettings: () {},
         ),
       ),
     );
-    expect(find.text('217'), findsOneWidget);
-    expect(find.text('Entrar'), findsOneWidget);
-    expect(find.text('Seu calendário de tomada.'), findsOneWidget);
-    // API base URL stays in Settings, not on the first viewport.
-    expect(find.text('http://10.0.2.2:8787'), findsNothing);
-    expect(find.byIcon(Icons.settings_outlined), findsOneWidget);
+    expect(find.text('contraceptive calendar'), findsOneWidget);
+    expect(find.text('Sign in'), findsOneWidget);
   });
 
   test('config defaults expose public WorkOS client id only', () {

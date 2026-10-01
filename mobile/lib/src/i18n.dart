@@ -6,7 +6,7 @@ class Strings {
   String get brand => '217';
   String get continueWorkOS => pt ? 'Entrar' : 'Sign in';
   String get signInSubtitle =>
-      pt ? 'Seu calendário de tomada.' : 'Your intake calendar.';
+      pt ? 'calendário de anticoncepcional' : 'contraceptive calendar';
   String get logout => pt ? 'Sair' : 'Log out';
   String get settings => pt ? 'Ajustes' : 'Settings';
   String get language => pt ? 'Idioma' : 'Language';

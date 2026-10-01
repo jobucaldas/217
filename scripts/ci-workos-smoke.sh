@@ -56,7 +56,9 @@ print("authkit=true password=false")
 
 echo "GET /api/auth/workos (AuthKit continue page)…"
 body="$(curl -fsS -c /tmp/217-cookies.txt "${BASE_URL}/api/auth/workos")"
-echo "${body}" | grep -q 'Continue to WorkOS'
+echo "${body}" | grep -Eq 'id="continue"|Continuar|Continue'
+echo "${body}" | grep -Fq '217'
+echo "${body}" | grep -Eq 'calendário de anticoncepcional|contraceptive calendar'
 echo "${body}" | grep -Eq 'https://[^"]*workos\.com|https://[^"]*authkit'
 echo "${body}" | grep -Fq "${WORKOS_CLIENT_ID}"
 # Binding cookie must be set for the callback path.

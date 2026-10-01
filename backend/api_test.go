@@ -428,11 +428,27 @@ func TestWorkOSOAuthStartUsesInterstitialNotBounceRedirect(t *testing.T) {
 	if !strings.Contains(authURL, "state=") || !strings.Contains(body, `id="continue"`) || !strings.Contains(body, "__WORKOS_AUTH_URL__") {
 		t.Fatalf("interstitial must expose click-through Continue to AuthKit: url=%s body=%s", authURL, body)
 	}
+	if !strings.Contains(body, "217") || !strings.Contains(body, "calendário de anticoncepcional") {
+		t.Fatalf("interstitial must match 217 login chrome (PT default): body=%s", body)
+	}
+	if strings.Contains(body, "Continue to WorkOS") {
+		t.Fatal("interstitial must not advertise a foreign WorkOS product page")
+	}
 	if strings.Contains(body, "location.replace") || strings.Contains(body, "http-equiv=\"refresh\"") {
 		t.Fatal("auto-navigation reintroduces Chromium bounce-tracking cookie loss")
 	}
 	if w.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("interstitial must be uncached, got %q", w.Header().Get("Cache-Control"))
+	}
+
+	// English Accept-Language keeps the same chrome with EN tagline.
+	wEN := httptest.NewRecorder()
+	reqEN := httptest.NewRequest(http.MethodGet, "/api/auth/workos", nil)
+	reqEN.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	h.StartWorkOSOAuth(wEN, reqEN)
+	bodyEN := wEN.Body.String()
+	if !strings.Contains(bodyEN, "contraceptive calendar") || !strings.Contains(bodyEN, `id="continue"`) {
+		t.Fatalf("EN interstitial missing 217 tagline/continue: %s", bodyEN)
 	}
 }
 
