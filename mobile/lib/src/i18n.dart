@@ -19,8 +19,6 @@ extension AppLanguageX on AppLanguage {
         AppLanguage.es => 'es',
       };
 
-  static AppLanguage fromId(String? raw) => tryFromId(raw) ?? AppLanguage.en;
-
   /// The language for an id or language code (`pt`, `es`…), or null.
   static AppLanguage? tryFromId(String? raw) {
     for (final language in AppLanguage.values) {
