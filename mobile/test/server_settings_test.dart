@@ -208,12 +208,10 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(
-      find.byKey(const ValueKey('self-host-guide')),
-      200,
-      scrollable: find.byType(Scrollable).first,
-    );
-    await tester.tap(find.byKey(const ValueKey('self-host-guide')));
+    final guide = find.byKey(const ValueKey('self-host-guide'));
+    await tester.ensureVisible(guide);
+    await tester.pumpAndSettle();
+    await tester.tap(guide);
     await tester.pumpAndSettle();
 
     expect(calls.single.method, 'openUrl');
