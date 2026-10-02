@@ -14,10 +14,10 @@ class SettingsPage extends StatefulWidget {
     super.key,
     required this.api,
     required this.strings,
-    required this.portuguese,
+    required this.language,
     required this.themeMode,
     required this.palette,
-    required this.onPortugueseChanged,
+    required this.onLanguageChanged,
     required this.onThemeModeChanged,
     required this.onPaletteChanged,
     required this.onApiBaseChanged,
@@ -26,14 +26,16 @@ class SettingsPage extends StatefulWidget {
     this.onShareChanged,
     this.onAccountDeleted,
     this.onLogout,
+    this.onJoinedCalendar,
+    this.expandServer = false,
   });
 
   final ApiClient api;
   final Strings strings;
-  final bool portuguese;
+  final AppLanguage language;
   final ThemeMode themeMode;
   final AppPalette palette;
-  final ValueChanged<bool> onPortugueseChanged;
+  final ValueChanged<AppLanguage> onLanguageChanged;
   final ValueChanged<ThemeMode> onThemeModeChanged;
   final ValueChanged<AppPalette> onPaletteChanged;
   final VoidCallback onApiBaseChanged;
@@ -42,6 +44,12 @@ class SettingsPage extends StatefulWidget {
   final ValueChanged<ShareState>? onShareChanged;
   final VoidCallback? onAccountDeleted;
   final Future<void> Function()? onLogout;
+
+  /// Called after this account joined another calendar with an invite code.
+  final ValueChanged<ShareState>? onJoinedCalendar;
+
+  /// Open with the self-hosted server field already expanded.
+  final bool expandServer;
 
   @override
   State<SettingsPage> createState() => _SettingsPageState();
@@ -52,7 +60,8 @@ class _SettingsPageState extends State<SettingsPage> {
   late final TextEditingController _serverUrl = TextEditingController(
     text: widget.api.config.usesCustomApiBase ? widget.api.config.apiBaseUrl : '',
   );
-  late bool _advancedOpen = widget.api.config.usesCustomApiBase;
+  late bool _advancedOpen =
+      widget.expandServer || widget.api.config.usesCustomApiBase;
   bool _testing = false;
   String? _serverError;
 
@@ -230,28 +239,25 @@ class _SettingsPageState extends State<SettingsPage> {
             ],
           ),
           const SizedBox(height: 20),
-          _SectionLabel(widget.strings.language),
+          _SectionLabel(widget.strings.languageLabel),
           _SettingsSection(
             children: [
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-                child: DropdownMenu<bool>(
-                  key: ValueKey(widget.portuguese),
-                  initialSelection: widget.portuguese,
+                child: DropdownMenu<AppLanguage>(
+                  key: ValueKey(widget.language),
+                  initialSelection: widget.language,
                   expandedInsets: EdgeInsets.zero,
                   dropdownMenuEntries: [
-                    DropdownMenuEntry(
-                      value: true,
-                      label: widget.strings.languagePortuguese,
-                    ),
-                    DropdownMenuEntry(
-                      value: false,
-                      label: widget.strings.languageEnglish,
-                    ),
+                    for (final language in AppLanguage.values)
+                      DropdownMenuEntry(
+                        value: language,
+                        label: language.nativeName,
+                      ),
                   ],
                   onSelected: (value) {
                     if (value == null) return;
-                    widget.onPortugueseChanged(value);
+                    widget.onLanguageChanged(value);
                   },
                 ),
               ),
@@ -268,11 +274,13 @@ class _SettingsPageState extends State<SettingsPage> {
               user: widget.user!,
               share: widget.share!,
               onShareChanged: widget.onShareChanged!,
+              onJoined: widget.onJoinedCalendar,
             ),
           ],
-          // Self-hosting only: web is served by its own server (same origin,
-          // CORS-locked), so pointing it elsewhere cannot work.
-          if (!kIsWeb) ...[
+          // Signed out only: the server is picked before signing in, since
+          // an account lives on one server. Never on web, which is served by
+          // its own server (same origin, CORS-locked).
+          if (!kIsWeb && widget.user == null) ...[
             const SizedBox(height: 20),
             _SettingsSection(
               children: [

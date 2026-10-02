@@ -11,6 +11,7 @@ void main() {
     testWidgets(
       'auth screen brand + CTA readable ($brightness)',
       (tester) async {
+        var openedServerSettings = false;
         final scheme = buildApp217ColorScheme(
           brightness,
           palette: AppPalette.azure,
@@ -27,15 +28,26 @@ void main() {
               ),
             ),
             home: AuthScreen(
-              strings: const Strings(true),
+              strings: const Strings(AppLanguage.pt),
               onSignIn: () async {},
               onOpenSettings: () {},
+              onOpenServerSettings: () => openedServerSettings = true,
             ),
           ),
         );
 
         expect(find.text('217'), findsOneWidget);
         expect(find.text('Entrar'), findsOneWidget);
+
+        // Self-hosting tip: readable secondary text that opens Settings.
+        final tip = find.byKey(const ValueKey('auth-self-host-tip'));
+        expect(
+          tester.widget<Text>(tip).data,
+          'Tem seu próprio servidor 217? Configure em Ajustes.',
+        );
+        expect(tester.widget<Text>(tip).style?.color, scheme.onSurfaceVariant);
+        await tester.tap(tip);
+        expect(openedServerSettings, isTrue);
         expect(find.text('calendário de anticoncepcional'), findsOneWidget);
         expect(find.textContaining('tomada'), findsNothing);
         expect(find.text('EN'), findsNothing);
@@ -71,7 +83,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: AuthScreen(
-          strings: const Strings(false),
+          strings: const Strings(AppLanguage.en),
           onSignIn: () async {},
           onOpenSettings: () {},
         ),

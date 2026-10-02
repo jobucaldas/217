@@ -47,7 +47,7 @@ Future<void> _pumpReminder(
   required Brightness brightness,
   required AppPalette palette,
 }) async {
-  final strings = Strings(false);
+  final strings = Strings(AppLanguage.en);
   await tester.pumpWidget(
     MaterialApp(
       theme: buildApp217Theme(brightness: brightness, palette: palette),

@@ -35,7 +35,7 @@ class _App217State extends State<App217> {
   User? _user;
   ShareState _share = const ShareState(status: 'none');
   bool _loading = true;
-  bool _portuguese = _deviceLanguageIsPortuguese();
+  AppLanguage _language = AppLanguage.en;
   ThemeMode _themeMode = ThemeMode.system;
   AppPalette _palette = AppPalette.azure;
   bool _reminderHintDismissed = false;
@@ -44,12 +44,7 @@ class _App217State extends State<App217> {
   /// here to pick up theme, language and session changes made from them.
   final _changes = _ChangeTicker();
 
-  Strings get _strings => Strings(_portuguese);
-
-  /// First launch follows the device: English devices get English, anything
-  /// else gets Português (the primary audience).
-  static bool _deviceLanguageIsPortuguese() =>
-      WidgetsBinding.instance.platformDispatcher.locale.languageCode != 'en';
+  Strings get _strings => Strings(_language);
 
   @override
   void initState() {
@@ -70,30 +65,42 @@ class _App217State extends State<App217> {
   }
 
   Future<void> _bootstrap() async {
+    // Local prefs first, so theme and language hold even when offline.
     try {
+      // Web invite link (`/?invite=CODE`): keep the code across sign-in.
+      final linkInvite = Uri.base.queryParameters['invite']?.trim() ?? '';
+      if (linkInvite.isNotEmpty) await _prefs.savePendingInvite(linkInvite);
       final appearance = await _prefs.load();
-      final portuguese = await _prefs.loadPortuguese();
+      final language = await _prefs.loadLanguage();
       final hintGone = await _prefs.reminderHintDismissed();
-      await _api.loadPersistedApiBase();
-      final session = await _api.currentSession();
       if (!mounted) return;
       setState(() {
         _themeMode = appearance.mode;
         _palette = appearance.palette;
-        if (portuguese != null) _portuguese = portuguese;
+        _language = language;
         _reminderHintDismissed = hintGone;
-        _user = session.user;
-        _share = session.share ?? const ShareState(status: 'none');
-        _loading = false;
       });
     } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _user = null;
-        _share = const ShareState(status: 'none');
-        _loading = false;
-      });
+      // Keep defaults.
     }
+
+    User? user;
+    var share = const ShareState(status: 'none');
+    try {
+      await _api.loadPersistedApiBase();
+      final session = await _api.currentSession();
+      user = session.user;
+      share = session.share ?? share;
+    } catch (_) {
+      // Unreachable server: show the signed-out screen.
+    }
+    if (!mounted) return;
+    setState(() {
+      _user = user;
+      _share = share;
+      _loading = false;
+    });
+    if (user != null) await _offerPendingInvite();
   }
 
   Future<void> _refreshSession() async {
@@ -115,9 +122,65 @@ class _App217State extends State<App217> {
     await _prefs.savePalette(palette);
   }
 
-  Future<void> _setPortuguese(bool portuguese) async {
-    setState(() => _portuguese = portuguese);
-    await _prefs.savePortuguese(portuguese);
+  Future<void> _setLanguage(AppLanguage language) async {
+    setState(() => _language = language);
+    await _prefs.saveLanguage(language);
+  }
+
+  /// After sign-in, offers to join the calendar from an opened invite link
+  /// when this account can join one (nothing shared yet, or access revoked).
+  Future<void> _offerPendingInvite() async {
+    final code = (await _prefs.pendingInvite())?.trim() ?? '';
+    final user = _user;
+    if (code.isEmpty || user == null || !mounted) return;
+    final canJoin = (user.isOwner && _share.isNone) ||
+        (user.isPartner && _share.isRevoked);
+    if (!canJoin) {
+      // e.g. the owner opened their own link: nothing to offer.
+      await _prefs.clearPendingInvite();
+      return;
+    }
+    final navContext = _navKey.currentContext;
+    if (navContext == null || !navContext.mounted) return;
+    final strings = _strings;
+    final join = await showDialog<bool>(
+      context: navContext,
+      builder: (context) => AlertDialog(
+        title: Text(strings.pendingInviteTitle),
+        content: Text(strings.pendingInviteBody(code)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(strings.notNow),
+          ),
+          FilledButton(
+            key: const ValueKey('pending-invite-join'),
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(strings.joinCalendar),
+          ),
+        ],
+      ),
+    );
+    await _prefs.clearPendingInvite();
+    if (join != true || !mounted) return;
+    try {
+      await _onJoinedCalendar(await _api.acceptShare(code));
+    } catch (err) {
+      _messengerKey.currentState?.showSnackBar(
+        SnackBar(content: Text(joinErrorText(_strings, err))),
+      );
+    }
+  }
+
+  /// This account now views someone else's calendar: its role changed, so
+  /// reload the session and return to the (partner) calendar.
+  Future<void> _onJoinedCalendar(ShareState share) async {
+    setState(() => _share = share);
+    _navKey.currentState?.popUntil((route) => route.isFirst);
+    _messengerKey.currentState?.showSnackBar(
+      SnackBar(content: Text(_strings.joinedCalendar)),
+    );
+    await _refreshSession();
   }
 
   /// A different server means a different account: the API client already
@@ -142,6 +205,7 @@ class _App217State extends State<App217> {
           _share = session.share ?? const ShareState(status: 'none');
           _loading = false;
         });
+        await _offerPendingInvite();
       } else {
         setState(() => _loading = false);
       }
@@ -176,7 +240,7 @@ class _App217State extends State<App217> {
     );
   }
 
-  void _openSettings() {
+  void _openSettings({bool expandServer = false}) {
     _navKey.currentState?.push(
       MaterialPageRoute(
         builder: (_) => ListenableBuilder(
@@ -184,18 +248,20 @@ class _App217State extends State<App217> {
           builder: (context, _) => SettingsPage(
             api: _api,
             strings: _strings,
-            portuguese: _portuguese,
+            language: _language,
             themeMode: _themeMode,
             palette: _palette,
             user: _user,
             share: _share,
-            onPortugueseChanged: _setPortuguese,
+            onLanguageChanged: _setLanguage,
             onThemeModeChanged: _setThemeMode,
             onPaletteChanged: _setPalette,
             onShareChanged: (share) => setState(() => _share = share),
             onAccountDeleted: _user == null ? null : _onAccountDeleted,
             onLogout: _user == null ? null : _logout,
             onApiBaseChanged: _onApiBaseChanged,
+            onJoinedCalendar: _user == null ? null : _onJoinedCalendar,
+            expandServer: expandServer,
           ),
         ),
       ),
@@ -229,6 +295,9 @@ class _App217State extends State<App217> {
             : null,
         onSignIn: _signIn,
         onOpenSettings: _openSettings,
+        // Server choice happens before sign-in; web always uses its origin.
+        onOpenServerSettings:
+            kIsWeb ? null : () => _openSettings(expandServer: true),
         showReminderHint: !_reminderHintDismissed,
         onDismissReminderHint: _dismissReminderHint,
       );
@@ -237,10 +306,7 @@ class _App217State extends State<App217> {
       return PartnerRevokedScreen(
         api: _api,
         strings: _strings,
-        onJoined: (share) {
-          setState(() => _share = share);
-          _refreshSession();
-        },
+        onJoined: _onJoinedCalendar,
         onAccountDeleted: _onAccountDeleted,
         onOpenSettings: _openSettings,
       );

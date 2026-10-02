@@ -1,6 +1,6 @@
 # 217
 
-Private bilingual (Português/English) anticonceptional intake tracker.
+Private anticonceptional intake tracker in English, Português and Español.
 
 - **Client:** Flutter (web + Android)
 - **API:** Go + PostgreSQL

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"217/backend/internal/auth"
@@ -24,8 +25,23 @@ func (h *Handler) sessionPayload(user *model.User) map[string]interface{} {
 	}
 	return map[string]interface{}{
 		"user":  user,
-		"share": share,
+		"share": h.withInviteURL(share),
 	}
+}
+
+// withInviteURL adds the shareable web link for an open invite, e.g.
+// https://217.example.com/?invite=ABCD1234. The web app reads ?invite= and
+// offers to join after sign-in.
+func (h *Handler) withInviteURL(state *model.ShareState) *model.ShareState {
+	if state == nil || state.Status != model.ShareOpen || state.InviteCode == "" {
+		return state
+	}
+	base := strings.TrimRight(h.appBaseURL, "/")
+	if base == "" {
+		return state
+	}
+	state.InviteURL = base + "/?invite=" + url.QueryEscape(state.InviteCode)
+	return state
 }
 
 func (h *Handler) DeleteAccount(w http.ResponseWriter, r *http.Request) {
@@ -82,7 +98,7 @@ func (h *Handler) GetShare(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, state)
+	writeJSON(w, http.StatusOK, h.withInviteURL(state))
 }
 
 func (h *Handler) EnableShare(w http.ResponseWriter, r *http.Request) {
@@ -96,7 +112,7 @@ func (h *Handler) EnableShare(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, state)
+	writeJSON(w, http.StatusOK, h.withInviteURL(state))
 }
 
 func (h *Handler) RevokeShare(w http.ResponseWriter, r *http.Request) {
@@ -110,7 +126,7 @@ func (h *Handler) RevokeShare(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, state)
+	writeJSON(w, http.StatusOK, h.withInviteURL(state))
 }
 
 func (h *Handler) AcceptShare(w http.ResponseWriter, r *http.Request) {

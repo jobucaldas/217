@@ -11,6 +11,7 @@ class AuthScreen extends StatelessWidget {
     this.showReminderHint = false,
     this.onDismissReminderHint,
     this.customServer,
+    this.onOpenServerSettings,
   });
 
   final Strings strings;
@@ -21,6 +22,10 @@ class AuthScreen extends StatelessWidget {
 
   /// Host of a self-hosted server, shown so sign-in goes where you expect.
   final String? customServer;
+
+  /// Opens Settings at the self-hosted server field; null hides the tip
+  /// (web always talks to the server that serves it).
+  final VoidCallback? onOpenServerSettings;
 
   @override
   Widget build(BuildContext context) {
@@ -103,14 +108,28 @@ class AuthScreen extends StatelessWidget {
                             child: Text(strings.continueWorkOS),
                           ),
                         ),
-                        if (customServer != null) ...[
-                          const SizedBox(height: 12),
-                          Text(
-                            strings.serverLabel(customServer!),
-                            key: const ValueKey('auth-custom-server'),
-                            textAlign: TextAlign.center,
-                            style: text.bodySmall?.copyWith(
-                              color: scheme.onSurfaceVariant,
+                        if (onOpenServerSettings != null) ...[
+                          const SizedBox(height: 8),
+                          TextButton(
+                            onPressed: onOpenServerSettings,
+                            style: TextButton.styleFrom(
+                              foregroundColor: scheme.onSurfaceVariant,
+                            ),
+                            child: Text(
+                              customServer != null
+                                  ? strings.serverLabel(customServer!)
+                                  : strings.selfHostTip,
+                              key: ValueKey(
+                                customServer != null
+                                    ? 'auth-custom-server'
+                                    : 'auth-self-host-tip',
+                              ),
+                              textAlign: TextAlign.center,
+                              style: text.bodySmall?.copyWith(
+                                color: scheme.onSurfaceVariant,
+                                decoration: TextDecoration.underline,
+                                decorationColor: scheme.onSurfaceVariant,
+                              ),
                             ),
                           ),
                         ],

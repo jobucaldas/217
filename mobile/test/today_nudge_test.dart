@@ -22,7 +22,7 @@ void main() {
             body: Stack(
               children: [
                 TodayNudge(
-                  strings: const Strings(true),
+                  strings: const Strings(AppLanguage.pt),
                   todayEntry: null,
                   onRecord: () {},
                 ),
@@ -59,7 +59,7 @@ void main() {
 
     testWidgets('today nudge English label is narrower than Portuguese ($brightness)',
         (tester) async {
-      Future<double> widthFor(bool pt) async {
+      Future<double> widthFor(AppLanguage language) async {
         await tester.pumpWidget(
           MaterialApp(
             theme: buildApp217Theme(brightness: brightness),
@@ -67,7 +67,7 @@ void main() {
               body: Stack(
                 children: [
                   TodayNudge(
-                    strings: Strings(pt),
+                    strings: Strings(language),
                     todayEntry: null,
                     onRecord: () {},
                   ),
@@ -83,9 +83,9 @@ void main() {
             .width;
       }
 
-      final en = await widthFor(false);
+      final en = await widthFor(AppLanguage.en);
       expect(find.text('Update today'), findsOneWidget);
-      final pt = await widthFor(true);
+      final pt = await widthFor(AppLanguage.pt);
       expect(find.text('Atualizar hoje'), findsOneWidget);
       expect(en, lessThan(pt));
     });
@@ -99,7 +99,7 @@ void main() {
             body: Stack(
               children: [
                 TodayNudge(
-                  strings: const Strings(true),
+                  strings: const Strings(AppLanguage.pt),
                   todayEntry: const Entry(
                     date: '2026-10-01',
                     taken: true,
@@ -128,7 +128,7 @@ void main() {
             body: Stack(
               children: [
                 TodayNudge(
-                  strings: const Strings(true),
+                  strings: const Strings(AppLanguage.pt),
                   todayEntry: const Entry(
                     date: '2026-10-01',
                     taken: null,
@@ -163,7 +163,7 @@ void main() {
               body: Stack(
                 children: [
                   TodayNudge(
-                    strings: const Strings(false),
+                    strings: const Strings(AppLanguage.en),
                     todayEntry: null,
                     onRecord: () {},
                   ),

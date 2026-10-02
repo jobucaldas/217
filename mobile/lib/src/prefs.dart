@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
+import 'i18n.dart';
 import 'theme/palette.dart';
 
 /// Persists appearance across auth and restarts.
@@ -13,6 +14,7 @@ class AppearancePrefs {
   static const themeModeKey = 'theme_mode';
   static const paletteKey = 'app_palette';
   static const languageKey = 'language';
+  static const pendingInviteKey = 'pending_invite';
   static const reminderHintDismissedKey = 'reminder_hint_dismissed';
   static const fabSideKey = 'today_fab_side';
   static const fabBottomKey = 'today_fab_bottom';
@@ -26,20 +28,21 @@ class AppearancePrefs {
     );
   }
 
-  /// Saved UI language: true = Português, false = English, null = not chosen.
-  Future<bool?> loadPortuguese() async {
-    switch (await _storage.read(key: languageKey)) {
-      case 'pt':
-        return true;
-      case 'en':
-        return false;
-      default:
-        return null;
-    }
-  }
+  /// Saved UI language; English until someone picks another one.
+  Future<AppLanguage> loadLanguage() async =>
+      AppLanguageX.fromId(await _storage.read(key: languageKey));
 
-  Future<void> savePortuguese(bool portuguese) =>
-      _storage.write(key: languageKey, value: portuguese ? 'pt' : 'en');
+  Future<void> saveLanguage(AppLanguage language) =>
+      _storage.write(key: languageKey, value: language.id);
+
+  /// Invite code from an opened `/?invite=` link, kept across the AuthKit
+  /// round trip until the signed-in user answers the join prompt.
+  Future<String?> pendingInvite() => _storage.read(key: pendingInviteKey);
+
+  Future<void> savePendingInvite(String code) =>
+      _storage.write(key: pendingInviteKey, value: code);
+
+  Future<void> clearPendingInvite() => _storage.delete(key: pendingInviteKey);
 
   Future<void> saveThemeMode(ThemeMode mode) =>
       _storage.write(key: themeModeKey, value: _themeModeId(mode));

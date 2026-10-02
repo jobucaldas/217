@@ -16,6 +16,7 @@ const (
 type ShareState struct {
 	Status          string `json:"status"`
 	InviteCode      string `json:"invite_code,omitempty"`
+	InviteURL       string `json:"invite_url,omitempty"`
 	PartnerEmail    string `json:"partner_email,omitempty"`
 	PartnerName     string `json:"partner_name,omitempty"`
 	OwnerName       string `json:"owner_name,omitempty"`

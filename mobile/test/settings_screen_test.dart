@@ -13,7 +13,7 @@ void main() {
     testWidgets(
       'settings advanced options + single language label ($brightness)',
       (tester) async {
-        var portuguese = false;
+        var language = AppLanguage.en;
         final api = ApiClient(AppConfig.fromEnvironment());
         await tester.pumpWidget(
           MaterialApp(
@@ -24,11 +24,11 @@ void main() {
             home: StatefulBuilder(
               builder: (context, setState) => SettingsPage(
                 api: api,
-                strings: Strings(portuguese),
-                portuguese: portuguese,
+                strings: Strings(language),
+                language: language,
                 themeMode: ThemeMode.system,
                 palette: AppPalette.azure,
-                onPortugueseChanged: (pt) => setState(() => portuguese = pt),
+                onLanguageChanged: (l) => setState(() => language = l),
                 onThemeModeChanged: (_) {},
                 onPaletteChanged: (_) {},
                 onApiBaseChanged: () {},
@@ -43,7 +43,7 @@ void main() {
         // Section label only — not duplicated as DropdownMenu floating label.
         expect(find.text('LANGUAGE'), findsOneWidget);
         expect(find.text('Language'), findsNothing);
-        expect(find.byType(DropdownMenu<bool>), findsOneWidget);
+        expect(find.byType(DropdownMenu<AppLanguage>), findsOneWidget);
         expect(find.byType(SegmentedButton<bool>), findsNothing);
         expect(find.text('English'), findsWidgets);
         expect(find.text('Advanced options'), findsOneWidget);
@@ -59,7 +59,7 @@ void main() {
         expect(find.text('Test connection'), findsOneWidget);
 
         // Open language dropdown menu and pick Português.
-        await tester.tap(find.byType(DropdownMenu<bool>));
+        await tester.tap(find.byType(DropdownMenu<AppLanguage>));
         await tester.pumpAndSettle();
         await tester.tap(find.text('Português').last);
         await tester.pumpAndSettle();
@@ -69,11 +69,19 @@ void main() {
         expect(find.text('Idioma'), findsNothing);
         expect(find.text('Ocultar opções avançadas'), findsOneWidget);
         expect(find.text('Mostrar menos'), findsNothing);
+
+        await tester.tap(find.byType(DropdownMenu<AppLanguage>));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Español').last);
+        await tester.pumpAndSettle();
+        expect(find.text('Ajustes'), findsOneWidget);
+        expect(find.text('IDIOMA'), findsOneWidget);
+        expect(find.text('Ocultar opciones avanzadas'), findsOneWidget);
       },
     );
   }
 
-  testWidgets('share sits before Advanced; delete near logout', (tester) async {
+  testWidgets('signed in: share, no server setting, delete near logout', (tester) async {
     final api = ApiClient(AppConfig.fromEnvironment());
     await tester.pumpWidget(
       MaterialApp(
@@ -83,11 +91,11 @@ void main() {
         ),
         home: SettingsPage(
           api: api,
-          strings: const Strings(false),
-          portuguese: false,
+          strings: const Strings(AppLanguage.en),
+          language: AppLanguage.en,
           themeMode: ThemeMode.system,
           palette: AppPalette.azure,
-          onPortugueseChanged: (_) {},
+          onLanguageChanged: (_) {},
           onThemeModeChanged: (_) {},
           onPaletteChanged: (_) {},
           onApiBaseChanged: () {},
@@ -121,12 +129,13 @@ void main() {
     await tester.pumpAndSettle();
 
     final shareIdx = textIndex('SHARE CALENDAR WITH BOYFRIEND');
-    final advancedIdx = textIndex('Advanced options');
     final deleteIdx = textIndex('Delete account');
     final logoutIdx = textIndex('Log out');
     expect(shareIdx, greaterThanOrEqualTo(0));
-    expect(advancedIdx, greaterThan(shareIdx));
-    expect(deleteIdx, greaterThan(advancedIdx));
+    // The server is chosen before sign-in, so it is not offered here.
+    expect(find.text('Advanced options'), findsNothing);
+    expect(find.text('Self-hosted server URL'), findsNothing);
+    expect(deleteIdx, greaterThan(shareIdx));
     expect(logoutIdx, greaterThan(deleteIdx));
 
     final deleteY = tester.getTopLeft(find.text('Delete account')).dy;

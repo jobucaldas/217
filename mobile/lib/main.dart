@@ -9,6 +9,7 @@ Future<void> main() async {
   await Future.wait([
     initializeDateFormatting('pt_BR'),
     initializeDateFormatting('en_US'),
+    initializeDateFormatting('es'),
   ]);
   final config = AppConfig.fromEnvironment();
   runApp(App217(config: config));
