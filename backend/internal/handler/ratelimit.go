@@ -45,10 +45,15 @@ func (l *ipRateLimiter) allow(key string) bool {
 	return l.hits[key] <= l.limit
 }
 
+// clientIP keys rate limits by caller address. Behind the bundled Caddy the
+// right-most X-Forwarded-For entry is the one our proxy appended; earlier
+// entries are client-supplied and could be rotated to dodge the limit.
 func clientIP(r *http.Request) string {
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 		parts := strings.Split(xff, ",")
-		return strings.TrimSpace(parts[0])
+		if ip := strings.TrimSpace(parts[len(parts)-1]); ip != "" {
+			return ip
+		}
 	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {

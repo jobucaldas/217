@@ -130,6 +130,10 @@ func (h *Handler) RevokeShare(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) AcceptShare(w http.ResponseWriter, r *http.Request) {
+	if !h.inviteLimiter.allow("user:"+getUserID(r)) || !h.inviteLimiter.allow("ip:"+clientIP(r)) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "too many invite attempts; try again in a minute"})
+		return
+	}
 	var body struct {
 		Code string `json:"code"`
 	}

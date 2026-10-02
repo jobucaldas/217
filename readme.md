@@ -1,6 +1,6 @@
 # 217
 
-Private anticonceptional intake tracker in English, Português and Español.
+Anticonceptional (birth control) intake tracker with a shared calendar, in English, Português and Español.
 
 - **Client:** Flutter (web + Android)
 - **API:** Go + PostgreSQL
@@ -48,7 +48,7 @@ Every push to `main` (after CI is green) publishes APK + GHCR with the same dual
 | `mobile/` | Flutter client |
 | `backend/` | Go API |
 | `frontend/` | Caddy image that serves the Flutter web bundle |
-| `deploy/` | kustomize / home-lab manifests |
+| `deploy/` | Kubernetes (kustomize) manifests; `overlays/dev` is the maintainer's own deployment, kept as an example |
 | `dev/Containerfile` | Go toolchain image used by `make test-backend` |
 | `scripts/` | CI helpers |
 
@@ -65,29 +65,6 @@ make mobile-web
 - Never commit `WORKOS_API_KEY` or other secrets
 - Flutter receives only `WORKOS_CLIENT_ID` (public)
 - Session tokens are stored as SHA-256 digests in PostgreSQL
-
-## CI
-
-Checks run in two places with the same jobs (Go, Flutter analyze/test, WorkOS smoke, web and APK release builds):
-
-- **GitHub Actions** — `.github/workflows/ci.yml`. Also publishes nightly APK releases and GHCR images on `main`.
-- **Depot CI** — `.depot/workflows/ci.yml`, on Depot's machines, so PR checks still run when GitHub-hosted runners are unavailable. Checks only; nothing is published from Depot.
-
-One-time Depot setup (needs the repo owner):
-
-1. Create a Depot organization at [depot.dev](https://depot.dev) and install the **Depot Code Access** GitHub app on this repo (Depot → Settings → GitHub Code Access → Connect to GitHub).
-2. Add the secrets the workflow reads, with the [Depot CLI](https://depot.dev/docs/cli/installation) logged in (`depot login`):
-
-   ```sh
-   depot ci secrets add WORKOS_CLIENT_ID
-   depot ci secrets add WORKOS_API_KEY
-   depot ci secrets add NIGHTLY_API_BASE_URL   # optional
-   ```
-
-   Or copy them from GitHub in one go: `depot ci migrate secrets-and-vars`.
-3. Pushes and PRs now also get "217 CI (Depot)" checks. Run it against local changes without pushing: `depot ci run --workflow .depot/workflows/ci.yml`. Inspect runs with `depot ci run list`, `depot ci logs <run-id>` and `depot ci diagnose --run <run-id>`.
-
-Keep the shared jobs in both files in sync when CI changes.
 
 ## Self-hosting
 
@@ -116,7 +93,7 @@ Sign-in uses [WorkOS AuthKit](https://workos.com/docs/authkit) (free tier is eno
 | `APP_BASE_URL` | yes | Public address people open, e.g. `https://217.example.com`. Used for sign-in redirects, secure cookies and invite links (`APP_BASE_URL/?invite=CODE`). |
 | `DATABASE_URL` | yes | e.g. `postgres://app_217:CHANGE_ME@postgres:5432/app_217?sslmode=disable` |
 | `WORKOS_CLIENT_ID` | yes | From step 1 |
-| `WORKOS_API_KEY` | yes | From step 1. Never put it in the app or a public repo. |
+| `WORKOS_API_KEY` | recommended | From step 1. Sign-in works without it, but **Delete account** needs it to remove the WorkOS login. Server only: never put it in the app or a repo. |
 | `SESSION_TTL` | no | Session lifetime, e.g. `720h` |
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` | no | Web push reminders; generate with `make vapid-keys` |
 
