@@ -117,12 +117,15 @@ class _SettingsPageState extends State<SettingsPage> {
       _testing = true;
       _serverError = null;
     });
-    final ok = await widget.api.ping(baseUrl: base);
+    final check = await widget.api.checkServer(baseUrl: base);
     if (!mounted) return;
     setState(() => _testing = false);
-    _showSnack(
-      ok ? widget.strings.connectionOk : widget.strings.connectionFail,
-    );
+    _showSnack(switch (check) {
+      ServerCheck.ok => widget.strings.connectionOk,
+      ServerCheck.unreachable => widget.strings.serverUnreachable,
+      ServerCheck.notA217Server => widget.strings.connectionFail,
+      ServerCheck.signInNotConfigured => widget.strings.serverSignInOff,
+    });
   }
 
   String _paletteLabel(AppPalette p) {
@@ -287,8 +290,11 @@ class _SettingsPageState extends State<SettingsPage> {
           ],
           // Signed out only: the server is picked before signing in, since
           // an account lives on one server. Never on web, which is served by
-          // its own server (same origin, CORS-locked).
-          if (!kIsWeb && widget.user == null) ...[
+          // its own server (same origin, CORS-locked). Builds without a
+          // built-in server pick it on the server setup screen instead.
+          if (!kIsWeb &&
+              widget.user == null &&
+              widget.api.config.hasDefaultServer) ...[
             const SizedBox(height: 20),
             _SettingsSection(
               children: [

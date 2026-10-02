@@ -133,7 +133,6 @@ jobs:
       image: ghcr.io/cirruslabs/flutter:stable
     env:
       WORKOS_CLIENT_ID: ${{ secrets.WORKOS_CLIENT_ID }}
-      NIGHTLY_API_BASE_URL: ${{ secrets.NIGHTLY_API_BASE_URL }}
     steps:
       - uses: actions/checkout@v4
       - name: Build release APK
@@ -142,12 +141,11 @@ jobs:
         run: |
           git config --global --add safe.directory /sdks/flutter || true
           flutter pub get
+          # Fallback only: servers report their own public client ID.
           CID="${WORKOS_CLIENT_ID:-client_01M3QCMK75B35RPC8EAJA5GREP}"
-          # Server the nightly APK talks to by default; matches the dev overlay's
-          # APP_BASE_URL. Users can switch servers in the app before signing in.
-          API="${NIGHTLY_API_BASE_URL:-https://encom.tailbe71e1.ts.net:8443}"
+          # No API_BASE_URL on purpose: the published APK ships without a
+          # server, so people connect their own 217 server on first launch.
           flutter build apk --release \
-            --dart-define=API_BASE_URL="$API" \
             --dart-define=WORKOS_CLIENT_ID="$CID"
           test -f build/app/outputs/flutter-apk/app-release.apk
           cp build/app/outputs/flutter-apk/app-release.apk "${GITHUB_WORKSPACE}/217-nightly.apk"
@@ -200,6 +198,7 @@ jobs:
             "- Built: ${BUILT_AT}" \
             "- Also published as release \`${DATETIME_SHA}\`" \
             "- Asset: \`217-nightly.apk\` (release build; debug-signed for sideload tryouts)" \
+            "- Asks for your 217 server on first launch (no built-in server; see the README's Self-hosting section)" \
             "- Commit: ${COMMIT_URL}")"
           if gh release view nightly >/dev/null 2>&1; then
             gh release edit nightly --target "${GITHUB_SHA}" --notes "${NIGHTLY_NOTES}" --prerelease
@@ -217,7 +216,7 @@ jobs:
             "" \
             "- Built: ${BUILT_AT}" \
             "- Tag: \`${DATETIME_SHA}\`" \
-            "- Asset: \`217-${DATETIME_SHA}.apk\`" \
+            "- Asset: \`217-${DATETIME_SHA}.apk\` (asks for your 217 server on first launch)" \
             "- Rolling pointer: release \`nightly\`" \
             "- Commit: ${COMMIT_URL}")"
           gh release create "${DATETIME_SHA}" \

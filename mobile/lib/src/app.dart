@@ -11,6 +11,7 @@ import 'platform/open_url.dart';
 import 'prefs.dart';
 import 'screens/auth_screen.dart';
 import 'screens/calendar_screen.dart';
+import 'screens/server_setup_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/share_screens.dart';
 import 'theme/app_theme.dart';
@@ -98,9 +99,11 @@ class _App217State extends State<App217> {
     var share = const ShareState(status: 'none');
     try {
       await _api.loadPersistedApiBase();
-      final session = await _api.currentSession();
-      user = session.user;
-      share = session.share ?? share;
+      if (!_api.config.needsServerSetup) {
+        final session = await _api.currentSession();
+        user = session.user;
+        share = session.share ?? share;
+      }
     } catch (_) {
       // Unreachable server: show the signed-out screen.
     }
@@ -200,6 +203,43 @@ class _App217State extends State<App217> {
       _user = null;
       _share = const ShareState(status: 'none');
     });
+  }
+
+  /// Server set up (first launch) or switched from the sign-in screen.
+  Future<void> _onServerConnected({
+    required bool changed,
+    String? inviteCode,
+  }) async {
+    if (inviteCode != null) await _prefs.savePendingInvite(inviteCode);
+    if (changed && mounted) _onApiBaseChanged();
+  }
+
+  Future<void> _openSelfHostGuide() async {
+    if (await openExternalUrl(selfHostGuideUrl)) return;
+    await Clipboard.setData(const ClipboardData(text: selfHostGuideUrl));
+    _messengerKey.currentState?.showSnackBar(
+      SnackBar(content: Text(_strings.linkCopied)),
+    );
+  }
+
+  void _openServerSetup() {
+    _navKey.currentState?.push(
+      MaterialPageRoute(
+        builder: (_) => ListenableBuilder(
+          listenable: _changes,
+          builder: (context, _) => ServerSetupScreen(
+            api: _api,
+            strings: _strings,
+            changing: true,
+            onConnected: ({required changed, inviteCode}) {
+              Navigator.of(context).pop();
+              _onServerConnected(changed: changed, inviteCode: inviteCode);
+            },
+            onOpenGuide: _openSelfHostGuide,
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _signIn() async {
@@ -302,6 +342,15 @@ class _App217State extends State<App217> {
         ),
       );
     }
+    if (_api.config.needsServerSetup) {
+      return ServerSetupScreen(
+        api: _api,
+        strings: _strings,
+        onConnected: _onServerConnected,
+        onOpenGuide: _openSelfHostGuide,
+        onOpenSettings: _openSettings,
+      );
+    }
     if (_user == null) {
       return AuthScreen(
         strings: _strings,
@@ -311,8 +360,12 @@ class _App217State extends State<App217> {
         onSignIn: _signIn,
         onOpenSettings: _openSettings,
         // Server choice happens before sign-in; web always uses its origin.
-        onOpenServerSettings:
-            kIsWeb ? null : () => _openSettings(expandServer: true),
+        // Builds without a built-in server switch on the setup screen.
+        onOpenServerSettings: kIsWeb
+            ? null
+            : _api.config.hasDefaultServer
+                ? () => _openSettings(expandServer: true)
+                : _openServerSetup,
         // Web can't switch servers, so point people at the self-host guide.
         onOpenSelfHostGuide: kIsWeb && !_selfHostCardDismissed
             ? () => openExternalUrl(selfHostGuideUrl)

@@ -29,17 +29,38 @@ class ApiClient {
   }
 
   /// Validates a self-hosted server URL; empty means "use the default server".
+  /// A bare host gets `https://`, and a pasted invite link
+  /// (`https://host/?invite=CODE`) keeps only its server part.
   /// Throws [FormatException] unless the URL is http(s) with a host.
   static String parseApiBase(String value) {
-    final normalized = normalizeApiBase(value);
-    if (normalized.isEmpty) return '';
-    final uri = Uri.tryParse(normalized);
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) return '';
+    final withScheme = trimmed.contains('://') ? trimmed : 'https://$trimmed';
+    final uri = Uri.tryParse(withScheme);
     if (uri == null ||
         (uri.scheme != 'http' && uri.scheme != 'https') ||
-        uri.host.isEmpty) {
+        uri.host.isEmpty ||
+        RegExp(r'[\s%]').hasMatch(uri.host) ||
+        uri.userInfo.isNotEmpty) {
       throw const FormatException('server URL needs http(s):// and a host');
     }
-    return normalized;
+    final server = Uri(
+      scheme: uri.scheme,
+      host: uri.host,
+      port: uri.hasPort ? uri.port : null,
+      path: uri.path,
+    );
+    return normalizeApiBase(server.toString());
+  }
+
+  /// Invite code carried by a pasted invite link, if any.
+  static String? inviteCodeIn(String value) {
+    final trimmed = value.trim();
+    final uri = Uri.tryParse(
+      trimmed.contains('://') ? trimmed : 'https://$trimmed',
+    );
+    final code = uri?.queryParameters['invite']?.trim() ?? '';
+    return code.isEmpty ? null : code;
   }
 
   /// Saves a self-hosted server URL (empty resets to the default server).
@@ -98,21 +119,49 @@ class ApiClient {
     return http.Response.fromStream(streamed);
   }
 
-  /// True when [baseUrl] (default: the current server) answers like a 217 API.
-  Future<bool> ping({String? baseUrl}) async {
+  /// Whether [baseUrl] (default: the current server) is a 217 API that
+  /// people can sign in to.
+  Future<ServerCheck> checkServer({String? baseUrl}) async {
     final base = baseUrl == null ? config.apiBaseUrl : normalizeApiBase(baseUrl);
+    final http.Response response;
     try {
-      final response = await _send(
+      response = await _send(
         'GET',
         _uriFor(base, '/api/auth/config'),
         auth: false,
       );
-      if (response.statusCode != 200) return false;
-      final decoded = jsonDecode(response.body);
-      return decoded is Map && decoded.containsKey('authkit');
     } catch (_) {
-      return false;
+      return ServerCheck.unreachable;
     }
+    if (response.statusCode != 200) return ServerCheck.notA217Server;
+    try {
+      final decoded = jsonDecode(response.body);
+      if (decoded is! Map || !decoded.containsKey('authkit')) {
+        return ServerCheck.notA217Server;
+      }
+      return decoded['authkit'] == true
+          ? ServerCheck.ok
+          : ServerCheck.signInNotConfigured;
+    } on FormatException {
+      return ServerCheck.notA217Server;
+    }
+  }
+
+  /// The server's public WorkOS client ID, so one APK can sign in to any
+  /// self-hosted server. Older servers don't report it: use the build's.
+  Future<String> signInClientId() async {
+    final response = await _send('GET', _uri('/api/auth/config'), auth: false);
+    if (response.statusCode != 200) {
+      throw ApiException('auth config', response);
+    }
+    final decoded = jsonDecode(response.body);
+    if (decoded is! Map || decoded['authkit'] != true) {
+      throw StateError('sign-in is not configured on this server');
+    }
+    final clientId = decoded['workos_client_id'];
+    return clientId is String && clientId.isNotEmpty
+        ? clientId
+        : config.workosClientId;
   }
 
   Future<SessionSnapshot> currentSession() async {
@@ -129,9 +178,10 @@ class ApiClient {
   }
 
   Future<User> signInWithWorkOS() async {
+    final clientId = await signInClientId();
     final pkce = _Pkce.generate();
     final authorize = Uri.https('api.workos.com', '/user_management/authorize', {
-      'client_id': config.workosClientId,
+      'client_id': clientId,
       'redirect_uri': config.redirectUri,
       'response_type': 'code',
       'provider': 'authkit',
@@ -346,6 +396,9 @@ class ApiClient {
     );
   }
 }
+
+/// Result of [ApiClient.checkServer].
+enum ServerCheck { ok, unreachable, notA217Server, signInNotConfigured }
 
 /// Non-success API response. [message] is the server's `error` field, if any.
 class ApiException implements Exception {

@@ -37,6 +37,8 @@ make mobile-apk
 
 Install `mobile/build/app/outputs/flutter-apk/app-debug.apk`. Emulator API base defaults to `http://10.0.2.2:8787` (`--dart-define=API_BASE_URL=...` to override at build time, or **Settings → Advanced options → Self-hosted server URL** in the app).
 
+The published APK has **no built-in server**: on first launch it asks for the address of a 217 server (see [Self-hosting](#self-hosting)), or an invite link from someone who runs one. Release builds only connect over `https://`.
+
 Every push to `main` (after CI is green) publishes APK + GHCR with the same dual names:
 - **nightly** — rolling GitHub Release (`217-nightly.apk`) and GHCR tags `:nightly` / `:dev`
 - **datetime_sha** — immutable GitHub Release `YYYYMMDDHHMMSS_<shortsha>` (`217-<tag>.apk`) and matching GHCR tags
@@ -103,16 +105,18 @@ Sign-in uses [WorkOS AuthKit](https://workos.com/docs/authkit) (free tier is eno
 - **Kubernetes:** `deploy/kustomize/base` has backend and frontend deployments plus a production `Caddyfile`; see `deploy/kustomize/overlays/dev` for a working overlay. Put `DATABASE_URL`, `WORKOS_API_KEY` and friends in a Secret.
 - **Images:** CI publishes `app-217-backend` and `app-217-frontend` images to GHCR on every push to `main`.
 
-Check it with `curl https://217.example.com/api/auth/config` — it should answer `{"authkit":true,...}`.
+Check it with `curl https://217.example.com/api/auth/config` — it should answer `{"authkit":true,...,"workos_client_id":"client_..."}`.
 
 ### 4. Use it
 
 - **Web:** open your `APP_BASE_URL`. The web app always talks to the server that serves it.
-- **Android:** the app signs in with the WorkOS client ID it was built with. With your own WorkOS project, build your own APK pointed at your server:
+- **Android:** install the APK from [GitHub Releases](https://github.com/jobucaldas/217/releases/tag/nightly). On first launch it asks for your server: type its address (`217.example.com`) or paste an invite link (`https://217.example.com/?invite=CODE`), then **Connect**. The app checks the server, then signs in with the WorkOS client ID the server reports at `/api/auth/config`, so the same APK works with any WorkOS project. Release builds need `https://`.
+
+  To change servers later, sign out and tap **Server: …** on the sign-in screen. Switching servers signs you out, because accounts belong to a server.
+
+  Prefer an APK with your server built in (no setup step)? Build one:
 
   ```sh
-  API_BASE_URL=https://217.example.com WORKOS_CLIENT_ID=client_... make mobile-apk
+  API_BASE_URL=https://217.example.com make mobile-apk
   ```
-
-  Any build can also switch servers before signing in: on the sign-in screen tap **Hosting your own 217 server?** → **Self-hosted server URL**, then **Test connection** and **Save**. That works when the server uses the same WorkOS client ID as the app. Switching servers signs you out, because accounts belong to a server.
 

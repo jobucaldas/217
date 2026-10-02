@@ -51,7 +51,8 @@ import json,sys
 b=json.load(sys.stdin)
 assert b.get("authkit") is True, b
 assert b.get("password") is False, b
-print("authkit=true password=false")
+assert str(b.get("workos_client_id", "")).startswith("client_"), "workos_client_id missing"
+print("authkit=true password=false workos_client_id=present")
 '
 
 echo "GET /api/auth/workos (JSON auth_url + binding cookie)…"
