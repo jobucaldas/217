@@ -114,6 +114,14 @@ class Strings {
         'Tem seu próprio servidor 217? Configure em Ajustes.',
         '¿Tienes tu propio servidor 217? Configúralo en Ajustes.',
       );
+  String get selfHostCard => _t(
+        'You can run 217 on your own server and keep your data there.',
+        'Você pode rodar o 217 no seu próprio servidor e manter seus dados lá.',
+        'Puedes ejecutar 217 en tu propio servidor y guardar tus datos allí.',
+      );
+  String get selfHostGuide =>
+      _t('Self-hosting guide', 'Guia de hospedagem própria', 'Guía para alojarlo tú');
+  String get dismiss => _t('Dismiss', 'Dispensar', 'Descartar');
   String get showMore =>
       _t('Advanced options', 'Opções avançadas', 'Opciones avanzadas');
   String get showLess => _t(

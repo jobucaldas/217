@@ -31,6 +31,9 @@ void main() {
 
     // No saved language → English.
     expect(find.text('Sign in'), findsOneWidget);
+    // The self-host card is a web thing; Android links to Settings instead.
+    expect(find.byKey(const ValueKey('auth-self-host-card')), findsNothing);
+    expect(find.byKey(const ValueKey('auth-self-host-tip')), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('auth-settings')));
     await tester.pumpAndSettle();
 

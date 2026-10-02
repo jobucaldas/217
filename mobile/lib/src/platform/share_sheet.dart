@@ -1,7 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
-const _channel = MethodChannel('com.jobucaldas.a217/share');
+/// Android intents bridge (share sheet, open URL) in `MainActivity.kt`.
+const intentsChannel = MethodChannel('com.jobucaldas.a217/intents');
 
 /// True when this build can open the OS share sheet (Android).
 bool get canShareNatively =>
@@ -13,7 +14,7 @@ bool get canShareNatively =>
 Future<bool> shareText(String text, {String? subject}) async {
   if (!canShareNatively) return false;
   try {
-    await _channel.invokeMethod<void>('shareText', {
+    await intentsChannel.invokeMethod<void>('shareText', {
       'text': text,
       if (subject != null) 'subject': subject,
     });

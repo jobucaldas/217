@@ -1,9 +1,11 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../api/client.dart';
 import '../i18n.dart';
 import '../models.dart';
+import '../platform/open_url.dart';
 import '../theme/app_theme.dart';
 import 'reminder_settings_screen.dart';
 import 'share_screens.dart';
@@ -93,6 +95,12 @@ class _SettingsPageState extends State<SettingsPage> {
     });
     if (changed) widget.onApiBaseChanged();
     _showSnack(custom ? widget.strings.serverSaved : widget.strings.serverReset);
+  }
+
+  Future<void> _openGuide() async {
+    if (await openExternalUrl(selfHostGuideUrl)) return;
+    await Clipboard.setData(const ClipboardData(text: selfHostGuideUrl));
+    if (mounted) _showSnack(widget.strings.linkCopied);
   }
 
   /// Probes the typed URL (or the default when empty) without saving it.
@@ -363,6 +371,18 @@ class _SettingsPageState extends State<SettingsPage> {
                           ),
                         ),
                       ],
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(4, 0, 16, 8),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        key: const ValueKey('self-host-guide'),
+                        onPressed: _openGuide,
+                        icon: const Icon(Icons.open_in_new, size: 18),
+                        label: Text(widget.strings.selfHostGuide),
+                      ),
                     ),
                   ),
                 ],

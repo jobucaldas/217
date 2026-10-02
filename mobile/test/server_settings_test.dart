@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:a217/src/api/client.dart';
 import 'package:a217/src/config.dart';
 import 'package:a217/src/i18n.dart';
+import 'package:a217/src/platform/open_url.dart';
+import 'package:a217/src/platform/share_sheet.dart';
 import 'package:a217/src/screens/settings_screen.dart';
 import 'package:a217/src/theme/app_theme.dart';
 
@@ -176,5 +179,45 @@ void main() {
           .text,
       'https://self.example.com',
     );
+  });
+
+  testWidgets('server section links to the self-hosting guide', (tester) async {
+    final calls = <MethodCall>[];
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(intentsChannel, (call) async {
+      calls.add(call);
+      return null;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(intentsChannel, null));
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsPage(
+          api: ApiClient(_config()),
+          strings: const Strings(AppLanguage.en),
+          language: AppLanguage.en,
+          themeMode: ThemeMode.system,
+          palette: AppPalette.azure,
+          onLanguageChanged: (_) {},
+          onThemeModeChanged: (_) {},
+          onPaletteChanged: (_) {},
+          onApiBaseChanged: () {},
+          expandServer: true,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('self-host-guide')),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.byKey(const ValueKey('self-host-guide')));
+    await tester.pumpAndSettle();
+
+    expect(calls.single.method, 'openUrl');
+    expect((calls.single.arguments as Map)['url'], selfHostGuideUrl);
+    expect(selfHostGuideUrl, endsWith('#self-hosting'));
   });
 }

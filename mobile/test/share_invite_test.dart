@@ -6,6 +6,7 @@ import 'package:a217/src/api/client.dart';
 import 'package:a217/src/config.dart';
 import 'package:a217/src/i18n.dart';
 import 'package:a217/src/models.dart';
+import 'package:a217/src/platform/share_sheet.dart';
 import 'package:a217/src/screens/share_screens.dart';
 import 'package:a217/src/theme/app_theme.dart';
 
@@ -68,7 +69,7 @@ void main() {
     final messenger =
         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
     messenger.setMockMethodCallHandler(
-      const MethodChannel('com.jobucaldas.a217/share'),
+      intentsChannel,
       (call) async {
         shareCalls.add(call);
         return null;
@@ -86,7 +87,7 @@ void main() {
     final messenger =
         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
     messenger.setMockMethodCallHandler(
-      const MethodChannel('com.jobucaldas.a217/share'),
+      intentsChannel,
       null,
     );
     messenger.setMockMethodCallHandler(SystemChannels.platform, null);
@@ -133,7 +134,7 @@ void main() {
       (tester) async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(
-      const MethodChannel('com.jobucaldas.a217/share'),
+      intentsChannel,
       (call) async => throw PlatformException(code: 'no_activity'),
     );
     await _pump(tester, share: _openShare);

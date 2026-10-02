@@ -79,6 +79,64 @@ void main() {
     );
   }
 
+  for (final brightness in Brightness.values) {
+    testWidgets('self-host card links to the guide and dismisses ($brightness)',
+        (tester) async {
+      var opened = 0;
+      var dismissed = 0;
+      final scheme =
+          buildApp217ColorScheme(brightness, palette: AppPalette.azure);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildApp217Theme(
+            brightness: brightness,
+            palette: AppPalette.azure,
+          ),
+          home: AuthScreen(
+            strings: const Strings(AppLanguage.en),
+            onSignIn: () async {},
+            onOpenSettings: () {},
+            onOpenSelfHostGuide: () => opened++,
+            onDismissSelfHostCard: () => dismissed++,
+          ),
+        ),
+      );
+
+      final body = find.text(
+        'You can run 217 on your own server and keep your data there.',
+      );
+      expect(body, findsOneWidget);
+      expect(tester.widget<Text>(body).style?.color, scheme.onSecondaryContainer);
+      final card = tester.widget<Material>(
+        find.byKey(const ValueKey('auth-self-host-card')),
+      );
+      expect(card.color, scheme.secondaryContainer);
+
+      await tester.tap(find.text('Self-hosting guide'));
+      expect(opened, 1);
+      await tester.tap(find.byTooltip('Dismiss'));
+      expect(dismissed, 1);
+      // Sign-in stays the primary action above the card.
+      expect(
+        tester.getCenter(find.text('Sign in')).dy,
+        lessThan(tester.getTopLeft(find.byKey(const ValueKey('auth-self-host-card'))).dy),
+      );
+    });
+  }
+
+  testWidgets('no self-host card without its callbacks', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: AuthScreen(
+          strings: const Strings(AppLanguage.en),
+          onSignIn: () async {},
+          onOpenSettings: () {},
+        ),
+      ),
+    );
+    expect(find.byKey(const ValueKey('auth-self-host-card')), findsNothing);
+  });
+
   testWidgets('auth screen English tagline has no trailing period', (tester) async {
     await tester.pumpWidget(
       MaterialApp(

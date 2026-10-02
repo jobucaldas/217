@@ -15,6 +15,7 @@ class AppearancePrefs {
   static const paletteKey = 'app_palette';
   static const languageKey = 'language';
   static const pendingInviteKey = 'pending_invite';
+  static const selfHostCardDismissedKey = 'self_host_card_dismissed';
   static const reminderHintDismissedKey = 'reminder_hint_dismissed';
   static const fabSideKey = 'today_fab_side';
   static const fabBottomKey = 'today_fab_bottom';
@@ -54,6 +55,12 @@ class AppearancePrefs {
     final v = await _storage.read(key: reminderHintDismissedKey);
     return v == '1';
   }
+
+  Future<bool> selfHostCardDismissed() async =>
+      await _storage.read(key: selfHostCardDismissedKey) == '1';
+
+  Future<void> dismissSelfHostCard() =>
+      _storage.write(key: selfHostCardDismissedKey, value: '1');
 
   Future<void> dismissReminderHint() =>
       _storage.write(key: reminderHintDismissedKey, value: '1');

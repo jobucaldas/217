@@ -1,7 +1,8 @@
 DEV_IMAGE ?= localhost/217-dev
 FLUTTER_IMAGE ?= ghcr.io/cirruslabs/flutter:stable
 PODMAN_RUN = podman run --rm -v "$(CURDIR):/workspace:Z" -w /workspace $(DEV_IMAGE)
-FLUTTER_RUN = podman run --rm -v "$(CURDIR):/workspace:Z" -w /workspace/mobile $(FLUTTER_IMAGE) bash -lc
+# -e passes API_BASE_URL / WORKOS_CLIENT_ID from the host when set (dart-defines below).
+FLUTTER_RUN = podman run --rm -e API_BASE_URL -e WORKOS_CLIENT_ID -v "$(CURDIR):/workspace:Z" -w /workspace/mobile $(FLUTTER_IMAGE) bash -lc
 COMPOSE_ENV = $(if $(wildcard .env.reminders.local),--env-file .env.reminders.local,) $(if $(wildcard .env.local),--env-file .env.local,)
 
 .PHONY: dev-image test-backend test-mobile test validate dev-up dev-down dev-logs vapid-keys mobile-apk mobile-web

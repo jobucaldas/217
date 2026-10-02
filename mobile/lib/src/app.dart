@@ -7,6 +7,7 @@ import 'auth/sign_in.dart';
 import 'config.dart';
 import 'i18n.dart';
 import 'models.dart';
+import 'platform/open_url.dart';
 import 'prefs.dart';
 import 'screens/auth_screen.dart';
 import 'screens/calendar_screen.dart';
@@ -39,6 +40,7 @@ class _App217State extends State<App217> {
   ThemeMode _themeMode = ThemeMode.system;
   AppPalette _palette = AppPalette.azure;
   bool _reminderHintDismissed = false;
+  bool _selfHostCardDismissed = false;
 
   /// Routes pushed on top of home (Settings) are built once, so they listen
   /// here to pick up theme, language and session changes made from them.
@@ -73,12 +75,14 @@ class _App217State extends State<App217> {
       final appearance = await _prefs.load();
       final language = await _prefs.loadLanguage();
       final hintGone = await _prefs.reminderHintDismissed();
+      final selfHostGone = await _prefs.selfHostCardDismissed();
       if (!mounted) return;
       setState(() {
         _themeMode = appearance.mode;
         _palette = appearance.palette;
         _language = language;
         _reminderHintDismissed = hintGone;
+        _selfHostCardDismissed = selfHostGone;
       });
     } catch (_) {
       // Keep defaults.
@@ -268,6 +272,11 @@ class _App217State extends State<App217> {
     );
   }
 
+  Future<void> _dismissSelfHostCard() async {
+    setState(() => _selfHostCardDismissed = true);
+    await _prefs.dismissSelfHostCard();
+  }
+
   Future<void> _dismissReminderHint() async {
     await _prefs.dismissReminderHint();
     if (!mounted) return;
@@ -298,6 +307,12 @@ class _App217State extends State<App217> {
         // Server choice happens before sign-in; web always uses its origin.
         onOpenServerSettings:
             kIsWeb ? null : () => _openSettings(expandServer: true),
+        // Web can't switch servers, so point people at the self-host guide.
+        onOpenSelfHostGuide: kIsWeb && !_selfHostCardDismissed
+            ? () => openExternalUrl(selfHostGuideUrl)
+            : null,
+        onDismissSelfHostCard:
+            kIsWeb && !_selfHostCardDismissed ? _dismissSelfHostCard : null,
         showReminderHint: !_reminderHintDismissed,
         onDismissReminderHint: _dismissReminderHint,
       );
