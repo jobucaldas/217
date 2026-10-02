@@ -1,4 +1,5 @@
-/// UI languages. English is the default until someone picks another one.
+/// UI languages. Without a saved choice the app follows the device language,
+/// falling back to English.
 enum AppLanguage { en, pt, es }
 
 extension AppLanguageX on AppLanguage {
@@ -18,10 +19,25 @@ extension AppLanguageX on AppLanguage {
         AppLanguage.es => 'es',
       };
 
-  static AppLanguage fromId(String? raw) => AppLanguage.values.firstWhere(
-        (l) => l.id == raw,
-        orElse: () => AppLanguage.en,
-      );
+  static AppLanguage fromId(String? raw) => tryFromId(raw) ?? AppLanguage.en;
+
+  /// The language for an id or language code (`pt`, `es`…), or null.
+  static AppLanguage? tryFromId(String? raw) {
+    for (final language in AppLanguage.values) {
+      if (language.id == raw) return language;
+    }
+    return null;
+  }
+
+  /// First supported language in [languageCodes] (device preference order),
+  /// else English.
+  static AppLanguage fromDevice(Iterable<String> languageCodes) {
+    for (final code in languageCodes) {
+      final language = tryFromId(code);
+      if (language != null) return language;
+    }
+    return AppLanguage.en;
+  }
 }
 
 class Strings {

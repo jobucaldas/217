@@ -36,7 +36,7 @@ class _App217State extends State<App217> {
   User? _user;
   ShareState _share = const ShareState(status: 'none');
   bool _loading = true;
-  AppLanguage _language = AppLanguage.en;
+  AppLanguage _language = _deviceLanguage();
   ThemeMode _themeMode = ThemeMode.system;
   AppPalette _palette = AppPalette.azure;
   bool _reminderHintDismissed = false;
@@ -47,6 +47,12 @@ class _App217State extends State<App217> {
   final _changes = _ChangeTicker();
 
   Strings get _strings => Strings(_language);
+
+  /// No saved choice: follow the device's preferred languages, else English.
+  static AppLanguage _deviceLanguage() => AppLanguageX.fromDevice(
+        WidgetsBinding.instance.platformDispatcher.locales
+            .map((locale) => locale.languageCode),
+      );
 
   @override
   void initState() {
@@ -80,7 +86,7 @@ class _App217State extends State<App217> {
       setState(() {
         _themeMode = appearance.mode;
         _palette = appearance.palette;
-        _language = language;
+        _language = language ?? _deviceLanguage();
         _reminderHintDismissed = hintGone;
         _selfHostCardDismissed = selfHostGone;
       });

@@ -29,9 +29,9 @@ class AppearancePrefs {
     );
   }
 
-  /// Saved UI language; English until someone picks another one.
-  Future<AppLanguage> loadLanguage() async =>
-      AppLanguageX.fromId(await _storage.read(key: languageKey));
+  /// Saved UI language, or null when nobody picked one yet.
+  Future<AppLanguage?> loadLanguage() async =>
+      AppLanguageX.tryFromId(await _storage.read(key: languageKey));
 
   Future<void> saveLanguage(AppLanguage language) =>
       _storage.write(key: languageKey, value: language.id);

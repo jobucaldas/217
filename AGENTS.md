@@ -3,7 +3,7 @@ Project: 217
 Cross-platform application for tracking anticonceptional intake.
 
 ## Overview
-Android-first Flutter app for tracking anticonceptional intake via a calendar UI. Multi-user support with WorkOS AuthKit authentication, dark mode, and English, Português and Español UI (English by default).
+Android-first Flutter app for tracking anticonceptional intake via a calendar UI. Multi-user support with WorkOS AuthKit authentication, dark mode, and English, Português and Español UI (follows the device language; English otherwise).
 
 ## Tech Stack
 - Client: Flutter (Android + web)

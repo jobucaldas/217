@@ -29,7 +29,7 @@ void main() {
     await tester.pumpWidget(App217(config: api.config, api: api));
     await tester.pumpAndSettle();
 
-    // No saved language → English.
+    // No saved language and an en_US test device → English.
     expect(find.text('Sign in'), findsOneWidget);
     // The self-host card is a web thing; Android links to Settings instead.
     expect(find.byKey(const ValueKey('auth-self-host-card')), findsNothing);
@@ -71,13 +71,41 @@ void main() {
     expect(find.text('Entrar'), findsOneWidget);
   });
 
-  testWidgets('English is the default even on a Portuguese device',
-      (tester) async {
-    tester.platformDispatcher.localeTestValue = const Locale('pt', 'BR');
-    addTearDown(tester.platformDispatcher.clearLocaleTestValue);
+  Future<void> pumpWithDeviceLocales(
+    WidgetTester tester,
+    List<Locale> locales,
+  ) async {
+    tester.platformDispatcher.localesTestValue = locales;
+    addTearDown(tester.platformDispatcher.clearLocalesTestValue);
     final api = _signedOutApi();
     await tester.pumpWidget(App217(config: api.config, api: api));
     await tester.pumpAndSettle();
+  }
+
+  testWidgets('no saved language: follows a Portuguese device',
+      (tester) async {
+    await pumpWithDeviceLocales(tester, const [Locale('pt', 'BR')]);
+    expect(find.text('Entrar'), findsOneWidget);
+  });
+
+  testWidgets('no saved language: first supported device language wins',
+      (tester) async {
+    await pumpWithDeviceLocales(
+      tester,
+      const [Locale('fr', 'FR'), Locale('es', 'MX'), Locale('pt', 'BR')],
+    );
+    expect(find.text('Iniciar sesión'), findsOneWidget);
+  });
+
+  testWidgets('no saved language: unsupported device falls back to English',
+      (tester) async {
+    await pumpWithDeviceLocales(tester, const [Locale('de', 'DE')]);
+    expect(find.text('Sign in'), findsOneWidget);
+  });
+
+  testWidgets('a saved language beats the device language', (tester) async {
+    FlutterSecureStorage.setMockInitialValues({'language': 'en'});
+    await pumpWithDeviceLocales(tester, const [Locale('pt', 'BR')]);
     expect(find.text('Sign in'), findsOneWidget);
   });
 
