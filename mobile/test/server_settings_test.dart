@@ -113,7 +113,7 @@ void main() {
       expect(find.text('Self-hosted server URL'), findsOneWidget);
       expect(find.textContaining('host your own 217 server'), findsOneWidget);
       expect(find.textContaining('10.0.2.2'), findsNothing);
-      expect(find.textContaining('LAN'), findsNothing);
+      expect(find.textContaining('YOUR_LAN_IP'), findsNothing);
       // Default server leaves the field empty.
       final field = find.byKey(const ValueKey('server-url'));
       expect(tester.widget<TextField>(field).controller!.text, isEmpty);
