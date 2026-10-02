@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"217/backend/internal/auth"
 	"217/backend/internal/store"
 )
 
@@ -27,6 +28,34 @@ func TestAuthConfigPasswordAlwaysDisabled(t *testing.T) {
 	}
 	if body["authkit"] != false {
 		t.Fatalf("authkit without provider = %#v", body["authkit"])
+	}
+	if _, ok := body["workos_client_id"]; ok {
+		t.Fatalf("client id without provider = %#v", body["workos_client_id"])
+	}
+}
+
+func TestAuthConfigReportsPublicClientID(t *testing.T) {
+	provider, err := auth.NewWorkOSOAuth("sk_test_secret", "client_selfhost", "https://217.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := New(store.NewMemoryStore())
+	h.SetOAuthProvider(provider)
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/config", nil)
+	w := httptest.NewRecorder()
+	h.AuthConfig(w, req)
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["authkit"] != true {
+		t.Fatalf("authkit = %#v", body["authkit"])
+	}
+	if body["workos_client_id"] != "client_selfhost" {
+		t.Fatalf("workos_client_id = %#v", body["workos_client_id"])
+	}
+	if strings.Contains(w.Body.String(), "sk_test_secret") {
+		t.Fatalf("API key leaked: %s", w.Body.String())
 	}
 }
 

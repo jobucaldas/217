@@ -31,6 +31,12 @@ type WorkOSExchanger interface {
 	ExchangeWithRedirect(ctx context.Context, code, codeVerifier, redirectURI string) (*OAuthUserInfo, error)
 }
 
+// ClientIDReporter exposes the public AuthKit client ID, so a generic app
+// build can start sign-in for whichever server it is pointed at.
+type ClientIDReporter interface {
+	ClientID() string
+}
+
 // WorkOSUserDeleter permanently removes an AuthKit user via the User Management API.
 // Account deletion must invoke this before wiping local app data (fail closed).
 type WorkOSUserDeleter interface {

@@ -85,12 +85,17 @@ func (h *Handler) SetAppBaseURL(u string)                { h.appBaseURL = u }
 
 func (h *Handler) authkitEnabled() bool { return h.oauthProvider != nil }
 
-// AuthConfig reports which sign-in modes the API exposes.
+// AuthConfig reports which sign-in modes the API exposes. With AuthKit on it
+// also reports the public client ID, which the Android app signs in with.
 func (h *Handler) AuthConfig(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	body := map[string]interface{}{
 		"authkit":  h.authkitEnabled(),
 		"password": false, // password register/login stay disabled for AuthKit deployments
-	})
+	}
+	if reporter, ok := h.oauthProvider.(auth.ClientIDReporter); ok {
+		body["workos_client_id"] = reporter.ClientID()
+	}
+	writeJSON(w, http.StatusOK, body)
 }
 
 // Register is disabled when AuthKit is the product auth path.

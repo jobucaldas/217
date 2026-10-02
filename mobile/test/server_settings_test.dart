@@ -1,7 +1,11 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 
 import 'package:a217/src/api/client.dart';
 import 'package:a217/src/config.dart';
@@ -27,10 +31,76 @@ void main() {
       expect(ApiClient.parseApiBase('  https://a.example/// '),
           'https://a.example');
       expect(ApiClient.parseApiBase(''), '');
-      expect(() => ApiClient.parseApiBase('a.example'), throwsFormatException);
       expect(() => ApiClient.parseApiBase('ftp://a.example'),
           throwsFormatException);
       expect(() => ApiClient.parseApiBase('https://'), throwsFormatException);
+      expect(() => ApiClient.parseApiBase('not a url'), throwsFormatException);
+      expect(() => ApiClient.parseApiBase('https://me:pw@a.example'),
+          throwsFormatException);
+    });
+
+    test('parseApiBase accepts bare hosts and invite links', () {
+      expect(ApiClient.parseApiBase('A.example'), 'https://a.example');
+      expect(ApiClient.parseApiBase('a.example:8443/'),
+          'https://a.example:8443');
+      expect(ApiClient.parseApiBase('http://10.0.0.5:8787'),
+          'http://10.0.0.5:8787');
+      expect(ApiClient.parseApiBase('https://a.example/217/'),
+          'https://a.example/217');
+      expect(ApiClient.parseApiBase('https://a.example/?invite=ABCD2345#x'),
+          'https://a.example');
+      expect(ApiClient.inviteCodeIn('https://a.example/?invite=ABCD2345'),
+          'ABCD2345');
+      expect(ApiClient.inviteCodeIn('a.example/?invite= ab '), 'ab');
+      expect(ApiClient.inviteCodeIn('https://a.example'), isNull);
+    });
+
+    test('checkServer tells unreachable, foreign and sign-in-less servers apart',
+        () async {
+      Future<ServerCheck> check(
+        Future<http.Response> Function(http.Request) handler,
+      ) =>
+          ApiClient(_config(), httpClient: MockClient(handler))
+              .checkServer(baseUrl: 'https://self.example.com');
+
+      expect(
+        await check((r) async {
+          expect(r.url.toString(), 'https://self.example.com/api/auth/config');
+          return http.Response('{"authkit":true,"password":false}', 200);
+        }),
+        ServerCheck.ok,
+      );
+      expect(
+        await check((_) async => throw const SocketException('offline')),
+        ServerCheck.unreachable,
+      );
+      expect(
+        await check((_) async => http.Response('<html>nginx</html>', 200)),
+        ServerCheck.notA217Server,
+      );
+      expect(
+        await check((_) async => http.Response('not found', 404)),
+        ServerCheck.notA217Server,
+      );
+      expect(
+        await check((_) async => http.Response('{"authkit":false}', 200)),
+        ServerCheck.signInNotConfigured,
+      );
+    });
+
+    test('sign-in uses the client ID the server reports', () async {
+      Future<String> clientId(String body) => ApiClient(
+            _config(),
+            httpClient: MockClient((_) async => http.Response(body, 200)),
+          ).signInClientId();
+
+      expect(
+        await clientId('{"authkit":true,"workos_client_id":"client_self"}'),
+        'client_self',
+      );
+      // Older servers don't report one: fall back to the build's.
+      expect(await clientId('{"authkit":true}'), 'client_test');
+      expect(clientId('{"authkit":false}'), throwsStateError);
     });
 
     test('custom server persists; switching drops the old session token',

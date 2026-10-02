@@ -121,8 +121,57 @@ class Strings {
         'Nenhum servidor 217 respondeu nesse endereço',
         'Ningún servidor 217 respondió en esa dirección',
       );
+  String get serverUnreachable => _t(
+        "Can't reach that address. Check it and your connection.",
+        'Não deu para acessar esse endereço. Confira o endereço e a sua conexão.',
+        'No se puede acceder a esa dirección. Revísala y revisa tu conexión.',
+      );
+  String get serverSignInOff => _t(
+        "That server hasn't set up sign-in yet",
+        'Esse servidor ainda não configurou o login',
+        'Ese servidor aún no configuró el inicio de sesión',
+      );
   String serverLabel(String host) =>
       _t('Server: $host', 'Servidor: $host', 'Servidor: $host');
+
+  // Server setup (Android builds without a built-in server)
+  String get serverSetupTitle => _t(
+        'Connect to your server',
+        'Conecte ao seu servidor',
+        'Conéctate a tu servidor',
+      );
+  String get changeServerTitle =>
+      _t('Change server', 'Trocar servidor', 'Cambiar servidor');
+  String get serverSetupIntro => _t(
+        "217 doesn't come with a server. Use one you run yourself, or one run by someone you trust.",
+        'O 217 não vem com servidor. Use um que você mesmo mantém ou um mantido por alguém de confiança.',
+        '217 no incluye un servidor. Usa uno que mantengas tú o uno de alguien de confianza.',
+      );
+  String get serverSetupBody => _t(
+        "Enter the server's address, or paste an invite link you got.",
+        'Digite o endereço do servidor ou cole um link de convite que você recebeu.',
+        'Escribe la dirección del servidor o pega un enlace de invitación que recibiste.',
+      );
+  String get serverAddress =>
+      _t('Server address', 'Endereço do servidor', 'Dirección del servidor');
+  String get serverAddressHint =>
+      _t('217.example.com', '217.exemplo.com', '217.ejemplo.com');
+  String get serverAddressInvalid => _t(
+        'Enter an address like 217.example.com',
+        'Digite um endereço como 217.exemplo.com',
+        'Escribe una dirección como 217.ejemplo.com',
+      );
+  String get serverNeedsHttps => _t(
+        'The app only connects to https:// addresses',
+        'O app só conecta a endereços https://',
+        'La app solo se conecta a direcciones https://',
+      );
+  String get connect => _t('Connect', 'Conectar', 'Conectar');
+  String get changeServerNote => _t(
+        'Accounts belong to a server, so you sign in again after switching.',
+        'Contas pertencem a um servidor, então você entra de novo depois de trocar.',
+        'Las cuentas pertenecen a un servidor, así que vuelves a iniciar sesión al cambiar.',
+      );
   String get selfHostTip => _t(
         'Hosting your own 217 server? Set it up in Settings.',
         'Tem seu próprio servidor 217? Configure em Ajustes.',

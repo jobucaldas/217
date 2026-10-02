@@ -56,6 +56,9 @@ func NewWorkOSOAuth(apiKey, clientID, appBaseURL string) (*WorkOSOAuth, error) {
 // RedirectURI returns the registered AuthKit callback for the browser cookie flow.
 func (w *WorkOSOAuth) RedirectURI() string { return w.redirectURI }
 
+// ClientID returns the public AuthKit client ID (never the API key).
+func (w *WorkOSOAuth) ClientID() string { return w.clientID }
+
 // AuthCodeURL returns the AuthKit consent URL with PKCE S256 parameters.
 // The nonce argument is accepted for OAuthProvider compatibility and is unused by AuthKit.
 func (w *WorkOSOAuth) AuthCodeURL(state, codeChallenge, nonce string) string {

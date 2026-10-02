@@ -29,12 +29,18 @@ Do not install Flutter on the host.
 
 | Define | Default | Notes |
 |---|---|---|
-| `API_BASE_URL` | web: same-origin; Android: `http://10.0.2.2:8787` | Emulator → host Caddy |
-| `WORKOS_CLIENT_ID` | staging public client id | Public OAuth client id |
+| `API_BASE_URL` | web: same-origin; Android debug: `http://10.0.2.2:8787`; Android release: none | Emulator → host Caddy. Release APKs without it ask for a server on first launch |
+| `WORKOS_CLIENT_ID` | staging public client id | Fallback only: Android signs in with the client id the server reports at `/api/auth/config` |
 | `WORKOS_REDIRECT_URI` | `com.jobucaldas.a217://auth/callback` | Android deep link only |
 | `SELF_HOST_GUIDE_URL` | repo README `#self-hosting` | Linked from the web sign-in card and the Android server setting |
 
-On Android, people who host their own 217 server can point the app at it before signing in: the sign-in screen links to **Settings → Advanced options → Self-hosted server URL** (leave it empty to use the `API_BASE_URL` baked into the build). The option is only offered while signed out, and switching servers signs you out, since accounts belong to a server. The web build always talks to the server that serves it, so the option is hidden there.
+## Choosing a server (Android)
+
+Release APKs built without `API_BASE_URL` (like the published nightly) ship with no server. On first launch, `ServerSetupScreen` asks for one: a bare host gets `https://`, a pasted invite link (`…/?invite=CODE`) sets the server and keeps the invite for after sign-in, and **Connect** only saves a server whose `/api/auth/config` answers with AuthKit on. Release builds refuse `http://` (the release manifest blocks cleartext). Signed out, tapping **Server: …** on the sign-in screen opens the same screen to switch.
+
+Builds with an `API_BASE_URL` (debug, or your own) skip that screen; there the sign-in screen links to **Settings → Advanced options → Self-hosted server URL** instead (leave it empty to use the built-in server).
+
+Either way the server is chosen only while signed out, and switching servers signs you out, since accounts belong to a server. The web build always talks to the server that serves it, so none of this shows there.
 
 ## Calendar invites
 
