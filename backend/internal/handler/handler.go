@@ -31,6 +31,9 @@ const (
 	maxSessionDuration = 7 * 24 * time.Hour
 	minSessionDuration = 15 * time.Minute
 	defaultAuthLimit   = 30
+	// Invite codes are 8 chars from a 32-letter alphabet; cap guesses per
+	// account and per address so codes can't be brute-forced.
+	inviteAcceptLimit = 10
 )
 
 type Handler struct {
@@ -41,6 +44,7 @@ type Handler struct {
 	oauthProvider   auth.OAuthProvider
 	appBaseURL      string
 	authLimiter     *ipRateLimiter
+	inviteLimiter   *ipRateLimiter
 }
 
 func New(s store.Store) *Handler {
@@ -49,6 +53,7 @@ func New(s store.Store) *Handler {
 		sessionCookie:   "217_session",
 		sessionDuration: maxSessionDuration,
 		authLimiter:     newIPRateLimiter(defaultAuthLimit, time.Minute),
+		inviteLimiter:   newIPRateLimiter(inviteAcceptLimit, time.Minute),
 	}
 }
 

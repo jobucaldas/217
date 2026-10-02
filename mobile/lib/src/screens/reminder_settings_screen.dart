@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../api/client.dart';
+import '../errors.dart';
 import '../i18n.dart';
 import '../notifications/local_reminders.dart';
 
@@ -108,7 +109,7 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen> {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = err.toString();
+        _error = friendlyError(widget.strings, err);
       });
     }
   }
@@ -179,7 +180,10 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen> {
         _saving = false;
         _error = (!_vapidConfigured && !supportsLocalReminders)
             ? widget.strings.reminderUnavailable
-            : err.toString();
+            // 409: the server needs a push subscription to deliver this.
+            : err is ApiException && err.statusCode == 409
+                ? widget.strings.reminderWebNeedsPush
+                : friendlyError(widget.strings, err);
       });
     }
   }

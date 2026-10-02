@@ -47,7 +47,7 @@ Future<void> _pumpReminder(
   required Brightness brightness,
   required AppPalette palette,
 }) async {
-  final strings = Strings(false);
+  final strings = Strings(AppLanguage.en);
   await tester.pumpWidget(
     MaterialApp(
       theme: buildApp217Theme(brightness: brightness, palette: palette),
@@ -75,7 +75,7 @@ void main() {
             palette: palette,
           );
           expect(find.text('Remind me daily'), findsOneWidget);
-          expect(find.textContaining('Android:'), findsOneWidget);
+          expect(find.textContaining('On Android'), findsOneWidget);
           expect(find.text('Save'), findsOneWidget);
         },
       );

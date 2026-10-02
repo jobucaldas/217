@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../api/client.dart';
+import '../errors.dart';
 import '../i18n.dart';
 import '../models.dart';
 import '../theme/app_theme.dart';
@@ -127,7 +128,7 @@ class _CalendarScreenState extends State<CalendarScreen>
       });
     } catch (err) {
       if (!mounted) return;
-      setState(() => _error = err.toString());
+      setState(() => _error = friendlyError(widget.strings, err));
     }
   }
 
@@ -241,7 +242,9 @@ class _CalendarScreenState extends State<CalendarScreen>
         hadEntry: existing != null,
         onCommit: (result) {
           _persistDay(key, result).catchError((Object err) {
-            if (mounted) setState(() => _error = err.toString());
+            if (mounted) {
+              setState(() => _error = friendlyError(widget.strings, err));
+            }
           });
         },
       ),
@@ -250,7 +253,7 @@ class _CalendarScreenState extends State<CalendarScreen>
 
   @override
   Widget build(BuildContext context) {
-    final locale = widget.strings.pt ? 'pt_BR' : 'en_US';
+    final locale = widget.strings.dateLocale;
     final monthLabel = DateFormat.yMMMM(locale).format(_month);
     final scheme = Theme.of(context).colorScheme;
     final text = Theme.of(context).textTheme;
@@ -382,7 +385,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                 child: Row(
                   children: [
                     IconButton(
-                      tooltip: monthLabel,
+                      tooltip: widget.strings.previousMonth,
                       onPressed: () => _shiftMonth(-1),
                       icon: const Icon(Icons.chevron_left),
                     ),
@@ -394,6 +397,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                       ),
                     ),
                     IconButton(
+                      tooltip: widget.strings.nextMonth,
                       onPressed: () => _shiftMonth(1),
                       icon: const Icon(Icons.chevron_right),
                     ),
@@ -429,7 +433,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                                   entries: _prevEntries,
                                   onDayTap: _openDay,
                                   todayLabel: widget.strings.today,
-                                  portuguese: widget.strings.pt,
+                                  weekdayLabels: widget.strings.weekdayInitials,
                                   palette: widget.palette,
                                   bottomInset: 12,
                                 ),
@@ -445,7 +449,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                                   entries: _entries,
                                   onDayTap: _openDay,
                                   todayLabel: widget.strings.today,
-                                  portuguese: widget.strings.pt,
+                                  weekdayLabels: widget.strings.weekdayInitials,
                                   palette: widget.palette,
                                   bottomInset: 12,
                                 ),
@@ -461,7 +465,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                                   entries: _nextEntries,
                                   onDayTap: _openDay,
                                   todayLabel: widget.strings.today,
-                                  portuguese: widget.strings.pt,
+                                  weekdayLabels: widget.strings.weekdayInitials,
                                   palette: widget.palette,
                                   bottomInset: 12,
                                 ),
@@ -482,14 +486,29 @@ class _CalendarScreenState extends State<CalendarScreen>
               right: 20,
               top: 8,
               child: Material(
+                key: const ValueKey('calendar-error'),
                 color: scheme.errorContainer,
                 borderRadius: BorderRadius.circular(10),
                 child: Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  child: Text(
-                    _error!,
-                    style: text.bodyMedium?.copyWith(color: scheme.error),
+                  padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          _error!,
+                          style: text.bodyMedium?.copyWith(
+                            color: scheme.onErrorContainer,
+                          ),
+                        ),
+                      ),
+                      TextButton(
+                        style: TextButton.styleFrom(
+                          foregroundColor: scheme.onErrorContainer,
+                        ),
+                        onPressed: _load,
+                        child: Text(widget.strings.retry),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -551,7 +570,7 @@ class _MonthGrid extends StatelessWidget {
     required this.entries,
     required this.onDayTap,
     required this.todayLabel,
-    required this.portuguese,
+    required this.weekdayLabels,
     required this.palette,
     required this.bottomInset,
   });
@@ -561,7 +580,7 @@ class _MonthGrid extends StatelessWidget {
   final Map<String, Entry> entries;
   final Future<void> Function(DateTime day) onDayTap;
   final String todayLabel;
-  final bool portuguese;
+  final List<String> weekdayLabels;
   final AppPalette palette;
   final double bottomInset;
 
@@ -570,9 +589,6 @@ class _MonthGrid extends StatelessWidget {
     final first = DateTime(month.year, month.month, 1);
     final daysInMonth = DateTime(month.year, month.month + 1, 0).day;
     final leading = first.weekday % 7; // Sunday-first
-    final weekdayLabels = portuguese
-        ? const ['D', 'S', 'T', 'Q', 'Q', 'S', 'S']
-        : const ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
     final rowCount = ((leading + daysInMonth) / 7).ceil();
 
     Widget slot(int index) {
@@ -906,7 +922,7 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final locale = widget.strings.pt ? 'pt_BR' : 'en_US';
+    final locale = widget.strings.dateLocale;
     final human = DateFormat.yMMMMd(locale).format(DateTime.parse(widget.date));
     final scheme = Theme.of(context).colorScheme;
     final hasNote = _notes.trim().isNotEmpty;

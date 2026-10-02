@@ -17,7 +17,7 @@ void main() {
           ),
           home: const Scaffold(
             body: DayEditorSheet(
-              strings: Strings(false),
+              strings: Strings(AppLanguage.en),
               date: '2026-10-01',
               initialTaken: null,
               initialNotes: '',

@@ -1,8 +1,11 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../api/client.dart';
 import '../i18n.dart';
 import '../models.dart';
+import '../platform/open_url.dart';
 import '../theme/app_theme.dart';
 import 'reminder_settings_screen.dart';
 import 'share_screens.dart';
@@ -13,10 +16,10 @@ class SettingsPage extends StatefulWidget {
     super.key,
     required this.api,
     required this.strings,
-    required this.portuguese,
+    required this.language,
     required this.themeMode,
     required this.palette,
-    required this.onPortugueseChanged,
+    required this.onLanguageChanged,
     required this.onThemeModeChanged,
     required this.onPaletteChanged,
     required this.onApiBaseChanged,
@@ -25,14 +28,16 @@ class SettingsPage extends StatefulWidget {
     this.onShareChanged,
     this.onAccountDeleted,
     this.onLogout,
+    this.onJoinedCalendar,
+    this.expandServer = false,
   });
 
   final ApiClient api;
   final Strings strings;
-  final bool portuguese;
+  final AppLanguage language;
   final ThemeMode themeMode;
   final AppPalette palette;
-  final ValueChanged<bool> onPortugueseChanged;
+  final ValueChanged<AppLanguage> onLanguageChanged;
   final ValueChanged<ThemeMode> onThemeModeChanged;
   final ValueChanged<AppPalette> onPaletteChanged;
   final VoidCallback onApiBaseChanged;
@@ -42,55 +47,82 @@ class SettingsPage extends StatefulWidget {
   final VoidCallback? onAccountDeleted;
   final Future<void> Function()? onLogout;
 
+  /// Called after this account joined another calendar with an invite code.
+  final ValueChanged<ShareState>? onJoinedCalendar;
+
+  /// Open with the self-hosted server field already expanded.
+  final bool expandServer;
+
   @override
   State<SettingsPage> createState() => _SettingsPageState();
 }
 
 class _SettingsPageState extends State<SettingsPage> {
-  late final TextEditingController _apiBase =
-      TextEditingController(text: widget.api.config.apiBaseUrl);
+  // Empty field = default server; only a self-hosted URL is shown here.
+  late final TextEditingController _serverUrl = TextEditingController(
+    text: widget.api.config.usesCustomApiBase ? widget.api.config.apiBaseUrl : '',
+  );
+  late bool _advancedOpen =
+      widget.expandServer || widget.api.config.usesCustomApiBase;
   bool _testing = false;
-  bool _advancedOpen = false;
+  String? _serverError;
 
   @override
   void dispose() {
-    _apiBase.dispose();
+    _serverUrl.dispose();
     super.dispose();
   }
 
-  Future<void> _saveApiBase() async {
-    try {
-      await widget.api.setApiBaseUrl(_apiBase.text);
-      widget.onApiBaseChanged();
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(widget.strings.save)),
-      );
-    } catch (err) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$err')),
-      );
-    }
+  void _showSnack(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
   }
 
-  Future<void> _testConnection() async {
-    setState(() => _testing = true);
+  Future<void> _saveServer() async {
     try {
-      await widget.api.setApiBaseUrl(_apiBase.text);
-      widget.onApiBaseChanged();
-      final ok = await widget.api.ping();
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            ok ? widget.strings.connectionOk : widget.strings.connectionFail,
-          ),
-        ),
-      );
-    } finally {
-      if (mounted) setState(() => _testing = false);
+      ApiClient.parseApiBase(_serverUrl.text);
+    } on FormatException {
+      setState(() => _serverError = widget.strings.serverInvalid);
+      return;
     }
+    final changed = await widget.api.setApiBaseUrl(_serverUrl.text);
+    if (!mounted) return;
+    final custom = widget.api.config.usesCustomApiBase;
+    setState(() {
+      _serverError = null;
+      _serverUrl.text = custom ? widget.api.config.apiBaseUrl : '';
+    });
+    if (changed) widget.onApiBaseChanged();
+    _showSnack(custom ? widget.strings.serverSaved : widget.strings.serverReset);
+  }
+
+  Future<void> _openGuide() async {
+    if (await openExternalUrl(selfHostGuideUrl)) return;
+    await Clipboard.setData(const ClipboardData(text: selfHostGuideUrl));
+    if (mounted) _showSnack(widget.strings.linkCopied);
+  }
+
+  /// Probes the typed URL (or the default when empty) without saving it.
+  Future<void> _testServer() async {
+    final String base;
+    try {
+      final parsed = ApiClient.parseApiBase(_serverUrl.text);
+      base = parsed.isEmpty ? widget.api.config.defaultApiBaseUrl : parsed;
+    } on FormatException {
+      setState(() => _serverError = widget.strings.serverInvalid);
+      return;
+    }
+    setState(() {
+      _testing = true;
+      _serverError = null;
+    });
+    final ok = await widget.api.ping(baseUrl: base);
+    if (!mounted) return;
+    setState(() => _testing = false);
+    _showSnack(
+      ok ? widget.strings.connectionOk : widget.strings.connectionFail,
+    );
   }
 
   String _paletteLabel(AppPalette p) {
@@ -215,28 +247,25 @@ class _SettingsPageState extends State<SettingsPage> {
             ],
           ),
           const SizedBox(height: 20),
-          _SectionLabel(widget.strings.language),
+          _SectionLabel(widget.strings.languageLabel),
           _SettingsSection(
             children: [
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-                child: DropdownMenu<bool>(
-                  key: ValueKey(widget.portuguese),
-                  initialSelection: widget.portuguese,
+                child: DropdownMenu<AppLanguage>(
+                  key: ValueKey(widget.language),
+                  initialSelection: widget.language,
                   expandedInsets: EdgeInsets.zero,
                   dropdownMenuEntries: [
-                    DropdownMenuEntry(
-                      value: true,
-                      label: widget.strings.languagePortuguese,
-                    ),
-                    DropdownMenuEntry(
-                      value: false,
-                      label: widget.strings.languageEnglish,
-                    ),
+                    for (final language in AppLanguage.values)
+                      DropdownMenuEntry(
+                        value: language,
+                        label: language.nativeName,
+                      ),
                   ],
                   onSelected: (value) {
                     if (value == null) return;
-                    widget.onPortugueseChanged(value);
+                    widget.onLanguageChanged(value);
                   },
                 ),
               ),
@@ -253,85 +282,113 @@ class _SettingsPageState extends State<SettingsPage> {
               user: widget.user!,
               share: widget.share!,
               onShareChanged: widget.onShareChanged!,
+              onJoined: widget.onJoinedCalendar,
             ),
           ],
-          const SizedBox(height: 20),
-          _SettingsSection(
-            children: [
-              if (!_advancedOpen)
+          // Signed out only: the server is picked before signing in, since
+          // an account lives on one server. Never on web, which is served by
+          // its own server (same origin, CORS-locked).
+          if (!kIsWeb && widget.user == null) ...[
+            const SizedBox(height: 20),
+            _SettingsSection(
+              children: [
                 ListTile(
                   title: Text(
-                    widget.strings.showMore,
+                    _advancedOpen
+                        ? widget.strings.showLess
+                        : widget.strings.showMore,
                     style: text.titleMedium?.copyWith(color: scheme.primary),
                   ),
                   trailing: Icon(
-                    Icons.expand_more,
+                    _advancedOpen ? Icons.expand_less : Icons.expand_more,
                     color: scheme.primary,
                   ),
-                  onTap: () => setState(() => _advancedOpen = true),
-                )
-              else ...[
-                ListTile(
-                  title: Text(
-                    widget.strings.showLess,
-                    style: text.titleMedium?.copyWith(color: scheme.primary),
-                  ),
-                  trailing: Icon(
-                    Icons.expand_less,
-                    color: scheme.primary,
-                  ),
-                  onTap: () => setState(() => _advancedOpen = false),
+                  onTap: () => setState(() => _advancedOpen = !_advancedOpen),
                 ),
-                const Divider(height: 1, indent: 16, endIndent: 16),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-                  child: TextField(
-                    controller: _apiBase,
-                    keyboardType: TextInputType.url,
-                    style: text.bodyLarge?.copyWith(color: scheme.onSurface),
-                    decoration: InputDecoration(
-                      labelText: widget.strings.apiBaseUrl,
-                      helperText: widget.strings.apiBaseHint,
-                      helperMaxLines: 2,
-                      helperStyle: text.bodySmall?.copyWith(
-                        color: scheme.onSurfaceVariant,
+                if (_advancedOpen) ...[
+                  const Divider(height: 1, indent: 16, endIndent: 16),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                    child: TextField(
+                      key: const ValueKey('server-url'),
+                      controller: _serverUrl,
+                      keyboardType: TextInputType.url,
+                      autocorrect: false,
+                      enableSuggestions: false,
+                      textInputAction: TextInputAction.done,
+                      onSubmitted: (_) => _saveServer(),
+                      onChanged: (_) {
+                        if (_serverError != null) {
+                          setState(() => _serverError = null);
+                        }
+                      },
+                      style: text.bodyLarge?.copyWith(color: scheme.onSurface),
+                      decoration: InputDecoration(
+                        labelText: widget.strings.serverUrl,
+                        hintText: widget.api.config.defaultApiBaseUrl,
+                        helperText: widget.strings.serverUrlHelp,
+                        helperMaxLines: 3,
+                        helperStyle: text.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                        errorText: _serverError,
+                        errorMaxLines: 2,
                       ),
                     ),
                   ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: FilledButton(
-                          style: FilledButton.styleFrom(
-                            minimumSize: const Size.fromHeight(44),
-                          ),
-                          onPressed: _saveApiBase,
-                          child: Text(widget.strings.save),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: OutlinedButton(
-                          style: OutlinedButton.styleFrom(
-                            minimumSize: const Size.fromHeight(44),
-                            foregroundColor: scheme.onSurface,
-                            side: BorderSide(
-                              color: scheme.outline.withValues(alpha: 0.8),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: FilledButton(
+                            style: FilledButton.styleFrom(
+                              minimumSize: const Size.fromHeight(44),
                             ),
+                            onPressed: _saveServer,
+                            child: Text(widget.strings.save),
                           ),
-                          onPressed: _testing ? null : _testConnection,
-                          child: Text(widget.strings.testConnection),
                         ),
-                      ),
-                    ],
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: OutlinedButton(
+                            style: OutlinedButton.styleFrom(
+                              minimumSize: const Size.fromHeight(44),
+                              foregroundColor: scheme.onSurface,
+                              side: BorderSide(
+                                color: scheme.outline.withValues(alpha: 0.8),
+                              ),
+                            ),
+                            onPressed: _testing ? null : _testServer,
+                            child: _testing
+                                ? const SizedBox.square(
+                                    dimension: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : Text(widget.strings.testConnection),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(4, 0, 16, 8),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        key: const ValueKey('self-host-guide'),
+                        onPressed: _openGuide,
+                        icon: const Icon(Icons.open_in_new, size: 18),
+                        label: Text(widget.strings.selfHostGuide),
+                      ),
+                    ),
+                  ),
+                ],
               ],
-            ],
-          ),
+            ),
+          ],
           // Account actions: pull away from prefs above; keep delete + logout tight.
           if (widget.onAccountDeleted != null || widget.onLogout != null) ...[
             const SizedBox(height: 40),

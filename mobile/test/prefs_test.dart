@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:a217/src/prefs.dart';
@@ -37,5 +38,13 @@ void main() {
         reason: 'scaffold must not shift with accent ($brightness)',
       );
     }
+  });
+
+  test('self-host card dismissal is remembered', () async {
+    FlutterSecureStorage.setMockInitialValues({});
+    final prefs = AppearancePrefs();
+    expect(await prefs.selfHostCardDismissed(), isFalse);
+    await prefs.dismissSelfHostCard();
+    expect(await AppearancePrefs().selfHostCardDismissed(), isTrue);
   });
 }

@@ -50,7 +50,7 @@ void main() {
           brightness,
           palette: AppPalette.azure,
         );
-        final strings = const Strings(false);
+        final strings = const Strings(AppLanguage.en);
         await tester.pumpWidget(
           MaterialApp(
             theme: buildApp217Theme(
@@ -126,7 +126,7 @@ void main() {
                   context: context,
                   isScrollControlled: true,
                   builder: (_) => DayEditorSheet(
-                    strings: const Strings(false),
+                    strings: const Strings(AppLanguage.en),
                     date: '2026-10-01',
                     initialTaken: null,
                     initialNotes: '',
@@ -177,7 +177,7 @@ void main() {
                   context: context,
                   isScrollControlled: true,
                   builder: (_) => DayEditorSheet(
-                    strings: const Strings(false),
+                    strings: const Strings(AppLanguage.en),
                     date: '2026-10-01',
                     initialTaken: null,
                     initialNotes: '',
@@ -231,7 +231,7 @@ void main() {
                   context: context,
                   isScrollControlled: true,
                   builder: (_) => DayEditorSheet(
-                    strings: const Strings(false),
+                    strings: const Strings(AppLanguage.en),
                     date: '2026-10-01',
                     initialTaken: null,
                     initialNotes: '',
@@ -299,7 +299,7 @@ void main() {
                   context: context,
                   isScrollControlled: true,
                   builder: (_) => const DayEditorSheet(
-                    strings: Strings(false),
+                    strings: Strings(AppLanguage.en),
                     date: '2026-10-01',
                     initialTaken: null,
                     initialNotes: 'with note',
@@ -344,7 +344,7 @@ void main() {
                 result = await showModalBottomSheet<DayEditResult>(
                   context: context,
                   builder: (_) => const DayEditorSheet(
-                    strings: Strings(false),
+                    strings: Strings(AppLanguage.en),
                     date: '2026-10-01',
                     initialTaken: true,
                     initialNotes: '',
@@ -387,7 +387,7 @@ void main() {
                   context: context,
                   isScrollControlled: true,
                   builder: (_) => const DayEditorSheet(
-                    strings: Strings(false),
+                    strings: Strings(AppLanguage.en),
                     date: '2026-10-01',
                     initialTaken: true,
                     initialNotes: '',
@@ -442,7 +442,7 @@ void main() {
                   context: context,
                   isScrollControlled: true,
                   builder: (_) => DayEditorSheet(
-                    strings: const Strings(false),
+                    strings: const Strings(AppLanguage.en),
                     date: '2026-10-01',
                     initialTaken: true,
                     initialNotes: 'old',
@@ -502,7 +502,7 @@ void main() {
                   context: context,
                   isScrollControlled: true,
                   builder: (_) => DayEditorSheet(
-                    strings: const Strings(false),
+                    strings: const Strings(AppLanguage.en),
                     date: '2026-10-01',
                     initialTaken: false,
                     initialNotes: 'keep me',
@@ -554,7 +554,7 @@ void main() {
                   context: context,
                   isScrollControlled: true,
                   builder: (_) => DayEditorSheet(
-                    strings: const Strings(false),
+                    strings: const Strings(AppLanguage.en),
                     date: '2026-10-01',
                     initialTaken: null,
                     initialNotes: 'with note',
@@ -589,7 +589,7 @@ void main() {
       'onCommit: Pronto keeps day sheet open for Taken ($brightness)',
       (tester) async {
         final commits = <DayEditResult>[];
-        const strings = Strings(false);
+        const strings = Strings(AppLanguage.en);
         await tester.pumpWidget(
           MaterialApp(
             theme: buildApp217Theme(
@@ -673,7 +673,7 @@ void main() {
                 email: 'shot@example.invalid',
                 name: 'Shot',
               ),
-              strings: const Strings(false),
+              strings: const Strings(AppLanguage.en),
               onOpenSettings: () {},
               palette: AppPalette.azure,
             ),
@@ -720,7 +720,7 @@ void main() {
                 email: 'shot@example.invalid',
                 name: 'Shot',
               ),
-              strings: const Strings(false),
+              strings: const Strings(AppLanguage.en),
               onOpenSettings: () {},
               palette: AppPalette.azure,
             ),

@@ -28,6 +28,7 @@ class ShareState {
   const ShareState({
     required this.status,
     this.inviteCode = '',
+    this.inviteUrl = '',
     this.partnerEmail = '',
     this.partnerName = '',
     this.ownerName = '',
@@ -38,6 +39,9 @@ class ShareState {
 
   final String status;
   final String inviteCode;
+
+  /// Web link that opens the app with this invite (`/?invite=CODE`).
+  final String inviteUrl;
   final String partnerEmail;
   final String partnerName;
   final String ownerName;
@@ -57,6 +61,7 @@ class ShareState {
     return ShareState(
       status: (json['status'] as String?) ?? 'none',
       inviteCode: (json['invite_code'] as String?) ?? '',
+      inviteUrl: (json['invite_url'] as String?) ?? '',
       partnerEmail: (json['partner_email'] as String?) ?? '',
       partnerName: (json['partner_name'] as String?) ?? '',
       ownerName: (json['owner_name'] as String?) ?? '',
@@ -161,20 +166,6 @@ class ReminderPreference {
       time: (json['time'] as String?) ?? '09:00',
       timezone: (json['timezone'] as String?) ?? 'UTC',
       deliverable: json['deliverable'] as bool? ?? false,
-    );
-  }
-}
-
-class AuthConfig {
-  const AuthConfig({required this.authkit, required this.password});
-
-  final bool authkit;
-  final bool password;
-
-  factory AuthConfig.fromJson(Map<String, dynamic> json) {
-    return AuthConfig(
-      authkit: json['authkit'] as bool? ?? false,
-      password: json['password'] as bool? ?? false,
     );
   }
 }

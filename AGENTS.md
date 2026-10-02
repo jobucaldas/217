@@ -3,7 +3,7 @@ Project: 217
 Cross-platform application for tracking anticonceptional intake.
 
 ## Overview
-Android-first Flutter app for tracking anticonceptional intake via a calendar UI. Multi-user support with WorkOS AuthKit authentication, dark mode, and bilingual (Pt/En) UI.
+Android-first Flutter app for tracking anticonceptional intake via a calendar UI. Multi-user support with WorkOS AuthKit authentication, dark mode, and English, Português and Español UI (follows the device language; English otherwise).
 
 ## Tech Stack
 - Client: Flutter (Android + web)
@@ -63,7 +63,7 @@ Android deep-link PKCE:
 - Mobile: `make test-mobile`
 - Web tryout: `make mobile-web` then open http://localhost:8787/
 - APK: `make mobile-apk`
-- **UI quality (agent directive, not a testing preference):** never ship Flutter UI without dark **and** light coverage. CI must fail unreadable contrast and broken “today” CTA persistence (see Project `workflows/ui-quality-gates.md`). **Not running those checks is unacceptable agent behavior** — same class as skipping the PR merge loop.
+- **UI quality (agent directive, not a testing preference):** never ship Flutter UI without dark **and** light coverage. CI must fail unreadable contrast and broken “today” CTA persistence (`mobile/test/theme_contrast_test.dart`, `mobile/test/today_nudge_test.dart`). **Not running those checks is unacceptable agent behavior** — same class as skipping the PR merge loop.
 
 ## Remaining gaps
 - Live WorkOS sign-in / authenticated calendar not verified in CI

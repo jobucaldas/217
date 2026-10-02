@@ -49,7 +49,7 @@ jobs:
           flutter analyze
           flutter test
 
-  # Roomies-style: boot API with real WORKOS_* repo secrets and smoke AuthKit wiring.
+  # Boot the API with the real WORKOS_* repo secrets and smoke-test the AuthKit wiring.
   workos-smoke:
     name: WorkOS AuthKit deploy smoke
     runs-on: ubuntu-latest
@@ -93,7 +93,7 @@ jobs:
       - name: AuthKit smoke against Postgres
         run: bash scripts/ci-workos-smoke.sh
 
-  # Deploy-shaped artifact: Flutter web release bundle (same input as home-lab image).
+  # Deploy-shaped artifact: Flutter web release bundle (same input as the frontend image).
   flutter-web-build:
     name: Flutter web release build
     runs-on: ubuntu-latest
@@ -143,7 +143,8 @@ jobs:
           git config --global --add safe.directory /sdks/flutter || true
           flutter pub get
           CID="${WORKOS_CLIENT_ID:-client_01M3QCMK75B35RPC8EAJA5GREP}"
-          # Optional secret; default matches deploy/kustomize APP_BASE_URL (HTTPS Serve).
+          # Server the nightly APK talks to by default; matches the dev overlay's
+          # APP_BASE_URL. Users can switch servers in the app before signing in.
           API="${NIGHTLY_API_BASE_URL:-https://encom.tailbe71e1.ts.net:8443}"
           flutter build apk --release \
             --dart-define=API_BASE_URL="$API" \

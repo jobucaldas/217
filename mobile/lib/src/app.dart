@@ -1,10 +1,13 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'api/client.dart';
 import 'auth/sign_in.dart';
 import 'config.dart';
 import 'i18n.dart';
 import 'models.dart';
+import 'platform/open_url.dart';
 import 'prefs.dart';
 import 'screens/auth_screen.dart';
 import 'screens/calendar_screen.dart';
@@ -13,16 +16,19 @@ import 'screens/share_screens.dart';
 import 'theme/app_theme.dart';
 
 class App217 extends StatefulWidget {
-  const App217({super.key, required this.config});
+  const App217({super.key, required this.config, this.api});
 
   final AppConfig config;
+
+  /// Injected client for tests; production builds one from [config].
+  final ApiClient? api;
 
   @override
   State<App217> createState() => _App217State();
 }
 
 class _App217State extends State<App217> {
-  late final ApiClient _api = ApiClient(widget.config);
+  late final ApiClient _api = widget.api ?? ApiClient(widget.config);
   late final AppearancePrefs _prefs = AppearancePrefs();
   final GlobalKey<NavigatorState> _navKey = GlobalKey<NavigatorState>();
   final GlobalKey<ScaffoldMessengerState> _messengerKey =
@@ -30,12 +36,23 @@ class _App217State extends State<App217> {
   User? _user;
   ShareState _share = const ShareState(status: 'none');
   bool _loading = true;
-  bool _portuguese = true;
+  AppLanguage _language = _deviceLanguage();
   ThemeMode _themeMode = ThemeMode.system;
   AppPalette _palette = AppPalette.azure;
   bool _reminderHintDismissed = false;
+  bool _selfHostCardDismissed = false;
 
-  Strings get _strings => Strings(_portuguese);
+  /// Routes pushed on top of home (Settings) are built once, so they listen
+  /// here to pick up theme, language and session changes made from them.
+  final _changes = _ChangeTicker();
+
+  Strings get _strings => Strings(_language);
+
+  /// No saved choice: follow the device's preferred languages, else English.
+  static AppLanguage _deviceLanguage() => AppLanguageX.fromDevice(
+        WidgetsBinding.instance.platformDispatcher.locales
+            .map((locale) => locale.languageCode),
+      );
 
   @override
   void initState() {
@@ -43,29 +60,57 @@ class _App217State extends State<App217> {
     _bootstrap();
   }
 
+  @override
+  void setState(VoidCallback fn) {
+    super.setState(fn);
+    _changes.notify();
+  }
+
+  @override
+  void dispose() {
+    _changes.dispose();
+    super.dispose();
+  }
+
   Future<void> _bootstrap() async {
+    // Local prefs first, so theme and language hold even when offline.
     try {
+      // Web invite link (`/?invite=CODE`): keep the code across sign-in.
+      final linkInvite = Uri.base.queryParameters['invite']?.trim() ?? '';
+      if (linkInvite.isNotEmpty) await _prefs.savePendingInvite(linkInvite);
       final appearance = await _prefs.load();
+      final language = await _prefs.loadLanguage();
       final hintGone = await _prefs.reminderHintDismissed();
-      await _api.loadPersistedApiBase();
-      final session = await _api.currentSession();
+      final selfHostGone = await _prefs.selfHostCardDismissed();
       if (!mounted) return;
       setState(() {
         _themeMode = appearance.mode;
         _palette = appearance.palette;
+        _language = language ?? _deviceLanguage();
         _reminderHintDismissed = hintGone;
-        _user = session.user;
-        _share = session.share ?? const ShareState(status: 'none');
-        _loading = false;
+        _selfHostCardDismissed = selfHostGone;
       });
     } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _user = null;
-        _share = const ShareState(status: 'none');
-        _loading = false;
-      });
+      // Keep defaults.
     }
+
+    User? user;
+    var share = const ShareState(status: 'none');
+    try {
+      await _api.loadPersistedApiBase();
+      final session = await _api.currentSession();
+      user = session.user;
+      share = session.share ?? share;
+    } catch (_) {
+      // Unreachable server: show the signed-out screen.
+    }
+    if (!mounted) return;
+    setState(() {
+      _user = user;
+      _share = share;
+      _loading = false;
+    });
+    if (user != null) await _offerPendingInvite();
   }
 
   Future<void> _refreshSession() async {
@@ -87,6 +132,76 @@ class _App217State extends State<App217> {
     await _prefs.savePalette(palette);
   }
 
+  Future<void> _setLanguage(AppLanguage language) async {
+    setState(() => _language = language);
+    await _prefs.saveLanguage(language);
+  }
+
+  /// After sign-in, offers to join the calendar from an opened invite link
+  /// when this account can join one (nothing shared yet, or access revoked).
+  Future<void> _offerPendingInvite() async {
+    final code = (await _prefs.pendingInvite())?.trim() ?? '';
+    final user = _user;
+    if (code.isEmpty || user == null || !mounted) return;
+    final canJoin = (user.isOwner && _share.isNone) ||
+        (user.isPartner && _share.isRevoked);
+    if (!canJoin) {
+      // e.g. the owner opened their own link: nothing to offer.
+      await _prefs.clearPendingInvite();
+      return;
+    }
+    final navContext = _navKey.currentContext;
+    if (navContext == null || !navContext.mounted) return;
+    final strings = _strings;
+    final join = await showDialog<bool>(
+      context: navContext,
+      builder: (context) => AlertDialog(
+        title: Text(strings.pendingInviteTitle),
+        content: Text(strings.pendingInviteBody(code)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(strings.notNow),
+          ),
+          FilledButton(
+            key: const ValueKey('pending-invite-join'),
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(strings.joinCalendar),
+          ),
+        ],
+      ),
+    );
+    await _prefs.clearPendingInvite();
+    if (join != true || !mounted) return;
+    try {
+      await _onJoinedCalendar(await _api.acceptShare(code));
+    } catch (err) {
+      _messengerKey.currentState?.showSnackBar(
+        SnackBar(content: Text(joinErrorText(_strings, err))),
+      );
+    }
+  }
+
+  /// This account now views someone else's calendar: its role changed, so
+  /// reload the session and return to the (partner) calendar.
+  Future<void> _onJoinedCalendar(ShareState share) async {
+    setState(() => _share = share);
+    _navKey.currentState?.popUntil((route) => route.isFirst);
+    _messengerKey.currentState?.showSnackBar(
+      SnackBar(content: Text(_strings.joinedCalendar)),
+    );
+    await _refreshSession();
+  }
+
+  /// A different server means a different account: the API client already
+  /// dropped the old token, so show the signed-out state.
+  void _onApiBaseChanged() {
+    setState(() {
+      _user = null;
+      _share = const ShareState(status: 'none');
+    });
+  }
+
   Future<void> _signIn() async {
     setState(() => _loading = true);
     try {
@@ -100,14 +215,18 @@ class _App217State extends State<App217> {
           _share = session.share ?? const ShareState(status: 'none');
           _loading = false;
         });
+        await _offerPendingInvite();
       } else {
         setState(() => _loading = false);
       }
     } catch (err) {
       if (!mounted) return;
       setState(() => _loading = false);
+      // Closing the AuthKit browser tab is not an error worth announcing.
+      if (err is PlatformException && err.code == 'CANCELED') return;
+      if (kDebugMode) debugPrint('sign-in failed: $err');
       _messengerKey.currentState?.showSnackBar(
-        SnackBar(content: Text('${_strings.signInError}\n$err')),
+        SnackBar(content: Text(_strings.signInError)),
       );
     }
   }
@@ -131,27 +250,37 @@ class _App217State extends State<App217> {
     );
   }
 
-  void _openSettings() {
+  void _openSettings({bool expandServer = false}) {
     _navKey.currentState?.push(
       MaterialPageRoute(
-        builder: (_) => SettingsPage(
-          api: _api,
-          strings: _strings,
-          portuguese: _portuguese,
-          themeMode: _themeMode,
-          palette: _palette,
-          user: _user,
-          share: _share,
-          onPortugueseChanged: (pt) => setState(() => _portuguese = pt),
-          onThemeModeChanged: _setThemeMode,
-          onPaletteChanged: _setPalette,
-          onShareChanged: (share) => setState(() => _share = share),
-          onAccountDeleted: _onAccountDeleted,
-          onLogout: _user == null ? null : _logout,
-          onApiBaseChanged: () => setState(() {}),
+        builder: (_) => ListenableBuilder(
+          listenable: _changes,
+          builder: (context, _) => SettingsPage(
+            api: _api,
+            strings: _strings,
+            language: _language,
+            themeMode: _themeMode,
+            palette: _palette,
+            user: _user,
+            share: _share,
+            onLanguageChanged: _setLanguage,
+            onThemeModeChanged: _setThemeMode,
+            onPaletteChanged: _setPalette,
+            onShareChanged: (share) => setState(() => _share = share),
+            onAccountDeleted: _user == null ? null : _onAccountDeleted,
+            onLogout: _user == null ? null : _logout,
+            onApiBaseChanged: _onApiBaseChanged,
+            onJoinedCalendar: _user == null ? null : _onJoinedCalendar,
+            expandServer: expandServer,
+          ),
         ),
       ),
     );
+  }
+
+  Future<void> _dismissSelfHostCard() async {
+    setState(() => _selfHostCardDismissed = true);
+    await _prefs.dismissSelfHostCard();
   }
 
   Future<void> _dismissReminderHint() async {
@@ -176,11 +305,20 @@ class _App217State extends State<App217> {
     if (_user == null) {
       return AuthScreen(
         strings: _strings,
-        apiBaseUrl: _api.config.apiBaseUrl.isEmpty
-            ? 'same-origin'
-            : _api.config.apiBaseUrl,
+        customServer: _api.config.usesCustomApiBase
+            ? Uri.tryParse(_api.config.apiBaseUrl)?.authority
+            : null,
         onSignIn: _signIn,
         onOpenSettings: _openSettings,
+        // Server choice happens before sign-in; web always uses its origin.
+        onOpenServerSettings:
+            kIsWeb ? null : () => _openSettings(expandServer: true),
+        // Web can't switch servers, so point people at the self-host guide.
+        onOpenSelfHostGuide: kIsWeb && !_selfHostCardDismissed
+            ? () => openExternalUrl(selfHostGuideUrl)
+            : null,
+        onDismissSelfHostCard:
+            kIsWeb && !_selfHostCardDismissed ? _dismissSelfHostCard : null,
         showReminderHint: !_reminderHintDismissed,
         onDismissReminderHint: _dismissReminderHint,
       );
@@ -189,10 +327,7 @@ class _App217State extends State<App217> {
       return PartnerRevokedScreen(
         api: _api,
         strings: _strings,
-        onJoined: (share) {
-          setState(() => _share = share);
-          _refreshSession();
-        },
+        onJoined: _onJoinedCalendar,
         onAccountDeleted: _onAccountDeleted,
         onOpenSettings: _openSettings,
       );
@@ -227,4 +362,8 @@ class _App217State extends State<App217> {
       home: _home(),
     );
   }
+}
+
+class _ChangeTicker extends ChangeNotifier {
+  void notify() => notifyListeners();
 }

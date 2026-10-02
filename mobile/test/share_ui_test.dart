@@ -21,7 +21,7 @@ void main() {
           ),
           home: PartnerRevokedScreen(
             api: api,
-            strings: const Strings(false),
+            strings: const Strings(AppLanguage.en),
             onJoined: (_) {},
             onAccountDeleted: () {},
             onOpenSettings: () {},
@@ -57,7 +57,7 @@ void main() {
           home: Scaffold(
             body: DeleteAccountSection(
               api: api,
-              strings: const Strings(false),
+              strings: const Strings(AppLanguage.en),
               onAccountDeleted: () {},
             ),
           ),

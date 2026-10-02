@@ -11,6 +11,7 @@ void main() {
     testWidgets(
       'auth screen brand + CTA readable ($brightness)',
       (tester) async {
+        var openedServerSettings = false;
         final scheme = buildApp217ColorScheme(
           brightness,
           palette: AppPalette.azure,
@@ -27,23 +28,33 @@ void main() {
               ),
             ),
             home: AuthScreen(
-              strings: const Strings(true),
-              apiBaseUrl: 'http://10.0.2.2:8787',
+              strings: const Strings(AppLanguage.pt),
               onSignIn: () async {},
               onOpenSettings: () {},
+              onOpenServerSettings: () => openedServerSettings = true,
             ),
           ),
         );
 
         expect(find.text('217'), findsOneWidget);
         expect(find.text('Entrar'), findsOneWidget);
+
+        // Self-hosting tip: readable secondary text that opens Settings.
+        final tip = find.byKey(const ValueKey('auth-self-host-tip'));
+        expect(
+          tester.widget<Text>(tip).data,
+          'Tem seu próprio servidor 217? Configure em Ajustes.',
+        );
+        expect(tester.widget<Text>(tip).style?.color, scheme.onSurfaceVariant);
+        await tester.tap(tip);
+        expect(openedServerSettings, isTrue);
         expect(find.text('calendário de anticoncepcional'), findsOneWidget);
         expect(find.textContaining('tomada'), findsNothing);
         expect(find.text('EN'), findsNothing);
         expect(find.text('PT'), findsNothing);
         expect(find.byKey(const ValueKey('auth-settings')), findsOneWidget);
-        // API base URL stays in Settings, not on the first viewport.
-        expect(find.text('http://10.0.2.2:8787'), findsNothing);
+        // Default server is not surfaced on the first viewport.
+        expect(find.byKey(const ValueKey('auth-custom-server')), findsNothing);
 
         final brand = tester.widget<Text>(find.text('217'));
         final cta = tester.widget<Text>(find.text('Entrar'));
@@ -68,12 +79,69 @@ void main() {
     );
   }
 
+  for (final brightness in Brightness.values) {
+    testWidgets('self-host card links to the guide and dismisses ($brightness)',
+        (tester) async {
+      var opened = 0;
+      var dismissed = 0;
+      final scheme =
+          buildApp217ColorScheme(brightness, palette: AppPalette.azure);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildApp217Theme(
+            brightness: brightness,
+            palette: AppPalette.azure,
+          ),
+          home: AuthScreen(
+            strings: const Strings(AppLanguage.en),
+            onSignIn: () async {},
+            onOpenSettings: () {},
+            onOpenSelfHostGuide: () => opened++,
+            onDismissSelfHostCard: () => dismissed++,
+          ),
+        ),
+      );
+
+      final body = find.text(
+        'You can run 217 on your own server and keep your data there.',
+      );
+      expect(body, findsOneWidget);
+      expect(tester.widget<Text>(body).style?.color, scheme.onSecondaryContainer);
+      final card = tester.widget<Material>(
+        find.byKey(const ValueKey('auth-self-host-card')),
+      );
+      expect(card.color, scheme.secondaryContainer);
+
+      await tester.tap(find.text('Self-hosting guide'));
+      expect(opened, 1);
+      await tester.tap(find.byTooltip('Dismiss'));
+      expect(dismissed, 1);
+      // Sign-in stays the primary action above the card.
+      expect(
+        tester.getCenter(find.text('Sign in')).dy,
+        lessThan(tester.getTopLeft(find.byKey(const ValueKey('auth-self-host-card'))).dy),
+      );
+    });
+  }
+
+  testWidgets('no self-host card without its callbacks', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: AuthScreen(
+          strings: const Strings(AppLanguage.en),
+          onSignIn: () async {},
+          onOpenSettings: () {},
+        ),
+      ),
+    );
+    expect(find.byKey(const ValueKey('auth-self-host-card')), findsNothing);
+  });
+
   testWidgets('auth screen English tagline has no trailing period', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
         home: AuthScreen(
-          strings: const Strings(false),
-          apiBaseUrl: '',
+          strings: const Strings(AppLanguage.en),
           onSignIn: () async {},
           onOpenSettings: () {},
         ),

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Roomies-style deploy smoke: boot API against Postgres with real WORKOS_*
+# Deploy smoke: boot the API against Postgres with real WORKOS_*
 # secrets and prove AuthKit is wired (config + continue URL + password off).
 set -euo pipefail
 

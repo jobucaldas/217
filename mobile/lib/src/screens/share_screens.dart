@@ -1,11 +1,15 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../api/client.dart';
+import '../errors.dart';
 import '../i18n.dart';
 import '../models.dart';
+import '../platform/share_sheet.dart';
 
-/// Owner settings for invite code + revoke (no delete — that sits with logout).
+/// Owner settings: send/copy the invite link or code, revoke, or — with
+/// nothing shared yet — join someone else's calendar with their code.
 class ShareSettingsSection extends StatefulWidget {
   const ShareSettingsSection({
     super.key,
@@ -14,6 +18,7 @@ class ShareSettingsSection extends StatefulWidget {
     required this.user,
     required this.share,
     required this.onShareChanged,
+    this.onJoined,
   });
 
   final ApiClient api;
@@ -21,6 +26,9 @@ class ShareSettingsSection extends StatefulWidget {
   final User user;
   final ShareState share;
   final ValueChanged<ShareState> onShareChanged;
+
+  /// Called after this account joined another calendar with a code.
+  final ValueChanged<ShareState>? onJoined;
 
   @override
   State<ShareSettingsSection> createState() => _ShareSettingsSectionState();
@@ -36,11 +44,56 @@ class _ShareSettingsSectionState extends State<ShareSettingsSection> {
     } catch (err) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$err')),
+        SnackBar(content: Text(friendlyError(widget.strings, err))),
       );
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  /// Server-provided link; on web an older server without `invite_url` still
+  /// gets a working link from this page's own origin.
+  String get _inviteLink {
+    final share = widget.share;
+    if (share.inviteUrl.isNotEmpty) return share.inviteUrl;
+    if (kIsWeb && share.inviteCode.isNotEmpty) {
+      final code = Uri.encodeQueryComponent(share.inviteCode);
+      return '${Uri.base.origin}/?invite=$code';
+    }
+    return '';
+  }
+
+  Future<void> _copy(String text, String confirmation) async {
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(confirmation)));
+  }
+
+  /// Android: system share sheet (WhatsApp, SMS…). Elsewhere, copy the link.
+  Future<void> _send() async {
+    final strings = widget.strings;
+    final link = _inviteLink;
+    final shared = await shareText(
+      strings.shareMessage(code: widget.share.inviteCode, link: link),
+      subject: strings.shareSubject,
+    );
+    if (shared || !mounted) return;
+    if (link.isNotEmpty) {
+      await _copy(link, strings.linkCopied);
+    } else {
+      await _copy(widget.share.inviteCode, strings.codeCopied);
+    }
+  }
+
+  Future<void> _join() async {
+    final joined = await showJoinCalendarDialog(
+      context: context,
+      api: widget.api,
+      strings: widget.strings,
+    );
+    if (joined != null) widget.onJoined?.call(joined);
   }
 
   @override
@@ -49,13 +102,16 @@ class _ShareSettingsSectionState extends State<ShareSettingsSection> {
 
     final scheme = Theme.of(context).colorScheme;
     final text = Theme.of(context).textTheme;
+    final strings = widget.strings;
     final share = widget.share;
+    final link = _inviteLink;
+    const divider = Divider(height: 1, indent: 16, endIndent: 16);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          widget.strings.shareCalendar.toUpperCase(),
+          strings.shareCalendar.toUpperCase(),
           style: text.labelMedium?.copyWith(
             color: scheme.onSurfaceVariant,
             letterSpacing: 0.6,
@@ -72,9 +128,9 @@ class _ShareSettingsSectionState extends State<ShareSettingsSection> {
           clipBehavior: Clip.antiAlias,
           child: Column(
             children: [
-              if (share.isNone)
+              if (share.isNone) ...[
                 ListTile(
-                  title: Text(widget.strings.shareEnable),
+                  title: Text(strings.shareEnable),
                   trailing: _busy
                       ? const SizedBox(
                           width: 20,
@@ -88,48 +144,83 @@ class _ShareSettingsSectionState extends State<ShareSettingsSection> {
                             final next = await widget.api.enableShare();
                             widget.onShareChanged(next);
                           }),
-                )
-              else ...[
-                ListTile(
-                  title: Text(widget.strings.shareInviteCode),
-                  subtitle: Text(
-                    share.inviteCode,
-                    style: text.headlineSmall?.copyWith(
-                      letterSpacing: 2,
-                      fontWeight: FontWeight.w700,
-                      color: scheme.onSurface,
+                ),
+                if (widget.onJoined != null) ...[
+                  divider,
+                  ListTile(
+                    key: const ValueKey('share-join-with-code'),
+                    title: Text(strings.joinWithCode),
+                    subtitle: Text(strings.joinWithCodeHint),
+                    trailing: Icon(Icons.login, color: scheme.onSurfaceVariant),
+                    onTap: _busy ? null : _join,
+                  ),
+                ],
+              ] else ...[
+                if (share.isOpen) ...[
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                    child: FilledButton.icon(
+                      key: const ValueKey('share-send-invite'),
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size.fromHeight(48),
+                      ),
+                      onPressed: _send,
+                      icon: Icon(canShareNatively ? Icons.share : Icons.link),
+                      label: Text(
+                        canShareNatively ? strings.shareSend : strings.shareCopyLink,
+                      ),
                     ),
                   ),
-                  trailing: IconButton(
-                    tooltip: widget.strings.shareCopyCode,
-                    onPressed: share.inviteCode.isEmpty
-                        ? null
-                        : () async {
-                            await Clipboard.setData(
-                              ClipboardData(text: share.inviteCode),
-                            );
-                            if (!context.mounted) return;
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(widget.strings.shareCopyCode),
-                              ),
-                            );
-                          },
-                    icon: const Icon(Icons.copy_outlined),
+                  if (link.isNotEmpty)
+                    ListTile(
+                      key: const ValueKey('share-invite-link'),
+                      title: Text(strings.shareInviteLink),
+                      subtitle: Text(
+                        link,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: text.bodyMedium?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                      trailing: IconButton(
+                        tooltip: strings.shareCopyLink,
+                        onPressed: () => _copy(link, strings.linkCopied),
+                        icon: const Icon(Icons.link),
+                      ),
+                    ),
+                  ListTile(
+                    key: const ValueKey('share-invite-code'),
+                    title: Text(strings.shareInviteCode),
+                    subtitle: SelectableText(
+                      share.inviteCode,
+                      style: text.headlineSmall?.copyWith(
+                        letterSpacing: 2,
+                        fontWeight: FontWeight.w700,
+                        color: scheme.onSurface,
+                      ),
+                    ),
+                    trailing: IconButton(
+                      tooltip: strings.shareCopyCode,
+                      onPressed: share.inviteCode.isEmpty
+                          ? null
+                          : () => _copy(share.inviteCode, strings.codeCopied),
+                      icon: const Icon(Icons.copy_outlined),
+                    ),
                   ),
-                ),
-                const Divider(height: 1, indent: 16, endIndent: 16),
+                  divider,
+                ],
                 ListTile(
                   title: Text(
                     share.isActive
-                        ? '${widget.strings.shareActiveWith} ${share.partnerName.isEmpty ? share.partnerEmail : share.partnerName}'
-                        : widget.strings.shareWaiting,
+                        ? '${strings.shareActiveWith} ${share.partnerName.isEmpty ? share.partnerEmail : share.partnerName}'
+                        : strings.shareWaiting,
                   ),
                 ),
-                const Divider(height: 1, indent: 16, endIndent: 16),
+                divider,
                 ListTile(
                   title: Text(
-                    widget.strings.shareRevoke,
+                    strings.shareRevoke,
                     style: text.titleMedium?.copyWith(color: scheme.error),
                   ),
                   onTap: _busy
@@ -142,6 +233,84 @@ class _ShareSettingsSectionState extends State<ShareSettingsSection> {
               ],
             ],
           ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Snackbar text for a failed join: a rejected code vs. anything else.
+String joinErrorText(Strings strings, Object err) =>
+    err is ApiException && err.statusCode == 400
+        ? strings.inviteCodeRejected
+        : friendlyError(strings, err);
+
+/// Asks for an invite code and joins that calendar. Returns the new share
+/// state, or null when cancelled or rejected (the error is shown).
+Future<ShareState?> showJoinCalendarDialog({
+  required BuildContext context,
+  required ApiClient api,
+  required Strings strings,
+}) async {
+  final code = await showDialog<String>(
+    context: context,
+    builder: (context) => _JoinCodeDialog(strings: strings),
+  );
+  if (code == null || code.isEmpty || !context.mounted) return null;
+  try {
+    return await api.acceptShare(code);
+  } catch (err) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(joinErrorText(strings, err))),
+      );
+    }
+    return null;
+  }
+}
+
+class _JoinCodeDialog extends StatefulWidget {
+  const _JoinCodeDialog({required this.strings});
+
+  final Strings strings;
+
+  @override
+  State<_JoinCodeDialog> createState() => _JoinCodeDialogState();
+}
+
+class _JoinCodeDialogState extends State<_JoinCodeDialog> {
+  final _code = TextEditingController();
+
+  @override
+  void dispose() {
+    _code.dispose();
+    super.dispose();
+  }
+
+  void _submit() => Navigator.pop(context, _code.text.trim());
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.strings.joinWithCode),
+      content: TextField(
+        key: const ValueKey('join-code-field'),
+        controller: _code,
+        autofocus: true,
+        textCapitalization: TextCapitalization.characters,
+        autocorrect: false,
+        textInputAction: TextInputAction.done,
+        onSubmitted: (_) => _submit(),
+        decoration: InputDecoration(labelText: widget.strings.enterInviteCode),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text(widget.strings.cancel),
+        ),
+        FilledButton(
+          onPressed: _submit,
+          child: Text(widget.strings.joinCalendar),
         ),
       ],
     );
@@ -204,7 +373,7 @@ class _DeleteAccountSectionState extends State<DeleteAccountSection> {
     } catch (err) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$err')),
+        SnackBar(content: Text(friendlyError(widget.strings, err))),
       );
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -272,12 +441,12 @@ class _PartnerRevokedScreenState extends State<PartnerRevokedScreen> {
   Future<void> _join() async {
     setState(() => _busy = true);
     try {
-      final share = await widget.api.acceptShare(_code.text);
+      final share = await widget.api.acceptShare(_code.text.trim());
       widget.onJoined(share);
     } catch (err) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$err')),
+        SnackBar(content: Text(joinErrorText(widget.strings, err))),
       );
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -315,7 +484,7 @@ class _PartnerRevokedScreenState extends State<PartnerRevokedScreen> {
     } catch (err) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$err')),
+        SnackBar(content: Text(friendlyError(widget.strings, err))),
       );
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -419,7 +588,7 @@ class _InboxScreenState extends State<InboxScreen> {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = '$err';
+        _error = friendlyError(widget.strings, err);
       });
     }
   }
@@ -441,7 +610,19 @@ class _InboxScreenState extends State<InboxScreen> {
       body: _loading
           ? Center(child: Text(widget.strings.loading))
           : _error != null
-              ? Center(child: Text(_error!))
+              ? Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(_error!),
+                      const SizedBox(height: 12),
+                      OutlinedButton(
+                        onPressed: _load,
+                        child: Text(widget.strings.retry),
+                      ),
+                    ],
+                  ),
+                )
               : _notes.isEmpty
                   ? Center(
                       child: Text(
@@ -512,7 +693,6 @@ Future<void> showPartnerNoteDialog({
   required Strings strings,
 }) async {
   final controller = TextEditingController();
-  final scheme = Theme.of(context).colorScheme;
   final result = await showDialog<String>(
     context: context,
     builder: (context) {
@@ -545,16 +725,13 @@ Future<void> showPartnerNoteDialog({
     await api.createPartnerNote(result);
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(strings.sendNote)),
+        SnackBar(content: Text(strings.noteSent)),
       );
     }
   } catch (err) {
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('$err'),
-          backgroundColor: scheme.error,
-        ),
+        SnackBar(content: Text(friendlyError(strings, err))),
       );
     }
   }
