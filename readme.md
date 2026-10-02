@@ -66,6 +66,29 @@ make mobile-web
 - Flutter receives only `WORKOS_CLIENT_ID` (public)
 - Session tokens are stored as SHA-256 digests in PostgreSQL
 
+## CI
+
+Checks run in two places with the same jobs (Go, Flutter analyze/test, WorkOS smoke, web and APK release builds):
+
+- **GitHub Actions** — `.github/workflows/ci.yml`. Also publishes nightly APK releases and GHCR images on `main`.
+- **Depot CI** — `.depot/workflows/ci.yml`, on Depot's machines, so PR checks still run when GitHub-hosted runners are unavailable. Checks only; nothing is published from Depot.
+
+One-time Depot setup (needs the repo owner):
+
+1. Create a Depot organization at [depot.dev](https://depot.dev) and install the **Depot Code Access** GitHub app on this repo (Depot → Settings → GitHub Code Access → Connect to GitHub).
+2. Add the secrets the workflow reads, with the [Depot CLI](https://depot.dev/docs/cli/installation) logged in (`depot login`):
+
+   ```sh
+   depot ci secrets add WORKOS_CLIENT_ID
+   depot ci secrets add WORKOS_API_KEY
+   depot ci secrets add NIGHTLY_API_BASE_URL   # optional
+   ```
+
+   Or copy them from GitHub in one go: `depot ci migrate secrets-and-vars`.
+3. Pushes and PRs now also get "217 CI (Depot)" checks. Run it against local changes without pushing: `depot ci run --workflow .depot/workflows/ci.yml`. Inspect runs with `depot ci run list`, `depot ci logs <run-id>` and `depot ci diagnose --run <run-id>`.
+
+Keep the shared jobs in both files in sync when CI changes.
+
 ## Self-hosting
 
 You can run your own 217 server, so your calendar never leaves hardware you control. A server is three pieces behind one origin:

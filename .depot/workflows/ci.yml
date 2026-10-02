@@ -1,0 +1,161 @@
+# Depot CI copy of .github/workflows/ci.yml — the check jobs only (Go, Flutter
+# analyze/test, WorkOS smoke, web + APK release builds), running on Depot's
+# machines so PR checks don't depend on GitHub-hosted runners.
+#
+# Main-branch publishing (nightly GitHub Releases, GHCR images) stays in
+# .github/workflows/ci.yml so nothing is published twice.
+#
+# Keep the shared jobs in sync with .github/workflows/ci.yml. Setup: see
+# "CI" in readme.md.
+
+name: 217 CI (Depot)
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Go fmt, test, vet and build
+    runs-on: depot-ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Go fmt check
+        working-directory: backend
+        run: test -z "$(gofmt -l .)"
+      - name: Go test
+        working-directory: backend
+        run: go test -mod=readonly ./...
+      - name: Go vet
+        working-directory: backend
+        run: go vet -mod=readonly ./...
+      - name: Go build
+        working-directory: backend
+        run: go build -mod=readonly ./...
+
+  mobile:
+    name: Flutter analyze and test
+    runs-on: depot-ubuntu-latest
+    container:
+      image: ghcr.io/cirruslabs/flutter:stable
+    steps:
+      - uses: actions/checkout@v4
+      - name: Flutter analyze and test
+        working-directory: mobile
+        run: |
+          git config --global --add safe.directory /sdks/flutter || true
+          flutter pub get
+          flutter analyze
+          flutter test
+
+  # Roomies-style: boot API with real WORKOS_* repo secrets and smoke AuthKit wiring.
+  workos-smoke:
+    name: WorkOS AuthKit deploy smoke
+    runs-on: depot-ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: app_217
+          POSTGRES_USER: app_217
+          POSTGRES_PASSWORD: app_217
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U app_217 -d app_217"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      WORKOS_CLIENT_ID: ${{ secrets.WORKOS_CLIENT_ID }}
+      WORKOS_API_KEY: ${{ secrets.WORKOS_API_KEY }}
+      APP_BASE_URL: http://localhost:8787
+      DATABASE_URL: postgres://app_217:app_217@localhost:5432/app_217?sslmode=disable
+      BACKEND_ADDR: 127.0.0.1:3000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Require WorkOS secrets
+        run: |
+          set -euo pipefail
+          if [ -z "${WORKOS_CLIENT_ID}" ] || [ -z "${WORKOS_API_KEY}" ]; then
+            echo "Missing WORKOS_CLIENT_ID and/or WORKOS_API_KEY repo Actions secrets." >&2
+            exit 1
+          fi
+          # Mask values so they never appear in logs if echoed by accident.
+          echo "::add-mask::${WORKOS_CLIENT_ID}"
+          echo "::add-mask::${WORKOS_API_KEY}"
+      - name: AuthKit smoke against Postgres
+        run: bash scripts/ci-workos-smoke.sh
+
+  # Deploy-shaped artifact: Flutter web release bundle (same input as home-lab image).
+  flutter-web-build:
+    name: Flutter web release build
+    runs-on: depot-ubuntu-latest
+    container:
+      image: ghcr.io/cirruslabs/flutter:stable
+    env:
+      # Public client id (safe). Sourced from repo secret when present.
+      WORKOS_CLIENT_ID: ${{ secrets.WORKOS_CLIENT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build web
+        working-directory: mobile
+        run: |
+          git config --global --add safe.directory /sdks/flutter || true
+          flutter pub get
+          # Fall back to Staging public client id if secret unset (fork PRs).
+          CID="${WORKOS_CLIENT_ID:-client_01M3QCMK75B35RPC8EAJA5GREP}"
+          flutter build web --release --no-web-resources-cdn \
+            --dart-define=WORKOS_CLIENT_ID="$CID"
+          # Stamp the commit so live Serve can prove which bundle is running.
+          printf 'BUILD_SHA=%s\n' "${GITHUB_SHA}" > build/web/BUILD_SHA.txt
+          test -f build/web/index.html
+          test -s build/web/BUILD_SHA.txt
+
+  # Deploy-shaped artifact: Android release APK (same toolchain image as other Flutter jobs).
+  mobile-apk-build:
+    name: Flutter Android release APK
+    runs-on: depot-ubuntu-latest
+    container:
+      image: ghcr.io/cirruslabs/flutter:stable
+    env:
+      WORKOS_CLIENT_ID: ${{ secrets.WORKOS_CLIENT_ID }}
+      NIGHTLY_API_BASE_URL: ${{ secrets.NIGHTLY_API_BASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build release APK
+        working-directory: mobile
+        # Flutter container default shell is dash (`sh`); avoid bash-only `pipefail`.
+        run: |
+          git config --global --add safe.directory /sdks/flutter || true
+          flutter pub get
+          CID="${WORKOS_CLIENT_ID:-client_01M3QCMK75B35RPC8EAJA5GREP}"
+          # Optional secret; default matches deploy/kustomize APP_BASE_URL (HTTPS Serve).
+          API="${NIGHTLY_API_BASE_URL:-https://encom.tailbe71e1.ts.net:8443}"
+          flutter build apk --release \
+            --dart-define=API_BASE_URL="$API" \
+            --dart-define=WORKOS_CLIENT_ID="$CID"
+          test -f build/app/outputs/flutter-apk/app-release.apk
+          cp build/app/outputs/flutter-apk/app-release.apk "${GITHUB_WORKSPACE}/217-nightly.apk"
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-nightly-apk
+          path: 217-nightly.apk
+          retention-days: 3
