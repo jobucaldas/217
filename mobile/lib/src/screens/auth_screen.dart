@@ -6,24 +6,24 @@ class AuthScreen extends StatelessWidget {
   const AuthScreen({
     super.key,
     required this.strings,
-    required this.apiBaseUrl,
     required this.onSignIn,
     required this.onOpenSettings,
     this.showReminderHint = false,
     this.onDismissReminderHint,
+    this.customServer,
   });
 
   final Strings strings;
-  final String apiBaseUrl; // call-site compat; API URL lives in Settings only
   final Future<void> Function() onSignIn;
   final VoidCallback onOpenSettings;
   final bool showReminderHint;
   final Future<void> Function()? onDismissReminderHint;
 
+  /// Host of a self-hosted server, shown so sign-in goes where you expect.
+  final String? customServer;
+
   @override
   Widget build(BuildContext context) {
-    // ignore: unused_local_variable — reserved for future debug badge
-    final _ = apiBaseUrl;
     final scheme = Theme.of(context).colorScheme;
     final text = Theme.of(context).textTheme;
     return Scaffold(
@@ -103,6 +103,17 @@ class AuthScreen extends StatelessWidget {
                             child: Text(strings.continueWorkOS),
                           ),
                         ),
+                        if (customServer != null) ...[
+                          const SizedBox(height: 12),
+                          Text(
+                            strings.serverLabel(customServer!),
+                            key: const ValueKey('auth-custom-server'),
+                            textAlign: TextAlign.center,
+                            style: text.bodySmall?.copyWith(
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ),

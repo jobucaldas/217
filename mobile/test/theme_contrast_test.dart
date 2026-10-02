@@ -82,6 +82,11 @@ void main() {
             isTrue,
             reason: 'day number on taken cell (${palette.name}/$brightness)',
           );
+          expect(
+            meetsBodyContrast(scheme.onErrorContainer, scheme.errorContainer),
+            isTrue,
+            reason: 'calendar sync error banner (${palette.name}/$brightness)',
+          );
         },
       );
     }

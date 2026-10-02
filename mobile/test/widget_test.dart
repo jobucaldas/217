@@ -28,7 +28,6 @@ void main() {
             ),
             home: AuthScreen(
               strings: const Strings(true),
-              apiBaseUrl: 'http://10.0.2.2:8787',
               onSignIn: () async {},
               onOpenSettings: () {},
             ),
@@ -42,8 +41,8 @@ void main() {
         expect(find.text('EN'), findsNothing);
         expect(find.text('PT'), findsNothing);
         expect(find.byKey(const ValueKey('auth-settings')), findsOneWidget);
-        // API base URL stays in Settings, not on the first viewport.
-        expect(find.text('http://10.0.2.2:8787'), findsNothing);
+        // Default server is not surfaced on the first viewport.
+        expect(find.byKey(const ValueKey('auth-custom-server')), findsNothing);
 
         final brand = tester.widget<Text>(find.text('217'));
         final cta = tester.widget<Text>(find.text('Entrar'));
@@ -73,7 +72,6 @@ void main() {
       MaterialApp(
         home: AuthScreen(
           strings: const Strings(false),
-          apiBaseUrl: '',
           onSignIn: () async {},
           onOpenSettings: () {},
         ),

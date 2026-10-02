@@ -19,19 +19,33 @@ class Strings {
   String get heartMarked => pt ? 'Intimidade marcada' : 'Intimacy marked';
   String get save => pt ? 'Salvar' : 'Save';
   String get cancel => pt ? 'Cancelar' : 'Cancel';
-  String get clearMark => pt ? 'Remover marcação' : 'Clear mark';
-  String get back => pt ? 'Voltar' : 'Back';
   String get loading => pt ? 'Carregando…' : 'Loading…';
   String get signInError =>
       pt ? 'Não deu para entrar. Tente de novo.' : 'Sign-in failed. Try again.';
-  String get apiBaseUrl => pt ? 'URL da API' : 'API base URL';
-  String get apiBaseHint => pt
-      ? 'Emulador: http://10.0.2.2:8787 — aparelho: http://SEU_IP:8787'
-      : 'Emulator: http://10.0.2.2:8787 — device: http://YOUR_LAN_IP:8787';
   String get testConnection => pt ? 'Testar conexão' : 'Test connection';
-  String get connectionOk => pt ? 'API acessível' : 'API reachable';
-  String get connectionFail => pt ? 'API inacessível' : 'API unreachable';
-  String get advanced => pt ? 'Avançado' : 'Advanced';
+  String get serverUrl =>
+      pt ? 'URL do servidor próprio' : 'Self-hosted server URL';
+  String get serverUrlHelp => pt
+      ? 'Só para quem hospeda o próprio servidor 217. Deixe vazio para usar o servidor padrão.'
+      : 'Only if you host your own 217 server. Leave empty to use the default server.';
+  String get serverSaved => pt ? 'Servidor salvo' : 'Server saved';
+  String get serverReset =>
+      pt ? 'Usando o servidor padrão' : 'Using the default server';
+  String get serverInvalid => pt
+      ? 'Use um endereço completo, ex.: https://217.exemplo.com'
+      : 'Enter a full address, e.g. https://217.example.com';
+  String get connectionOk =>
+      pt ? 'Servidor 217 encontrado' : 'Found a 217 server';
+  String get connectionFail => pt
+      ? 'Nenhum servidor 217 respondeu nesse endereço'
+      : 'No 217 server answered at that address';
+  String serverLabel(String host) => pt ? 'Servidor: $host' : 'Server: $host';
+  String get genericError =>
+      pt ? 'Algo deu errado. Tente de novo.' : 'Something went wrong. Try again.';
+  String get connectionError => pt
+      ? 'Sem conexão com o servidor. Tente de novo.'
+      : "Can't reach the server. Try again.";
+  String get retry => pt ? 'Tentar de novo' : 'Retry';
   String get showMore =>
       pt ? 'Opções avançadas' : 'Advanced options';
   String get showLess =>
@@ -40,7 +54,6 @@ class Strings {
   String get languageEnglish => 'English';
   String get done => pt ? 'Pronto' : 'Done';
   String get clearNote => pt ? 'Limpar nota' : 'Clear note';
-  String get darkMode => pt ? 'Tema escuro' : 'Dark theme';
   String get appearance => pt ? 'Aparência' : 'Appearance';
   String get themeSystem => pt ? 'Sistema' : 'System';
   String get themeLight => pt ? 'Claro' : 'Light';
@@ -50,18 +63,17 @@ class Strings {
   String get paletteMint => pt ? 'Menta' : 'Mint';
   String get palettePlum => pt ? 'Ameixa' : 'Plum';
   String get today => pt ? 'Hoje' : 'Today';
+  String get previousMonth => pt ? 'Mês anterior' : 'Previous month';
+  String get nextMonth => pt ? 'Próximo mês' : 'Next month';
   String get recordToday => pt ? 'Registrar hoje' : 'Record today';
   String get updateToday => pt ? 'Atualizar hoje' : 'Update today';
-  String get todayStatus => pt ? 'Hoje' : 'Today';
-  String get remindersOn => pt ? 'Lembrete' : 'Reminder';
   String get remindersOff => pt ? 'Lembrete desligado' : 'Reminder off';
   String get reminderNotReady =>
       pt ? 'Lembrete ainda não configurado' : 'Reminder not set up yet';
   String get reminderHint => pt
-      ? 'Configure um lembrete diário em Ajustes. No Android usamos notificações do sistema.'
-      : 'Set a daily reminder in Settings. On Android we use system notifications.';
+      ? 'Depois de entrar, configure um lembrete diário em Ajustes.'
+      : 'After signing in, set a daily reminder in Settings.';
   String get reminderHintDismiss => pt ? 'Entendi' : 'Got it';
-  String get legend => pt ? 'Legenda' : 'Legend';
   String get legendTaken => pt ? 'Tomado' : 'Taken';
   String get legendMissed => pt ? 'Perdido' : 'Missed';
   String get legendUnrecorded => pt ? 'Em aberto' : 'Open';
@@ -75,21 +87,22 @@ class Strings {
       ? 'Ative as notificações do sistema neste aparelho.'
       : 'Enable system notifications on this device.';
   String get reminderUnavailable => pt
-      ? 'Neste navegador, lembretes web precisam de push (VAPID). No Android usamos notificações nativas.'
-      : 'In this browser, web reminders need push (VAPID). On Android we use native notifications.';
+      ? 'Lembretes ainda não funcionam neste navegador. Use o app Android para receber notificações.'
+      : "Reminders don't work in this browser yet. Use the Android app to get notifications.";
   String get reminderReady => pt ? 'Lembrete ativo' : 'Reminder on';
   String get reminderNativeNote => pt
-      ? 'Android: notificação local diária do sistema. Web: push do servidor (VAPID) quando disponível.'
-      : 'Android: daily system local notification. Web: server push (VAPID) when available.';
+      ? 'No Android, o lembrete é uma notificação diária neste aparelho. No navegador, depende do servidor ter notificações push.'
+      : 'On Android, the reminder is a daily notification on this device. In the browser, it depends on the server supporting push notifications.';
   String get reminderPermissionDenied => pt
       ? 'Permissão de notificação negada neste aparelho.'
       : 'Notification permission denied on this device.';
   String get reminderLocalScheduled => pt
       ? 'Notificação local agendada neste aparelho'
       : 'Local notification scheduled on this device';
+
   String get reminderWebNeedsPush => pt
-      ? 'Neste navegador, entrega em segundo plano precisa de push do servidor.'
-      : 'In this browser, background delivery needs server push.';
+      ? 'Neste navegador, o lembrete em segundo plano precisa de notificações push do servidor.'
+      : 'In this browser, background reminders need push notifications from the server.';
 
   // Account / share
   String get deleteAccount => pt ? 'Excluir conta' : 'Delete account';
@@ -101,6 +114,7 @@ class Strings {
       pt ? 'Compartilhar calendário com namorado' : 'Share calendar with boyfriend';
   String get shareInviteCode => pt ? 'Código do convite' : 'Invite code';
   String get shareCopyCode => pt ? 'Copiar código' : 'Copy code';
+  String get codeCopied => pt ? 'Código copiado' : 'Code copied';
   String get shareEnable => pt ? 'Gerar convite' : 'Create invite';
   String get shareRevoke => pt ? 'Revogar acesso' : 'Revoke access';
   String get shareActiveWith => pt ? 'Compartilhado com' : 'Shared with';
@@ -110,14 +124,17 @@ class Strings {
   String get inboxEmpty => pt ? 'Nenhuma nota ainda.' : 'No notes yet.';
   String get leaveNote => pt ? 'Deixar uma nota' : 'Leave a note';
   String get sendNote => pt ? 'Enviar' : 'Send';
+  String get noteSent => pt ? 'Nota enviada' : 'Note sent';
   String get partnerRevokedTitle => pt
       ? 'Você não está convidado ao calendário 217 dela'
       : 'You are not invited to her 217 calendar';
   String get partnerRevokedBody => pt
       ? 'Quer adicionar o código dela ou excluir esta conta?'
       : 'Add her code, or delete this account?';
-  String get addHerCode => pt ? 'Adicionar código' : 'Add her code';
   String get enterInviteCode => pt ? 'Código do convite' : 'Invite code';
+  String get inviteCodeRejected => pt
+      ? 'Esse código não funcionou. Confira e tente de novo.'
+      : "That code didn't work. Check it and try again.";
   String get joinCalendar => pt ? 'Entrar' : 'Join';
   String get readOnlyCalendar =>
       pt ? 'Calendário em modo leitura' : 'Read-only calendar';

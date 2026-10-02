@@ -23,26 +23,40 @@ class ApiClient {
   static const _apiBaseKey = 'api_base_url';
 
   Future<void> loadPersistedApiBase() async {
-    final saved = await _storage.read(key: _apiBaseKey);
-    if (saved != null && saved.trim().isNotEmpty) {
-      config.apiBaseUrl = saved.trim().replaceAll(RegExp(r'/+$'), '');
-    }
+    final saved = normalizeApiBase(await _storage.read(key: _apiBaseKey) ?? '');
+    // Missing or empty (older builds stored '' for same-origin) → build default.
+    config.apiBaseUrl = saved.isEmpty ? config.defaultApiBaseUrl : saved;
   }
 
-  Future<void> setApiBaseUrl(String value) async {
-    final normalized = value.trim().replaceAll(RegExp(r'/+$'), '');
-    if (normalized.isEmpty) {
-      // Empty means same-origin (web).
-      config.apiBaseUrl = '';
-      await _storage.write(key: _apiBaseKey, value: '');
-      return;
-    }
+  /// Validates a self-hosted server URL; empty means "use the default server".
+  /// Throws [FormatException] unless the URL is http(s) with a host.
+  static String parseApiBase(String value) {
+    final normalized = normalizeApiBase(value);
+    if (normalized.isEmpty) return '';
     final uri = Uri.tryParse(normalized);
-    if (uri == null || !uri.hasScheme || uri.host.isEmpty) {
-      throw ArgumentError('API base URL must include scheme and host');
+    if (uri == null ||
+        (uri.scheme != 'http' && uri.scheme != 'https') ||
+        uri.host.isEmpty) {
+      throw const FormatException('server URL needs http(s):// and a host');
     }
-    config.apiBaseUrl = normalized;
-    await _storage.write(key: _apiBaseKey, value: normalized);
+    return normalized;
+  }
+
+  /// Saves a self-hosted server URL (empty resets to the default server).
+  /// Returns true when the server changed. The old session token is dropped
+  /// then, so it is never sent to a different host.
+  Future<bool> setApiBaseUrl(String value) async {
+    final parsed = parseApiBase(value);
+    final next = parsed.isEmpty ? config.defaultApiBaseUrl : parsed;
+    if (next == config.defaultApiBaseUrl) {
+      await _storage.delete(key: _apiBaseKey);
+    } else {
+      await _storage.write(key: _apiBaseKey, value: next);
+    }
+    if (next == config.apiBaseUrl) return false;
+    config.apiBaseUrl = next;
+    await clearSession();
+    return true;
   }
 
   Future<String?> readSessionToken() => _storage.read(key: _sessionKey);
@@ -52,8 +66,10 @@ class ApiClient {
 
   Future<void> clearSession() => _storage.delete(key: _sessionKey);
 
-  Uri _uri(String path, [Map<String, String>? query]) {
-    final base = config.apiBaseUrl.replaceAll(RegExp(r'/+$'), '');
+  Uri _uri(String path, [Map<String, String>? query]) =>
+      _uriFor(config.apiBaseUrl, path, query);
+
+  static Uri _uriFor(String base, String path, [Map<String, String>? query]) {
     final uri = base.isEmpty ? Uri.parse(path) : Uri.parse('$base$path');
     if (query == null || query.isEmpty) {
       return uri;
@@ -82,10 +98,18 @@ class ApiClient {
     return http.Response.fromStream(streamed);
   }
 
-  Future<bool> ping() async {
+  /// True when [baseUrl] (default: the current server) answers like a 217 API.
+  Future<bool> ping({String? baseUrl}) async {
+    final base = baseUrl == null ? config.apiBaseUrl : normalizeApiBase(baseUrl);
     try {
-      final response = await _send('GET', _uri('/api/auth/session'), auth: false);
-      return response.statusCode == 200;
+      final response = await _send(
+        'GET',
+        _uriFor(base, '/api/auth/config'),
+        auth: false,
+      );
+      if (response.statusCode != 200) return false;
+      final decoded = jsonDecode(response.body);
+      return decoded is Map && decoded.containsKey('authkit');
     } catch (_) {
       return false;
     }
@@ -102,11 +126,6 @@ class ApiClient {
       await clearSession();
     }
     return snapshot;
-  }
-
-  Future<User?> currentUser() async {
-    final snapshot = await currentSession();
-    return snapshot.user;
   }
 
   Future<User> signInWithWorkOS() async {
@@ -169,7 +188,7 @@ class ApiClient {
   Future<void> deleteAccount() async {
     final response = await _send('DELETE', _uri('/api/account'));
     if (response.statusCode != 204 && response.statusCode != 200) {
-      throw StateError('delete account failed: ${response.body}');
+      throw ApiException('delete account', response);
     }
     // Only clear local tokens after the server confirms WorkOS + app data deletion.
     await clearSession();
@@ -178,7 +197,7 @@ class ApiClient {
   Future<ShareState> getShare() async {
     final response = await _send('GET', _uri('/api/share'));
     if (response.statusCode != 200) {
-      throw StateError('get share failed: ${response.body}');
+      throw ApiException('get share', response);
     }
     return ShareState.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
   }
@@ -186,7 +205,7 @@ class ApiClient {
   Future<ShareState> enableShare() async {
     final response = await _send('POST', _uri('/api/share/enable'), body: {});
     if (response.statusCode != 200) {
-      throw StateError('enable share failed: ${response.body}');
+      throw ApiException('enable share', response);
     }
     return ShareState.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
   }
@@ -194,7 +213,7 @@ class ApiClient {
   Future<ShareState> revokeShare() async {
     final response = await _send('POST', _uri('/api/share/revoke'), body: {});
     if (response.statusCode != 200) {
-      throw StateError('revoke share failed: ${response.body}');
+      throw ApiException('revoke share', response);
     }
     return ShareState.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
   }
@@ -206,7 +225,7 @@ class ApiClient {
       body: {'code': code},
     );
     if (response.statusCode != 200) {
-      throw StateError('accept share failed: ${response.body}');
+      throw ApiException('accept share', response);
     }
     return ShareState.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
   }
@@ -214,7 +233,7 @@ class ApiClient {
   Future<List<PartnerNote>> listInbox() async {
     final response = await _send('GET', _uri('/api/inbox'));
     if (response.statusCode != 200) {
-      throw StateError('inbox failed: ${response.body}');
+      throw ApiException('inbox', response);
     }
     final decoded = jsonDecode(response.body) as Map<String, dynamic>;
     return (decoded['notes'] as List<dynamic>? ?? const [])
@@ -229,7 +248,7 @@ class ApiClient {
       body: {'body': body},
     );
     if (response.statusCode != 201 && response.statusCode != 200) {
-      throw StateError('partner note failed: ${response.body}');
+      throw ApiException('partner note', response);
     }
     return PartnerNote.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
   }
@@ -237,7 +256,7 @@ class ApiClient {
   Future<void> markInboxNoteRead(String id) async {
     final response = await _send('POST', _uri('/api/inbox/$id/read'), body: {});
     if (response.statusCode != 204 && response.statusCode != 200) {
-      throw StateError('mark note read failed: ${response.body}');
+      throw ApiException('mark note read', response);
     }
   }
 
@@ -250,7 +269,7 @@ class ApiClient {
       }),
     );
     if (response.statusCode != 200) {
-      throw StateError('list entries failed: ${response.body}');
+      throw ApiException('list entries', response);
     }
     final decoded = jsonDecode(response.body) as Map<String, dynamic>;
     final entries = (decoded['entries'] as List<dynamic>? ?? const [])
@@ -271,7 +290,7 @@ class ApiClient {
       body: {'taken': taken, 'notes': notes, 'heart': heart},
     );
     if (response.statusCode != 200) {
-      throw StateError('upsert entry failed: ${response.body}');
+      throw ApiException('upsert entry', response);
     }
     return Entry.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
   }
@@ -282,7 +301,7 @@ class ApiClient {
       return; // already cleared
     }
     if (response.statusCode != 204 && response.statusCode != 200) {
-      throw StateError('delete entry failed: ${response.body}');
+      throw ApiException('delete entry', response);
     }
   }
 
@@ -290,7 +309,7 @@ class ApiClient {
     final response = await _send('GET', _uri('/api/reminders/preferences'));
     if (response.statusCode == 404) return null;
     if (response.statusCode != 200) {
-      throw StateError('reminder preference failed: ${response.body}');
+      throw ApiException('reminder preference', response);
     }
     return ReminderPreference.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
   }
@@ -309,11 +328,8 @@ class ApiClient {
         'timezone': timezone,
       },
     );
-    if (response.statusCode == 409) {
-      throw StateError('needs_push');
-    }
     if (response.statusCode != 200) {
-      throw StateError('save reminder failed: ${response.body}');
+      throw ApiException('save reminder', response);
     }
     return ReminderPreference.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
   }
@@ -329,14 +345,31 @@ class ApiClient {
       publicKey: (decoded['public_key'] as String?) ?? '',
     );
   }
+}
 
-  Future<AuthConfig> authConfig() async {
-    final response = await _send('GET', _uri('/api/auth/config'), auth: false);
-    if (response.statusCode != 200) {
-      return const AuthConfig(authkit: false, password: false);
-    }
-    return AuthConfig.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+/// Non-success API response. [message] is the server's `error` field, if any.
+class ApiException implements Exception {
+  ApiException(this.action, http.Response response)
+      : statusCode = response.statusCode,
+        message = _errorField(response.body);
+
+  final String action;
+  final int statusCode;
+  final String message;
+
+  static String _errorField(String body) {
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map && decoded['error'] is String) {
+        return decoded['error'] as String;
+      }
+    } catch (_) {}
+    return '';
   }
+
+  @override
+  String toString() =>
+      '$action failed ($statusCode)${message.isEmpty ? '' : ': $message'}';
 }
 
 class _Pkce {

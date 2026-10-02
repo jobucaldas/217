@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../api/client.dart';
+import '../errors.dart';
 import '../i18n.dart';
 import '../models.dart';
 
@@ -36,7 +37,7 @@ class _ShareSettingsSectionState extends State<ShareSettingsSection> {
     } catch (err) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$err')),
+        SnackBar(content: Text(friendlyError(widget.strings, err))),
       );
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -111,7 +112,7 @@ class _ShareSettingsSectionState extends State<ShareSettingsSection> {
                             if (!context.mounted) return;
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
-                                content: Text(widget.strings.shareCopyCode),
+                                content: Text(widget.strings.codeCopied),
                               ),
                             );
                           },
@@ -204,7 +205,7 @@ class _DeleteAccountSectionState extends State<DeleteAccountSection> {
     } catch (err) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$err')),
+        SnackBar(content: Text(friendlyError(widget.strings, err))),
       );
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -272,12 +273,15 @@ class _PartnerRevokedScreenState extends State<PartnerRevokedScreen> {
   Future<void> _join() async {
     setState(() => _busy = true);
     try {
-      final share = await widget.api.acceptShare(_code.text);
+      final share = await widget.api.acceptShare(_code.text.trim());
       widget.onJoined(share);
     } catch (err) {
       if (!mounted) return;
+      final message = err is ApiException && err.statusCode == 400
+          ? widget.strings.inviteCodeRejected
+          : friendlyError(widget.strings, err);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$err')),
+        SnackBar(content: Text(message)),
       );
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -315,7 +319,7 @@ class _PartnerRevokedScreenState extends State<PartnerRevokedScreen> {
     } catch (err) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$err')),
+        SnackBar(content: Text(friendlyError(widget.strings, err))),
       );
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -419,7 +423,7 @@ class _InboxScreenState extends State<InboxScreen> {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = '$err';
+        _error = friendlyError(widget.strings, err);
       });
     }
   }
@@ -441,7 +445,19 @@ class _InboxScreenState extends State<InboxScreen> {
       body: _loading
           ? Center(child: Text(widget.strings.loading))
           : _error != null
-              ? Center(child: Text(_error!))
+              ? Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(_error!),
+                      const SizedBox(height: 12),
+                      OutlinedButton(
+                        onPressed: _load,
+                        child: Text(widget.strings.retry),
+                      ),
+                    ],
+                  ),
+                )
               : _notes.isEmpty
                   ? Center(
                       child: Text(
@@ -512,7 +528,6 @@ Future<void> showPartnerNoteDialog({
   required Strings strings,
 }) async {
   final controller = TextEditingController();
-  final scheme = Theme.of(context).colorScheme;
   final result = await showDialog<String>(
     context: context,
     builder: (context) {
@@ -545,16 +560,13 @@ Future<void> showPartnerNoteDialog({
     await api.createPartnerNote(result);
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(strings.sendNote)),
+        SnackBar(content: Text(strings.noteSent)),
       );
     }
   } catch (err) {
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('$err'),
-          backgroundColor: scheme.error,
-        ),
+        SnackBar(content: Text(friendlyError(strings, err))),
       );
     }
   }

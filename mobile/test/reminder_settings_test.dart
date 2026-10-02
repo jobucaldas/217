@@ -75,7 +75,7 @@ void main() {
             palette: palette,
           );
           expect(find.text('Remind me daily'), findsOneWidget);
-          expect(find.textContaining('Android:'), findsOneWidget);
+          expect(find.textContaining('On Android'), findsOneWidget);
           expect(find.text('Save'), findsOneWidget);
         },
       );

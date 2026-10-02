@@ -5,11 +5,18 @@ class AppConfig {
     required String apiBaseUrl,
     required this.workosClientId,
     required this.redirectUri,
-  }) : apiBaseUrl = apiBaseUrl.replaceAll(RegExp(r'/+$'), '');
+  })  : defaultApiBaseUrl = normalizeApiBase(apiBaseUrl),
+        apiBaseUrl = normalizeApiBase(apiBaseUrl);
 
+  /// Server baked into this build (`API_BASE_URL`); empty means same-origin.
+  final String defaultApiBaseUrl;
+
+  /// Server currently in use — the default unless a self-hosted URL was saved.
   String apiBaseUrl;
   final String workosClientId;
   final String redirectUri;
+
+  bool get usesCustomApiBase => apiBaseUrl != defaultApiBaseUrl;
 
   /// Public client ID only — never pass WORKOS_API_KEY into the Flutter binary.
   factory AppConfig.fromEnvironment() {
@@ -33,3 +40,7 @@ class AppConfig {
     );
   }
 }
+
+/// Trims whitespace and trailing slashes from a server URL.
+String normalizeApiBase(String value) =>
+    value.trim().replaceAll(RegExp(r'/+$'), '');

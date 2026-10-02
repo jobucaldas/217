@@ -48,14 +48,14 @@ void main() {
         expect(find.text('English'), findsWidgets);
         expect(find.text('Advanced options'), findsOneWidget);
         expect(find.text('Show more'), findsNothing);
-        expect(find.text('API base URL'), findsNothing);
+        expect(find.text('Self-hosted server URL'), findsNothing);
         expect(find.text('Test connection'), findsNothing);
 
         await tester.tap(find.text('Advanced options'));
         await tester.pumpAndSettle();
 
         expect(find.text('Hide advanced options'), findsOneWidget);
-        expect(find.text('API base URL'), findsWidgets);
+        expect(find.text('Self-hosted server URL'), findsWidgets);
         expect(find.text('Test connection'), findsOneWidget);
 
         // Open language dropdown menu and pick Português.

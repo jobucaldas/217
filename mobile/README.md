@@ -33,4 +33,6 @@ Do not install Flutter on the host.
 | `WORKOS_CLIENT_ID` | staging public client id | Public OAuth client id |
 | `WORKOS_REDIRECT_URI` | `com.jobucaldas.a217://auth/callback` | Android deep link only |
 
+On Android, people who host their own 217 server can point the app at it from **Settings → Advanced options → Self-hosted server URL** (leave it empty to use the `API_BASE_URL` baked into the build). Switching servers signs you out, since accounts belong to a server. The web build always talks to the server that serves it, so the option is hidden there.
+
 Never pass `WORKOS_API_KEY` into the app.

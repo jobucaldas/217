@@ -12,6 +12,7 @@ class AppearancePrefs {
 
   static const themeModeKey = 'theme_mode';
   static const paletteKey = 'app_palette';
+  static const languageKey = 'language';
   static const reminderHintDismissedKey = 'reminder_hint_dismissed';
   static const fabSideKey = 'today_fab_side';
   static const fabBottomKey = 'today_fab_bottom';
@@ -24,6 +25,21 @@ class AppearancePrefs {
       palette: AppPaletteX.fromId(paletteRaw),
     );
   }
+
+  /// Saved UI language: true = Português, false = English, null = not chosen.
+  Future<bool?> loadPortuguese() async {
+    switch (await _storage.read(key: languageKey)) {
+      case 'pt':
+        return true;
+      case 'en':
+        return false;
+      default:
+        return null;
+    }
+  }
+
+  Future<void> savePortuguese(bool portuguese) =>
+      _storage.write(key: languageKey, value: portuguese ? 'pt' : 'en');
 
   Future<void> saveThemeMode(ThemeMode mode) =>
       _storage.write(key: themeModeKey, value: _themeModeId(mode));

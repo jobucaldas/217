@@ -164,17 +164,3 @@ class ReminderPreference {
     );
   }
 }
-
-class AuthConfig {
-  const AuthConfig({required this.authkit, required this.password});
-
-  final bool authkit;
-  final bool password;
-
-  factory AuthConfig.fromJson(Map<String, dynamic> json) {
-    return AuthConfig(
-      authkit: json['authkit'] as bool? ?? false,
-      password: json['password'] as bool? ?? false,
-    );
-  }
-}
