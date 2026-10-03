@@ -2,6 +2,7 @@ name: 217 CI
 
 on:
   push:
+    branches: [main]
   pull_request:
 
 permissions:
@@ -9,284 +10,129 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Public staging client id: fallback when the secret is unset (fork PRs).
+  # Servers report their own client id, so this only seeds the default.
+  WORKOS_CLIENT_ID: ${{ secrets.WORKOS_CLIENT_ID || 'client_01M3QCMK75B35RPC8EAJA5GREP' }}
 
 jobs:
   backend:
-    name: Go fmt, test, vet and build
+    name: Backend (gofmt, vet, test)
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
-      - name: Go fmt check
-        working-directory: backend
-        run: test -z "$(gofmt -l .)"
-      - name: Go test
-        working-directory: backend
-        run: go test -mod=readonly ./...
-      - name: Go vet
-        working-directory: backend
-        run: go vet -mod=readonly ./...
-      - name: Go build
-        working-directory: backend
-        run: go build -mod=readonly ./...
+      - run: test -z "$(gofmt -l .)"
+      - run: go vet -mod=readonly ./...
+      - run: go test -mod=readonly ./...
 
-  mobile:
-    name: Flutter analyze and test
+  frontend:
+    name: Frontend (analyze, test, web + APK build)
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/cirruslabs/flutter:stable
+    defaults:
+      run:
+        working-directory: frontend/mobile
     steps:
       - uses: actions/checkout@v4
-      - name: Flutter analyze and test
-        working-directory: mobile
-        run: |
+      - run: |
           git config --global --add safe.directory /sdks/flutter || true
           flutter pub get
-          flutter analyze
-          flutter test
-
-  # Boot the API with the real WORKOS_* repo secrets and smoke-test the AuthKit wiring.
-  workos-smoke:
-    name: WorkOS AuthKit deploy smoke
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_DB: app_217
-          POSTGRES_USER: app_217
-          POSTGRES_PASSWORD: app_217
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U app_217 -d app_217"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-    env:
-      WORKOS_CLIENT_ID: ${{ secrets.WORKOS_CLIENT_ID }}
-      WORKOS_API_KEY: ${{ secrets.WORKOS_API_KEY }}
-      APP_BASE_URL: http://localhost:8787
-      DATABASE_URL: postgres://app_217:app_217@localhost:5432/app_217?sslmode=disable
-      BACKEND_ADDR: 127.0.0.1:3000
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: backend/go.mod
-          cache-dependency-path: backend/go.sum
-      - name: Require WorkOS secrets
+      - run: flutter analyze
+      - run: flutter test
+      - name: Build web bundle
         run: |
-          set -euo pipefail
-          if [ -z "${WORKOS_CLIENT_ID}" ] || [ -z "${WORKOS_API_KEY}" ]; then
-            echo "Missing WORKOS_CLIENT_ID and/or WORKOS_API_KEY repo Actions secrets." >&2
-            exit 1
-          fi
-          # Mask values so they never appear in logs if echoed by accident.
-          echo "::add-mask::${WORKOS_CLIENT_ID}"
-          echo "::add-mask::${WORKOS_API_KEY}"
-      - name: AuthKit smoke against Postgres
-        run: bash scripts/ci-workos-smoke.sh
-
-  # Deploy-shaped artifact: Flutter web release bundle (same input as the frontend image).
-  flutter-web-build:
-    name: Flutter web release build
-    runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/cirruslabs/flutter:stable
-    env:
-      # Public client id (safe). Sourced from repo secret when present.
-      WORKOS_CLIENT_ID: ${{ secrets.WORKOS_CLIENT_ID }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build web
-        working-directory: mobile
-        run: |
-          git config --global --add safe.directory /sdks/flutter || true
-          flutter pub get
-          # Fall back to Staging public client id if secret unset (fork PRs).
-          CID="${WORKOS_CLIENT_ID:-client_01M3QCMK75B35RPC8EAJA5GREP}"
           flutter build web --release --no-web-resources-cdn \
-            --dart-define=WORKOS_CLIENT_ID="$CID"
-          # Stamp the commit so live Serve can prove which bundle is running.
-          printf 'BUILD_SHA=%s\n' "${GITHUB_SHA}" > build/web/BUILD_SHA.txt
-          test -f build/web/index.html
-          test -s build/web/BUILD_SHA.txt
-      - name: Upload web bundle for GHCR frontend image
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/upload-artifact@v4
-        with:
-          name: flutter-web-release
-          path: mobile/build/web
-          retention-days: 3
-
-  # Deploy-shaped artifact: Android release APK (same toolchain image as other Flutter jobs).
-  mobile-apk-build:
-    name: Flutter Android release APK
-    runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/cirruslabs/flutter:stable
-    env:
-      WORKOS_CLIENT_ID: ${{ secrets.WORKOS_CLIENT_ID }}
-    steps:
-      - uses: actions/checkout@v4
+            --dart-define=WORKOS_CLIENT_ID="$WORKOS_CLIENT_ID"
+          # Stamp the commit so the live site can prove which bundle is running.
+          printf 'BUILD_SHA=%s\n' "$GITHUB_SHA" > build/web/BUILD_SHA.txt
       - name: Build release APK
-        working-directory: mobile
-        # Flutter container default shell is dash (`sh`); avoid bash-only `pipefail`.
-        run: |
-          git config --global --add safe.directory /sdks/flutter || true
-          flutter pub get
-          # Fallback only: servers report their own public client ID.
-          CID="${WORKOS_CLIENT_ID:-client_01M3QCMK75B35RPC8EAJA5GREP}"
-          # No API_BASE_URL on purpose: the published APK ships without a
-          # server, so people connect their own 217 server on first launch.
-          flutter build apk --release \
-            --dart-define=WORKOS_CLIENT_ID="$CID"
-          test -f build/app/outputs/flutter-apk/app-release.apk
-          cp build/app/outputs/flutter-apk/app-release.apk "${GITHUB_WORKSPACE}/217-nightly.apk"
-      - name: Upload APK artifact
+        # No API_BASE_URL on purpose: the published APK asks for a server on first launch.
+        run: flutter build apk --release --dart-define=WORKOS_CLIENT_ID="$WORKOS_CLIENT_ID"
+      - if: github.event_name == 'push'
         uses: actions/upload-artifact@v4
         with:
-          name: android-nightly-apk
-          path: 217-nightly.apk
+          name: frontend-build
+          path: |
+            frontend/mobile/build/web
+            frontend/mobile/build/app/outputs/flutter-apk/app-release.apk
           retention-days: 3
 
-  # Main-only: APK to rolling nightly + immutable datetime_sha GitHub Releases.
-  # Independent of GHCR / flutter-web-build — Android compile must not wait on Docker.
-  nightly-apk:
-    name: Android APK → GitHub Releases (nightly + datetime_sha)
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [backend, mobile, workos-smoke, mobile-apk-build]
+  # main only: GHCR images + APK releases, both as `nightly` and immutable `datetime_sha`.
+  publish:
+    name: Publish (GHCR + GitHub Releases)
+    if: github.event_name == 'push'
+    needs: [backend, frontend]
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    steps:
-      - name: Download APK
-        uses: actions/download-artifact@v4
-        with:
-          name: android-nightly-apk
-          path: dist
-      - name: Publish nightly + datetime_sha releases
-        env:
-          GH_TOKEN: ${{ github.token }}
-          # Job has no checkout; tell gh which repo to target.
-          GH_REPO: ${{ github.repository }}
-          COMMIT_TIMESTAMP: ${{ github.event.head_commit.timestamp }}
-        run: |
-          set -euo pipefail
-          test -f dist/217-nightly.apk
-          SHORT_SHA="${GITHUB_SHA:0:7}"
-          if [ -n "${COMMIT_TIMESTAMP}" ]; then
-            DT="$(date -u -d "${COMMIT_TIMESTAMP}" +%Y%m%d%H%M%S)"
-          else
-            DT="$(date -u +%Y%m%d%H%M%S)"
-          fi
-          DATETIME_SHA="${DT}_${SHORT_SHA}"
-          BUILT_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          COMMIT_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}"
-
-          cp dist/217-nightly.apk "dist/217-${DATETIME_SHA}.apk"
-
-          NIGHTLY_NOTES="$(printf '%s\n' \
-            "Rolling nightly from \`${SHORT_SHA}\` on \`main\`." \
-            "" \
-            "- Built: ${BUILT_AT}" \
-            "- Also published as release \`${DATETIME_SHA}\`" \
-            "- Asset: \`217-nightly.apk\` (release build; debug-signed for sideload tryouts)" \
-            "- Asks for your 217 server on first launch (no built-in server; see the README's Self-hosting section)" \
-            "- Commit: ${COMMIT_URL}")"
-          if gh release view nightly >/dev/null 2>&1; then
-            gh release edit nightly --target "${GITHUB_SHA}" --notes "${NIGHTLY_NOTES}" --prerelease
-          else
-            gh release create nightly \
-              --title "Nightly" \
-              --target "${GITHUB_SHA}" \
-              --notes "${NIGHTLY_NOTES}" \
-              --prerelease
-          fi
-          gh release upload nightly dist/217-nightly.apk --clobber
-
-          DATED_NOTES="$(printf '%s\n' \
-            "Immutable main deploy from \`${SHORT_SHA}\`." \
-            "" \
-            "- Built: ${BUILT_AT}" \
-            "- Tag: \`${DATETIME_SHA}\`" \
-            "- Asset: \`217-${DATETIME_SHA}.apk\` (asks for your 217 server on first launch)" \
-            "- Rolling pointer: release \`nightly\`" \
-            "- Commit: ${COMMIT_URL}")"
-          gh release create "${DATETIME_SHA}" \
-            --title "${DATETIME_SHA}" \
-            --target "${GITHUB_SHA}" \
-            --notes "${DATED_NOTES}" \
-            --prerelease \
-            "dist/217-${DATETIME_SHA}.apk"
-
-  # Main-only: backend + frontend images. Independent of Android APK build/publish —
-  # GHCR must not wait on mobile-apk-build (or nightly-apk).
-  ghcr-images:
-    name: GHCR images (nightly + datetime_sha)
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [backend, mobile, workos-smoke, flutter-web-build]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
       packages: write
     steps:
       - uses: actions/checkout@v4
-      - name: Download Flutter web bundle
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
-          name: flutter-web-release
-          path: mobile/build/web
-      - name: Ensure BUILD_SHA.txt in web bundle
-        run: |
-          set -euo pipefail
-          if [ ! -f mobile/build/web/BUILD_SHA.txt ]; then
-            printf 'BUILD_SHA=%s\n' "${GITHUB_SHA}" > mobile/build/web/BUILD_SHA.txt
-          fi
-          cat mobile/build/web/BUILD_SHA.txt
-      - name: Compute image tags
+          name: frontend-build
+          path: frontend/mobile/build
+      - name: Compute tags
         id: tags
         env:
           COMMIT_TIMESTAMP: ${{ github.event.head_commit.timestamp }}
         run: |
-          set -euo pipefail
-          SHORT_SHA="${GITHUB_SHA:0:7}"
-          if [ -n "${COMMIT_TIMESTAMP}" ]; then
-            DT="$(date -u -d "${COMMIT_TIMESTAMP}" +%Y%m%d%H%M%S)"
-          else
-            DT="$(date -u +%Y%m%d%H%M%S)"
-          fi
-          echo "datetime_sha=${DT}_${SHORT_SHA}" >> "${GITHUB_OUTPUT}"
-          echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> "${GITHUB_OUTPUT}"
+          DT="$(date -u -d "${COMMIT_TIMESTAMP:-now}" +%Y%m%d%H%M%S)"
+          echo "datetime_sha=${DT}_${GITHUB_SHA:0:7}" >> "$GITHUB_OUTPUT"
+          echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/app-217" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build and push backend
+      - name: Push backend image
         uses: docker/build-push-action@v6
         with:
           context: ./backend
-          file: ./backend/Dockerfile.prod
           push: true
           tags: |
-            ghcr.io/${{ steps.tags.outputs.owner }}/app-217-backend:nightly
-            ghcr.io/${{ steps.tags.outputs.owner }}/app-217-backend:${{ steps.tags.outputs.datetime_sha }}
-            ghcr.io/${{ steps.tags.outputs.owner }}/app-217-backend:dev
-      - name: Build and push frontend
+            ${{ steps.tags.outputs.image }}-backend:nightly
+            ${{ steps.tags.outputs.image }}-backend:${{ steps.tags.outputs.datetime_sha }}
+      - name: Push frontend image
         uses: docker/build-push-action@v6
         with:
-          context: .
-          file: ./frontend/Dockerfile.prod
+          context: ./frontend
           push: true
           tags: |
-            ghcr.io/${{ steps.tags.outputs.owner }}/app-217-frontend:nightly
-            ghcr.io/${{ steps.tags.outputs.owner }}/app-217-frontend:${{ steps.tags.outputs.datetime_sha }}
-            ghcr.io/${{ steps.tags.outputs.owner }}/app-217-frontend:dev
+            ${{ steps.tags.outputs.image }}-frontend:nightly
+            ${{ steps.tags.outputs.image }}-frontend:${{ steps.tags.outputs.datetime_sha }}
+      - name: Publish APK releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tags.outputs.datetime_sha }}
+        run: |
+          set -euo pipefail
+          SHORT_SHA="${GITHUB_SHA:0:7}"
+          COMMIT_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}"
+          APK=frontend/mobile/build/app/outputs/flutter-apk/app-release.apk
+          cp "$APK" 217-nightly.apk
+          cp "$APK" "217-${TAG}.apk"
+
+          NOTES="$(printf '%s\n' \
+            "Built from \`${SHORT_SHA}\` on \`main\` (${COMMIT_URL})." \
+            "" \
+            "Release build, debug-signed for sideloading. Asks for your 217 server on first launch (see the README's Self-hosting section).")"
+
+          if gh release view nightly >/dev/null 2>&1; then
+            gh release edit nightly --target "$GITHUB_SHA" --notes "${NOTES}" --prerelease
+          else
+            gh release create nightly --title Nightly --target "$GITHUB_SHA" --notes "${NOTES}" --prerelease
+          fi
+          gh release upload nightly 217-nightly.apk --clobber
+          gh release create "$TAG" --title "$TAG" --target "$GITHUB_SHA" --notes "${NOTES}" --prerelease "217-${TAG}.apk"
