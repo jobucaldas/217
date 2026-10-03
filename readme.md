@@ -50,7 +50,7 @@ Every push to `main` (after CI is green) publishes APK + GHCR with the same dual
 | `mobile/` | Flutter client |
 | `backend/` | Go API |
 | `frontend/` | Caddy image that serves the Flutter web bundle |
-| `deploy/` | Kubernetes (kustomize) manifests; `overlays/dev` is the maintainer's own deployment, kept as an example |
+| `deploy/` | Kubernetes (kustomize) base manifests for self-hosting |
 | `dev/Containerfile` | Go toolchain image used by `make test-backend` |
 | `scripts/` | CI helpers |
 
@@ -102,7 +102,7 @@ Sign-in uses [WorkOS AuthKit](https://workos.com/docs/authkit) (free tier is eno
 ### 3. Run it
 
 - **Compose (simplest):** `docker-compose.yml` runs Postgres, the API and Caddy. Put the variables above in `.env.local`, build the web app with `make mobile-web`, then `make dev-up`. Change the default database password and serve it over HTTPS (for example a reverse proxy in front of port 8787, or Caddy itself with your domain in the `Caddyfile` and ports 80/443 published).
-- **Kubernetes:** `deploy/kustomize/base` has backend and frontend deployments plus a production `Caddyfile`; see `deploy/kustomize/overlays/dev` for a working overlay. Put `DATABASE_URL`, `WORKOS_API_KEY` and friends in a Secret.
+- **Kubernetes:** `deploy/kustomize/base` has backend and frontend deployments plus a production `Caddyfile`; add an overlay with your namespace, image tags, Postgres and ingress. Put `DATABASE_URL`, `WORKOS_API_KEY` and friends in a Secret.
 - **Images:** CI publishes `app-217-backend` and `app-217-frontend` images to GHCR on every push to `main`.
 
 Check it with `curl https://217.example.com/api/auth/config` — it should answer `{"authkit":true,...,"workos_client_id":"client_..."}`.
