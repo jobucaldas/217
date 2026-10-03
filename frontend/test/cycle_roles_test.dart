@@ -308,10 +308,19 @@ void main() {
       await tester.pumpAndSettle();
 
       final chip = find.byKey(const ValueKey('day-period-toggle'));
-      expect(find.descendant(of: chip, matching: find.text('Period')),
-          findsOneWidget);
+      // Sits in the header beside the notes button, not on its own row.
+      final notes = find.byTooltip('Add note');
+      expect(
+        (tester.getCenter(chip).dy - tester.getCenter(notes).dy).abs(),
+        lessThan(1),
+      );
+      expect(find.byTooltip('Period'), findsOneWidget);
+      expect(find.descendant(of: chip, matching: find.byIcon(Icons.water_drop)),
+          findsNothing);
       await tester.tap(chip);
       await tester.pumpAndSettle();
+      expect(find.descendant(of: chip, matching: find.byIcon(Icons.water_drop)),
+          findsOneWidget);
       expect(commits.single.period, isTrue);
       expect(commits.single.taken, isNull);
       expect(find.byKey(const ValueKey('day-period-toggle')), findsOneWidget);
