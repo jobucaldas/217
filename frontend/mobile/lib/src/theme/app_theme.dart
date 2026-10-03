@@ -7,26 +7,26 @@ export 'palette.dart';
 
 /// Status helpers used by calendar chrome (palette-aware).
 abstract final class App217Colors {
-  static Color statusTaken(Brightness b, [AppPalette palette = AppPalette.azure]) =>
+  static Color statusTaken(Brightness b, [AppPalette palette = AppPalette.blue]) =>
       PaletteColors.resolve(palette, b).taken;
 
-  static Color statusMissed(Brightness b, [AppPalette palette = AppPalette.azure]) =>
+  static Color statusMissed(Brightness b, [AppPalette palette = AppPalette.blue]) =>
       PaletteColors.resolve(palette, b).missed;
 
-  static Color cellTaken(Brightness b, [AppPalette palette = AppPalette.azure]) =>
+  static Color cellTaken(Brightness b, [AppPalette palette = AppPalette.blue]) =>
       PaletteColors.resolve(palette, b).takenFill;
 
-  static Color cellMissed(Brightness b, [AppPalette palette = AppPalette.azure]) =>
+  static Color cellMissed(Brightness b, [AppPalette palette = AppPalette.blue]) =>
       PaletteColors.resolve(palette, b).missedFill;
 
-  static Color onFilledCell(Brightness b, [AppPalette palette = AppPalette.azure]) =>
+  static Color onFilledCell(Brightness b, [AppPalette palette = AppPalette.blue]) =>
       PaletteColors.resolve(palette, b).onFilledCell;
 }
 
 /// Colors only — safe for unit tests (no Google Fonts / binding).
 ColorScheme buildApp217ColorScheme(
   Brightness brightness, {
-  AppPalette palette = AppPalette.azure,
+  AppPalette palette = AppPalette.blue,
 }) {
   final c = PaletteColors.resolve(palette, brightness);
   return ColorScheme(
@@ -63,13 +63,13 @@ ColorScheme buildApp217ColorScheme(
 
 Color scaffoldBackgroundFor(
   Brightness brightness, {
-  AppPalette palette = AppPalette.azure,
+  AppPalette palette = AppPalette.blue,
 }) =>
     PaletteColors.resolve(palette, brightness).scaffold;
 
 ThemeData buildApp217Theme({
   required Brightness brightness,
-  AppPalette palette = AppPalette.azure,
+  AppPalette palette = AppPalette.blue,
 }) {
   final scheme = buildApp217ColorScheme(brightness, palette: palette);
   final c = PaletteColors.resolve(palette, brightness);

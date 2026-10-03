@@ -3,43 +3,45 @@ import 'package:flutter/material.dart';
 /// Accent families for 217 chrome. Surfaces stay pinned neutrals;
 /// taken/missed stay semantic green/red.
 enum AppPalette {
-  /// Default vivid azure accent.
-  azure,
+  /// Default vivid blue accent.
+  blue,
 
-  /// Cyan/aqua accent (less green than classic mint).
-  mint,
+  /// Cyan/aqua accent.
+  cyan,
 
-  /// Vivid fuchsia-plum accent.
-  plum,
+  /// Vivid purple accent.
+  purple,
 }
 
 extension AppPaletteX on AppPalette {
   String get id => name;
 
-  /// Resolves stored ids. Legacy `forest` (and unknown) → [AppPalette.azure].
+  /// Resolves stored ids. Legacy ids (`azure`, `mint`, `plum`, `forest`) and
+  /// unknown values map to the current accents.
   static AppPalette fromId(String? raw) {
     switch (raw) {
+      case 'cyan':
       case 'mint':
-        return AppPalette.mint;
+        return AppPalette.cyan;
+      case 'purple':
       case 'plum':
-        return AppPalette.plum;
-      case 'azure':
+        return AppPalette.purple;
       case 'blue':
-        return AppPalette.azure;
+      case 'azure':
       case 'forest':
       default:
-        return AppPalette.azure;
+        return AppPalette.blue;
     }
   }
 
   /// Swatch shown in the settings picker.
   Color get swatch {
     switch (this) {
-      case AppPalette.azure:
+      case AppPalette.blue:
         return const Color(0xFF2563EB);
-      case AppPalette.mint:
+      case AppPalette.cyan:
         return const Color(0xFF0891B2);
-      case AppPalette.plum:
+      case AppPalette.purple:
         return const Color(0xFFC026D3);
     }
   }
@@ -115,12 +117,12 @@ class PaletteColors {
 
   static _Accent _accentFor(AppPalette palette, bool dark) {
     switch (palette) {
-      case AppPalette.azure:
-        return dark ? _azureDark : _azureLight;
-      case AppPalette.mint:
-        return dark ? _mintDark : _mintLight;
-      case AppPalette.plum:
-        return dark ? _plumDark : _plumLight;
+      case AppPalette.blue:
+        return dark ? _blueDark : _blueLight;
+      case AppPalette.cyan:
+        return dark ? _cyanDark : _cyanLight;
+      case AppPalette.purple:
+        return dark ? _purpleDark : _purpleLight;
     }
   }
 
@@ -149,39 +151,39 @@ class PaletteColors {
   static const _takenFillDark = Color(0xFF14532D);
   static const _missedFillDark = Color(0xFF7F1D1D);
 
-  static const _azureLight = _Accent(
+  static const _blueLight = _Accent(
     primary: Color(0xFF2563EB),
     onPrimary: Colors.white,
     primaryContainer: Color(0xFFDBEAFE),
     onPrimaryContainer: Color(0xFF1E3A8A),
   );
-  static const _azureDark = _Accent(
+  static const _blueDark = _Accent(
     primary: Color(0xFF60A5FA),
     onPrimary: Color(0xFF0B1220),
     primaryContainer: Color(0xFF1E3A8A),
     onPrimaryContainer: Color(0xFFDBEAFE),
   );
 
-  static const _mintLight = _Accent(
+  static const _cyanLight = _Accent(
     primary: Color(0xFF0891B2),
     onPrimary: Colors.white,
     primaryContainer: Color(0xFFCFFAFE),
     onPrimaryContainer: Color(0xFF164E63),
   );
-  static const _mintDark = _Accent(
+  static const _cyanDark = _Accent(
     primary: Color(0xFF22D3EE),
     onPrimary: Color(0xFF083344),
     primaryContainer: Color(0xFF155E75),
     onPrimaryContainer: Color(0xFFCFFAFE),
   );
 
-  static const _plumLight = _Accent(
+  static const _purpleLight = _Accent(
     primary: Color(0xFFC026D3),
     onPrimary: Colors.white,
     primaryContainer: Color(0xFFFAE8FF),
     onPrimaryContainer: Color(0xFF701A75),
   );
-  static const _plumDark = _Accent(
+  static const _purpleDark = _Accent(
     primary: Color(0xFFE879F9),
     onPrimary: Color(0xFF4A044E),
     primaryContainer: Color(0xFF86198F),

@@ -130,12 +130,12 @@ class _SettingsPageState extends State<SettingsPage> {
 
   String _paletteLabel(AppPalette p) {
     switch (p) {
-      case AppPalette.azure:
-        return widget.strings.paletteAzure;
-      case AppPalette.mint:
-        return widget.strings.paletteMint;
-      case AppPalette.plum:
-        return widget.strings.palettePlum;
+      case AppPalette.blue:
+        return widget.strings.paletteBlue;
+      case AppPalette.cyan:
+        return widget.strings.paletteCyan;
+      case AppPalette.purple:
+        return widget.strings.palettePurple;
     }
   }
 

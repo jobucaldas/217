@@ -19,7 +19,7 @@ void main() {
           MaterialApp(
             theme: buildApp217Theme(
               brightness: brightness,
-              palette: AppPalette.azure,
+              palette: AppPalette.blue,
             ),
             home: StatefulBuilder(
               builder: (context, setState) => SettingsPage(
@@ -27,7 +27,7 @@ void main() {
                 strings: Strings(language),
                 language: language,
                 themeMode: ThemeMode.system,
-                palette: AppPalette.azure,
+                palette: AppPalette.blue,
                 onLanguageChanged: (l) => setState(() => language = l),
                 onThemeModeChanged: (_) {},
                 onPaletteChanged: (_) {},
@@ -87,14 +87,14 @@ void main() {
       MaterialApp(
         theme: buildApp217Theme(
           brightness: Brightness.light,
-          palette: AppPalette.azure,
+          palette: AppPalette.blue,
         ),
         home: SettingsPage(
           api: api,
           strings: const Strings(AppLanguage.en),
           language: AppLanguage.en,
           themeMode: ThemeMode.system,
-          palette: AppPalette.azure,
+          palette: AppPalette.blue,
           onLanguageChanged: (_) {},
           onThemeModeChanged: (_) {},
           onPaletteChanged: (_) {},

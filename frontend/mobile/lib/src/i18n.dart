@@ -211,9 +211,9 @@ class Strings {
   String get themeLight => _t('Light', 'Claro', 'Claro');
   String get themeDark => _t('Dark', 'Escuro', 'Oscuro');
   String get colorTheme => _t('Accent', 'Cor de destaque', 'Color de acento');
-  String get paletteAzure => _t('Azure', 'Azul', 'Azul');
-  String get paletteMint => _t('Mint', 'Menta', 'Menta');
-  String get palettePlum => _t('Plum', 'Ameixa', 'Ciruela');
+  String get paletteBlue => _t('Blue', 'Azul', 'Azul');
+  String get paletteCyan => _t('Cyan', 'Ciano', 'Cian');
+  String get palettePurple => _t('Purple', 'Roxo', 'Morado');
   String get today => _t('Today', 'Hoje', 'Hoy');
   String get previousMonth =>
       _t('Previous month', 'Mês anterior', 'Mes anterior');

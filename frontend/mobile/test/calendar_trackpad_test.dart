@@ -31,7 +31,7 @@ Future<void> _pumpCalendar(WidgetTester tester, {Size size = const Size(390, 844
     MaterialApp(
       theme: buildApp217Theme(
         brightness: Brightness.light,
-        palette: AppPalette.azure,
+        palette: AppPalette.blue,
       ),
       home: MediaQuery(
         data: MediaQueryData(size: size),
@@ -44,7 +44,7 @@ Future<void> _pumpCalendar(WidgetTester tester, {Size size = const Size(390, 844
           ),
           strings: const Strings(AppLanguage.en),
           onOpenSettings: () {},
-          palette: AppPalette.azure,
+          palette: AppPalette.blue,
         ),
       ),
     ),

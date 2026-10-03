@@ -40,8 +40,17 @@ void main() {
           tester.getSize(find.byKey(const ValueKey('today-nudge-control')));
       expect(size.height, TodayNudge.height);
       // Hugs text — not a stretched wide bar.
-      expect(size.width, lessThan(240));
-      expect(size.width, greaterThan(120));
+      expect(size.width, lessThan(300));
+      expect(size.width, greaterThan(160));
+
+      // Roomy pill: 48dp tap target and generous side padding around the text.
+      final pill = tester.getRect(find.byType(InkWell).first);
+      final text = tester.getRect(find.text('Atualizar hoje'));
+      expect(pill.height, greaterThanOrEqualTo(48));
+      expect(text.left - pill.left, greaterThanOrEqualTo(20));
+      expect(pill.right - text.right, greaterThanOrEqualTo(20));
+      expect(text.top - pill.top, greaterThanOrEqualTo(12));
+      expect(pill.bottom - text.bottom, greaterThanOrEqualTo(12));
 
       // Default right edge → plus on top-right corner.
       final plusCenter = tester.getCenter(find.byIcon(Icons.add));

@@ -13,7 +13,7 @@ void main() {
         MaterialApp(
           theme: buildApp217Theme(
             brightness: brightness,
-            palette: AppPalette.azure,
+            palette: AppPalette.blue,
           ),
           home: const Scaffold(
             body: DayEditorSheet(
