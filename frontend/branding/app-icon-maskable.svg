@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <rect width="1024" height="1024" fill="#121212"/>
+  <g transform="translate(512,512) scale(0.8) translate(-512,-512)">
   <path transform="translate(512,268) scale(1.32, 1.88)" fill="#FB7185"
     d="M0,8 C-105,-78 -195,-48 -195,32 C-195,112 -38,188 0,228 C38,188 195,112 195,32 C195,-48 105,-78 0,8 Z"/>
   <path transform="translate(339,284.7) scale(1.85)" fill="#FFFFFF"
@@ -9,5 +10,6 @@
     <rect x="-140" y="-42" width="280" height="84" rx="42" fill="#F1F5F9"/>
     <path d="M0,-42 H98 A42,42 0 0 1 98,42 H0 Z" fill="#38BDF8"/>
     <rect x="-3" y="-42" width="6" height="84" fill="#94A3B8" opacity="0.45"/>
+  </g>
   </g>
 </svg>
