@@ -1338,8 +1338,8 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
                         right: -4,
                         top: -4,
                         child: Icon(
-                          Icons.add_circle,
-                          size: 14,
+                          Icons.add,
+                          size: 18,
                           color: scheme.primary,
                         ),
                       ),
