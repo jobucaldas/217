@@ -5,7 +5,7 @@ Everything runs in containers through Docker Compose (Podman works too). Do not 
 ## Run the stack from local code
 
 ```sh
-cp .env.example .env     # set WORKOS_API_KEY; the client ID is public
+cp .env.example .env     # set WORKOS_CLIENT_ID and WORKOS_API_KEY from your own WorkOS project
 docker compose up --build
 ```
 
@@ -16,7 +16,7 @@ Open <http://localhost:8787/>. This starts Postgres, the Go API (`go run` on the
 | `backend/` | `docker compose restart backend` |
 | `frontend/` | `docker compose up --build -d web` |
 
-Register `http://localhost:8787/api/auth/workos/callback` as a redirect URI in WorkOS. Change the port with `HTTP_PORT` and a matching `APP_BASE_URL`. Stop with `docker compose down` (`-v` also wipes the database).
+Sign-in needs your own [WorkOS](https://workos.com) project (AuthKit enabled); register `http://localhost:8787/api/auth/workos/callback` as a redirect URI there. Without it the stack runs but nobody can sign in. Change the port with `HTTP_PORT` and a matching `APP_BASE_URL`. Stop with `docker compose down` (`-v` also wipes the database).
 
 ## Checks
 

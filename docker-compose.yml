@@ -2,7 +2,7 @@
 #   docker compose up --build        # http://localhost:8787
 #   docker compose run --rm test-backend
 # Running 217 rather than hacking on it? Use the compose file in the README.
-name: app-217
+name: "217"
 
 services:
   postgres:
@@ -29,7 +29,7 @@ services:
     environment:
       DATABASE_URL: "postgres://app_217:app_217@postgres:5432/app_217?sslmode=disable"
       WORKOS_API_KEY: "${WORKOS_API_KEY:-}"
-      WORKOS_CLIENT_ID: "${WORKOS_CLIENT_ID:-client_01M3QCMK75B35RPC8EAJA5GREP}"
+      WORKOS_CLIENT_ID: "${WORKOS_CLIENT_ID:-}"
       APP_BASE_URL: "${APP_BASE_URL:-http://localhost:8787}"
       VAPID_PUBLIC_KEY: "${VAPID_PUBLIC_KEY:-}"
       VAPID_PRIVATE_KEY: "${VAPID_PRIVATE_KEY:-}"
@@ -49,8 +49,6 @@ services:
     build:
       context: ./frontend
       target: local
-      args:
-        WORKOS_CLIENT_ID: "${WORKOS_CLIENT_ID:-client_01M3QCMK75B35RPC8EAJA5GREP}"
     ports:
       # HTTP_PORT must match the port in APP_BASE_URL and the WorkOS redirect URI.
       - "${HTTP_PORT:-8787}:8787"
@@ -85,14 +83,13 @@ services:
     image: ghcr.io/cirruslabs/flutter:stable
     environment:
       API_BASE_URL: "${API_BASE_URL:-http://10.0.2.2:8787}"
-      WORKOS_CLIENT_ID: "${WORKOS_CLIENT_ID:-client_01M3QCMK75B35RPC8EAJA5GREP}"
     volumes:
       - ./frontend:/workspace:Z
     working_dir: /workspace
     command:
       - bash
       - -lc
-      - git config --global --add safe.directory /sdks/flutter; flutter pub get && flutter build apk --debug --dart-define=API_BASE_URL="$$API_BASE_URL" --dart-define=WORKOS_CLIENT_ID="$$WORKOS_CLIENT_ID"
+      - git config --global --add safe.directory /sdks/flutter; flutter pub get && flutter build apk --debug --dart-define=API_BASE_URL="$$API_BASE_URL"
 
   vapid-keys:
     profiles: [tools]

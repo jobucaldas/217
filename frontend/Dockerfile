@@ -8,14 +8,12 @@
 
 ARG FLUTTER_IMAGE=ghcr.io/cirruslabs/flutter:stable
 FROM ${FLUTTER_IMAGE} AS web-build
-ARG WORKOS_CLIENT_ID=client_01M3QCMK75B35RPC8EAJA5GREP
 WORKDIR /app
 COPY pubspec.yaml pubspec.lock ./
 COPY packages packages
 RUN git config --global --add safe.directory /sdks/flutter && flutter pub get
 COPY . .
-RUN flutter build web --release --no-web-resources-cdn \
-    --dart-define=WORKOS_CLIENT_ID="$WORKOS_CLIENT_ID"
+RUN flutter build web --release --no-web-resources-cdn
 
 FROM docker.io/library/caddy:alpine AS runtime
 RUN adduser -D -H -u 65532 -g nonroot nonroot \

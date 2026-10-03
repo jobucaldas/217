@@ -41,7 +41,7 @@ flutter build linux --release     # on Linux: clang cmake ninja-build libgtk-3-d
 | Define | Default | Notes |
 |---|---|---|
 | `API_BASE_URL` | web: same-origin; Android debug: `http://10.0.2.2:8787`; desktop debug: `http://localhost:8787`; release apps: none | Emulator → host Caddy. Release apps without it ask for a server on first launch |
-| `WORKOS_CLIENT_ID` | staging public client id | Fallback only: Android signs in with the client id the server reports at `/api/auth/config` |
+| `WORKOS_CLIENT_ID` | none | Optional fallback: the apps sign in with the client ID the server reports at `/api/auth/config` |
 | `WORKOS_REDIRECT_URI` | Android `com.jobucaldas.a217://auth/callback`; desktop `http://localhost:21717/auth/callback` | Native sign-in callback |
 | `SELF_HOST_GUIDE_URL` | repo README `#self-hosting` | Linked from the web sign-in card and the Android server setting |
 

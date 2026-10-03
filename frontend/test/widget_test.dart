@@ -94,9 +94,9 @@ void main() {
     expect(find.text('Sign in'), findsOneWidget);
   });
 
-  test('config defaults expose public WorkOS client id only', () {
+  test('config defaults bake in no WorkOS client id', () {
     final config = AppConfig.fromEnvironment();
-    expect(config.workosClientId.startsWith('client_'), isTrue);
+    expect(config.workosClientId, isEmpty);
     expect(config.redirectUri, 'com.jobucaldas.a217://auth/callback');
   });
 }

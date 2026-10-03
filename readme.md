@@ -10,7 +10,7 @@ Your calendar lives on a server you run. You only need Docker; no clone of this 
 
 ## Run your own server
 
-**1. WorkOS.** Create a project at [WorkOS](https://workos.com/docs/authkit) and enable AuthKit (free tier is enough). Copy the **Client ID** (public) and an **API key** (secret). Add these redirect URIs, with your public address:
+**1. WorkOS.** You bring your own sign-in: create a project at [WorkOS](https://workos.com/docs/authkit) and enable AuthKit (free tier is enough). Copy the **Client ID** (public) and an **API key** (secret). Nothing of the maintainers' is built in, and the apps pick up your client ID from your server. Add these redirect URIs, with your public address:
 
 - `https://217.example.com/api/auth/workos/callback` (web)
 - `com.jobucaldas.a217://auth/callback` (Android)
@@ -21,7 +21,7 @@ Optional: upload `frontend/branding/logo-217-light.svg` / `logo-217-dark.svg` un
 **2. Save this as `compose.yaml`:**
 
 ```yaml
-name: app-217
+name: "217"
 
 services:
   postgres:
@@ -40,7 +40,7 @@ services:
     restart: unless-stopped
 
   backend:
-    image: ghcr.io/jobucaldas/app-217-backend:nightly
+    image: ghcr.io/jobucaldas/217-backend:nightly
     environment:
       DATABASE_URL: postgres://app_217:${POSTGRES_PASSWORD}@postgres:5432/app_217?sslmode=disable
       APP_BASE_URL: ${APP_BASE_URL:?set APP_BASE_URL in .env}
@@ -52,7 +52,7 @@ services:
     restart: unless-stopped
 
   web:
-    image: ghcr.io/jobucaldas/app-217-frontend:nightly
+    image: ghcr.io/jobucaldas/217-frontend:nightly
     environment:
       SITE_ADDRESS: ${SITE_ADDRESS:-:8787}
     ports:
