@@ -381,7 +381,7 @@ func (h *Handler) WorkOSOAuthCallback(w http.ResponseWriter, r *http.Request) {
 }
 
 // ExchangeWorkOS handles native (Flutter) AuthKit PKCE completion.
-// The mobile app opens AuthKit with a custom-scheme redirect, then posts code+verifier here.
+// Native apps open AuthKit with a custom-scheme (Android) or loopback (desktop) redirect, then posts code+verifier here.
 func (h *Handler) ExchangeWorkOS(w http.ResponseWriter, r *http.Request) {
 	if h.oauthProvider == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "oauth not configured"})
@@ -396,7 +396,7 @@ func (h *Handler) ExchangeWorkOS(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
 		return
 	}
-	if body.RedirectURI != auth.NativeAuthRedirectURI {
+	if !auth.IsNativeRedirectURI(body.RedirectURI) {
 		http.Error(w, `{"error":"invalid redirect uri"}`, http.StatusBadRequest)
 		return
 	}

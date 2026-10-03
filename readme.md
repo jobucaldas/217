@@ -2,7 +2,7 @@
 
 Anticonceptional (birth control) intake tracker with a shared calendar, in English, Português and Español.
 
-- **Client:** Flutter (web + Android)
+- **Client:** Flutter (web, Android, Windows, Linux)
 - **API:** Go + PostgreSQL
 - **Auth:** WorkOS AuthKit (PKCE; API key server-side only)
 
@@ -18,10 +18,11 @@ Copy `.env.example` to ignored `.env.local`. Set `WORKOS_API_KEY` from the WorkO
 
 - `http://localhost:8787/api/auth/workos/callback` (browser)
 - `com.jobucaldas.a217://auth/callback` (Android)
+- `http://localhost:21717/auth/callback` (Windows and Linux)
 
 ```sh
 make dev-up       # postgres + Go API + Caddy
-make mobile-web   # Flutter web → frontend/mobile/build/web
+make web   # Flutter web → frontend/build/web
 ```
 
 Open <http://localhost:8787/>. Stop with `make dev-down`.
@@ -31,33 +32,44 @@ Host port defaults to **8787** (`HTTP_PORT` / matching `APP_BASE_URL` to overrid
 ## Android
 
 ```sh
-make test-mobile
-make mobile-apk
+make test-frontend
+make apk
 ```
 
-Install `frontend/mobile/build/app/outputs/flutter-apk/app-debug.apk`. Emulator API base defaults to `http://10.0.2.2:8787` (`--dart-define=API_BASE_URL=...` to override at build time, or **Settings → Advanced options → Self-hosted server URL** in the app).
+Install `frontend/build/app/outputs/flutter-apk/app-debug.apk`. Emulator API base defaults to `http://10.0.2.2:8787` (`--dart-define=API_BASE_URL=...` to override at build time, or **Settings → Advanced options → Self-hosted server URL** in the app).
 
 The published APK has **no built-in server**: on first launch it asks for the address of a 217 server (see [Self-hosting](#self-hosting)), or an invite link from someone who runs one. Release builds only connect over `https://`.
 
-Every push to `main` (after CI is green) publishes APK + GHCR with the same dual names:
-- **nightly** — rolling GitHub Release (`217-nightly.apk`) and GHCR tag `:nightly`
-- **datetime_sha** — immutable GitHub Release `YYYYMMDDHHMMSS_<shortsha>` (`217-<tag>.apk`) and matching GHCR tags
+## Windows and Linux
+
+The desktop apps work like the Android one: no built-in server, so they ask for yours on first launch, and sign-in goes through the system browser and returns to a local `http://localhost:21717/auth/callback` listener.
+
+- **Windows:** run `217-nightly-setup.exe` (per-user install, unsigned, so SmartScreen may warn).
+- **Linux:** `chmod +x 217-nightly-x86_64.AppImage` and run it. Needs a Secret Service keyring (GNOME Keyring, KWallet) to store the session.
+
+Both are on [GitHub Releases](https://github.com/jobucaldas/217/releases/tag/nightly). Build them yourself with `flutter build windows|linux --release` inside `frontend/` (on the matching OS); `frontend/packaging/` wraps the output into the installer and AppImage.
+
+## Releases
+
+Every push to `main` (after CI is green) publishes the APK, Windows installer, AppImage and GHCR images with the same dual names:
+- **nightly** — rolling GitHub Release (`217-nightly.apk`, `217-nightly-setup.exe`, `217-nightly-x86_64.AppImage`) and GHCR tag `:nightly`
+- **datetime_sha** — immutable GitHub Release `YYYYMMDDHHMMSS_<shortsha>` (`217-<tag>.<ext>`) and matching GHCR tags
 
 ## Layout
 
 | Path | Role |
 |---|---|
 | `backend/` | Go API; its `Dockerfile` has a `dev` stage (toolchain for compose and `make test-backend`) and the production image |
-| `frontend/` | Web/Android client: `mobile/` is the Flutter app, `Dockerfile` packages its web bundle, `Caddyfile` is the local proxy |
+| `frontend/` | Flutter client for web, Android, Windows and Linux; `Dockerfile` packages the web bundle, `Caddyfile` is the local proxy |
 | `docker-compose.yml` | Local stack: Postgres + API + Caddy |
-| `.github/workflows/ci.yml` | Backend and Flutter checks; on `main`, publishes GHCR images and the APK |
+| `.github/workflows/ci.yml` | Backend and Flutter checks; on `main`, publishes GHCR images, the APK, Windows installer and AppImage |
 
 ## Validate
 
 ```sh
 make test-backend
-make test-mobile
-make mobile-web
+make test-frontend
+make web
 ```
 
 ## Security
@@ -85,7 +97,7 @@ Sign-in uses [WorkOS AuthKit](https://workos.com/docs/authkit) (free tier is eno
 3. Add redirect URIs for your public address, for example:
    - `https://217.example.com/api/auth/workos/callback` (web)
    - `com.jobucaldas.a217://auth/callback` (Android app)
-4. Optional branding: in **Branding**, upload `frontend/mobile/branding/logo-217-light.svg` (light) and `logo-217-dark.svg` (dark) so the hosted sign-in page shows the 217 wordmark in the app's typeface instead of the app name in WorkOS's default font.
+4. Optional branding: in **Branding**, upload `frontend/branding/logo-217-light.svg` (light) and `logo-217-dark.svg` (dark) so the hosted sign-in page shows the 217 wordmark in the app's typeface instead of the app name in WorkOS's default font.
 
 ### 2. Configure the server
 
@@ -100,7 +112,7 @@ Sign-in uses [WorkOS AuthKit](https://workos.com/docs/authkit) (free tier is eno
 
 ### 3. Run it
 
-- **Compose (simplest):** `docker-compose.yml` runs Postgres, the API and Caddy. Put the variables above in `.env.local`, build the web app with `make mobile-web`, then `make dev-up`. Change the default database password and serve it over HTTPS (for example a reverse proxy in front of port 8787, or Caddy itself with your domain in `frontend/Caddyfile` and ports 80/443 published).
+- **Compose (simplest):** `docker-compose.yml` runs Postgres, the API and Caddy. Put the variables above in `.env.local`, build the web app with `make web`, then `make dev-up`. Change the default database password and serve it over HTTPS (for example a reverse proxy in front of port 8787, or Caddy itself with your domain in `frontend/Caddyfile` and ports 80/443 published).
 - **Images:** CI publishes `app-217-backend` (the API) and `app-217-frontend` (the web bundle in `/app/dist`, to serve with Caddy next to the API) to GHCR on every push to `main`. Put `DATABASE_URL`, `WORKOS_API_KEY` and friends in your orchestrator's secrets.
 
 Check it with `curl https://217.example.com/api/auth/config` — it should answer `{"authkit":true,...,"workos_client_id":"client_..."}`.
@@ -115,6 +127,6 @@ Check it with `curl https://217.example.com/api/auth/config` — it should answe
   Prefer an APK with your server built in (no setup step)? Build one:
 
   ```sh
-  API_BASE_URL=https://217.example.com make mobile-apk
+  API_BASE_URL=https://217.example.com make apk
   ```
 

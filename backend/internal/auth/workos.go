@@ -20,6 +20,15 @@ const workosAPIDefault = "https://api.workos.com"
 // Custom schemes are not exclusive across apps, so this allowlist is not a substitute for PKCE.
 const NativeAuthRedirectURI = "com.jobucaldas.a217://auth/callback"
 
+// DesktopAuthRedirectURI is the loopback callback the Windows and Linux apps listen on
+// while the system browser completes AuthKit (RFC 8252 section 7.3).
+const DesktopAuthRedirectURI = "http://localhost:21717/auth/callback"
+
+// IsNativeRedirectURI reports whether uri is a callback registered for a native client.
+func IsNativeRedirectURI(uri string) bool {
+	return uri == NativeAuthRedirectURI || uri == DesktopAuthRedirectURI
+}
+
 // WorkOSOAuth is an AuthKit authorization-code client using PKCE.
 // Native exchange uses the public client_id + code_verifier path (no API key required).
 type WorkOSOAuth struct {
@@ -94,7 +103,7 @@ func (w *WorkOSOAuth) ExchangeWithRedirect(ctx context.Context, code, codeVerifi
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	if redirectURI != w.redirectURI && redirectURI != NativeAuthRedirectURI {
+	if redirectURI != w.redirectURI && !IsNativeRedirectURI(redirectURI) {
 		return nil, fmt.Errorf("redirect uri is not registered")
 	}
 	// Public PKCE client: code_verifier is the only client authenticator.

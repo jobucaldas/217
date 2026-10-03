@@ -1,0 +1,17 @@
+name: desktop_webview_window
+description: >-
+  Native-free stand-in for desktop_webview_window, wired in through
+  dependency_overrides. flutter_web_auth_2 imports it for an embedded sign-in
+  window on Windows/Linux that 217 never opens (it signs in through the system
+  browser with a loopback callback), but the real plugin would still link
+  WebKitGTK into the Linux build.
+version: 0.2.3
+publish_to: none
+
+environment:
+  sdk: ">=3.5.0 <4.0.0"
+  flutter: ">=3.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter

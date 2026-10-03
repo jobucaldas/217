@@ -56,8 +56,8 @@ services:
       # Override with HTTP_PORT=... if 8787 is taken on the host.
       - "${HTTP_PORT:-8787}:8787"
     volumes:
-      # Flutter web release build (`make mobile-web`).
-      - ./frontend/mobile/build/web:/srv/web:Z
+      # Flutter web release build (`make web`).
+      - ./frontend/build/web:/srv/web:Z
       - ./frontend/Caddyfile:/etc/caddy/Caddyfile:Z
     depends_on:
       - backend
