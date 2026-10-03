@@ -82,7 +82,7 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(find.byType(AlertDialog), findsOneWidget);
-        expect(find.byKey(const ValueKey('note-heart-toggle')), findsOneWidget);
+        expect(find.byKey(const ValueKey('note-heart-toggle')), findsNothing);
         // Cancel removed — outside/barrier dismisses.
         expect(find.text('Cancel'), findsNothing);
 
@@ -94,21 +94,24 @@ void main() {
         expect(contrast, greaterThan(0.25));
 
         await tester.enterText(find.byType(TextField), 'hello note');
-        await tester.tap(find.byKey(const ValueKey('note-heart-toggle')));
-        await tester.pumpAndSettle();
-        expect(find.byIcon(Icons.favorite), findsWidgets);
-
         await tester.tap(find.text('Done'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('day-heart-toggle')));
         await tester.pumpAndSettle();
 
         expect(find.byType(AlertDialog), findsNothing);
         // Embedded sheet (no modal): state updates in place; icons show.
         expect(find.byIcon(Icons.sticky_note_2), findsOneWidget);
         expect(find.byIcon(Icons.favorite), findsOneWidget);
-        final sheetHeart =
-            tester.widget<Icon>(find.byIcon(Icons.favorite).first);
-        expect(sheetHeart.color, scheme.primary);
-        expect(sheetHeart.color, isNot(const Color(0xFFE11D48)));
+        final heartButton = tester.widget<IconButton>(find.descendant(
+          of: find.byKey(const ValueKey('day-heart-toggle')),
+          matching: find.byType(IconButton),
+        ));
+        expect(
+          heartButton.style?.backgroundColor
+              ?.resolve({WidgetState.selected}),
+          scheme.primary,
+        );
         expect(find.text('Taken'), findsOneWidget);
         expect(find.text('Cancel'), findsNothing);
         expect(find.text('Save'), findsNothing);
@@ -203,9 +206,9 @@ void main() {
     await tester.tap(find.text('open'));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('Add note'));
+    await tester.tap(find.byKey(const ValueKey('day-heart-toggle')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('note-heart-toggle')));
+    await tester.tap(find.byTooltip('Add note'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Done'));
     await tester.pumpAndSettle();
@@ -267,11 +270,11 @@ void main() {
     await tester.tap(find.text('open'));
     await tester.pumpAndSettle();
 
+    await tester.tap(find.byKey(const ValueKey('day-heart-toggle')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Add note'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), 'keep me');
-    await tester.tap(find.byKey(const ValueKey('note-heart-toggle')));
-    await tester.pumpAndSettle();
     await tester.tap(find.text('Done'));
     await tester.pumpAndSettle();
 
@@ -377,7 +380,7 @@ void main() {
     expect(result?.clear, isTrue);
   });
 
-  testWidgets('note Done with existing status commits note + heart alone',
+  testWidgets('heart toggle with existing status commits the heart',
       (tester) async {
     DayEditResult? result;
     await tester.pumpWidget(
@@ -414,19 +417,13 @@ void main() {
 
     expect(find.text('Cancel'), findsNothing);
 
-    await tester.tap(find.byTooltip('Add note'));
-    await tester.pumpAndSettle();
-    expect(find.text('Cancel'), findsNothing);
-    await tester.enterText(find.byType(TextField), 'solo note');
-    await tester.tap(find.byKey(const ValueKey('note-heart-toggle')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Done'));
+    await tester.tap(find.byKey(const ValueKey('day-heart-toggle')));
     await tester.pumpAndSettle();
 
-    // Done alone persists — no Taken/Missed re-tap, no Save.
+    // The toggle alone persists — no Taken/Missed re-tap, no Save.
     expect(result?.clear, isFalse);
     expect(result?.taken, isTrue);
-    expect(result?.notes, 'solo note');
+    expect(result?.notes, '');
     expect(result?.heart, isTrue);
   });
 
@@ -471,15 +468,16 @@ void main() {
     await tester.tap(find.text('open'));
     await tester.pumpAndSettle();
 
+    await tester.tap(find.byKey(const ValueKey('day-heart-toggle')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Note'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), 'status unchanged');
-    await tester.tap(find.byKey(const ValueKey('note-heart-toggle')));
-    await tester.pumpAndSettle();
     await tester.tap(find.text('Done'));
     await tester.pumpAndSettle();
 
-    expect(commitCount, 1);
+    // One commit for the heart, one for the note.
+    expect(commitCount, 2);
     expect(committed?.clear, isFalse);
     expect(committed?.taken, isTrue);
     expect(committed?.notes, 'status unchanged');
@@ -528,11 +526,11 @@ void main() {
     await tester.tap(find.text('open'));
     await tester.pumpAndSettle();
 
+    await tester.tap(find.byKey(const ValueKey('day-heart-toggle')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Note'));
     await tester.pumpAndSettle();
     // Heart only — leave note text alone, do not touch Missed.
-    await tester.tap(find.byKey(const ValueKey('note-heart-toggle')));
-    await tester.pumpAndSettle();
     await tester.tap(find.text('Done'));
     await tester.pumpAndSettle();
 

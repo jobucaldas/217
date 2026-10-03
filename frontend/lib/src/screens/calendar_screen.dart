@@ -1130,12 +1130,12 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
         period: _period,
       );
 
-  /// Period toggles persist at once and keep the sheet open, like notes.
-  void _togglePeriod(bool value) {
-    setState(() => _period = value);
+  /// Heart and period toggles persist at once and keep the sheet open, like
+  /// notes.
+  void _persistToggle() {
     final status = _taken ?? widget.initialTaken;
     final DayEditResult result;
-    if (!value && status == null && _notes.trim().isEmpty && !_heart) {
+    if (status == null && _notes.trim().isEmpty && !_heart && !_period) {
       if (!_hadEntry) return;
       result = const DayEditResult.clear();
       _hadEntry = false;
@@ -1150,6 +1150,16 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
       // Test harness without onCommit: return the result via sheet pop.
       Navigator.pop(context, result);
     }
+  }
+
+  void _toggleHeart() {
+    setState(() => _heart = !_heart);
+    _persistToggle();
+  }
+
+  void _togglePeriod() {
+    setState(() => _period = !_period);
+    _persistToggle();
   }
 
   void _emit(DayEditResult result) {
@@ -1205,25 +1215,23 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
     // Capture before the dialog await — sheet may unmount on web when the
     // nested route settles, and we still must persist note/heart.
     final onCommit = widget.onCommit;
-    final result = await showDialog<_NoteDialogResult>(
+    final result = await showDialog<String>(
       context: context,
       useRootNavigator: true,
       builder: (context) => _NoteDialog(
         strings: widget.strings,
         initialNotes: _notes,
-        initialHeart: _heart,
       ),
     );
     if (result == null) return;
 
-    final notes = result.notes;
-    final heart = result.heart;
+    final notes = result;
+    final heart = _heart;
     final status = _taken ?? widget.initialTaken;
 
     if (mounted) {
       setState(() {
         _notes = notes;
-        _heart = heart;
         if (status != null) _taken = status;
       });
     }
@@ -1289,31 +1297,28 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
                   style: Theme.of(context).textTheme.headlineMedium,
                 ),
               ),
-              if (_heart)
-                Padding(
-                  padding: const EdgeInsets.only(right: 4),
-                  child: Icon(Icons.favorite, color: scheme.primary, size: 20),
-                ),
-              IconButton(
+              _MarkButton(
+                key: const ValueKey('day-heart-toggle'),
+                tooltip: _heart
+                    ? widget.strings.heartMarked
+                    : widget.strings.heartMark,
+                selected: _heart,
+                color: scheme.primary,
+                ink: scheme.onPrimary,
+                icon: Icons.favorite_border,
+                selectedIcon: Icons.favorite,
+                onPressed: _toggleHeart,
+              ),
+              const SizedBox(width: 4),
+              _MarkButton(
                 key: const ValueKey('day-period-toggle'),
                 tooltip: widget.strings.periodLabel,
-                isSelected: _period,
-                onPressed: () => _togglePeriod(!_period),
-                // Marked days are solid, like the drop drawn on the calendar.
-                style: ButtonStyle(
-                  backgroundColor: WidgetStateProperty.resolveWith(
-                    (states) => states.contains(WidgetState.selected)
-                        ? periodColor
-                        : periodColor.withValues(alpha: 0.16),
-                  ),
-                  foregroundColor: WidgetStateProperty.resolveWith(
-                    (states) => states.contains(WidgetState.selected)
-                        ? periodInk
-                        : periodColor,
-                  ),
-                ),
-                icon: const Icon(Icons.water_drop_outlined),
-                selectedIcon: const Icon(Icons.water_drop),
+                selected: _period,
+                color: periodColor,
+                ink: periodInk,
+                icon: Icons.water_drop_outlined,
+                selectedIcon: Icons.water_drop,
+                onPressed: _togglePeriod,
               ),
               const SizedBox(width: 4),
               IconButton.filledTonal(
@@ -1365,23 +1370,11 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
   }
 }
 
-class _NoteDialogResult {
-  const _NoteDialogResult({required this.notes, required this.heart});
-
-  final String notes;
-  final bool heart;
-}
-
 class _NoteDialog extends StatefulWidget {
-  const _NoteDialog({
-    required this.strings,
-    required this.initialNotes,
-    required this.initialHeart,
-  });
+  const _NoteDialog({required this.strings, required this.initialNotes});
 
   final Strings strings;
   final String initialNotes;
-  final bool initialHeart;
 
   @override
   State<_NoteDialog> createState() => _NoteDialogState();
@@ -1390,7 +1383,6 @@ class _NoteDialog extends StatefulWidget {
 class _NoteDialogState extends State<_NoteDialog> {
   late final TextEditingController _controller =
       TextEditingController(text: widget.initialNotes);
-  late bool _heart = widget.initialHeart;
 
   @override
   void initState() {
@@ -1416,25 +1408,9 @@ class _NoteDialogState extends State<_NoteDialog> {
     );
     return AlertDialog(
       backgroundColor: scheme.surface,
-      title: Row(
-        children: [
-          Expanded(
-            child: Text(
-              widget.strings.notes,
-              style: textTheme.titleLarge?.copyWith(color: scheme.onSurface),
-            ),
-          ),
-          IconButton(
-            key: const ValueKey('note-heart-toggle'),
-            tooltip:
-                _heart ? widget.strings.heartMarked : widget.strings.heartMark,
-            onPressed: () => setState(() => _heart = !_heart),
-            icon: Icon(
-              _heart ? Icons.favorite : Icons.favorite_border,
-              color: _heart ? scheme.primary : scheme.onSurfaceVariant,
-            ),
-          ),
-        ],
+      title: Text(
+        widget.strings.notes,
+        style: textTheme.titleLarge?.copyWith(color: scheme.onSurface),
       ),
       content: TextField(
         controller: _controller,
@@ -1475,7 +1451,7 @@ class _NoteDialogState extends State<_NoteDialog> {
               ? DialogLinkButton(
                   onPressed: () => Navigator.pop(
                     context,
-                    _NoteDialogResult(notes: '', heart: _heart),
+                    '',
                   ),
                   label: widget.strings.clearNote,
                 )
@@ -1486,12 +1462,57 @@ class _NoteDialogState extends State<_NoteDialog> {
             ),
             onPressed: () => Navigator.pop(
               context,
-              _NoteDialogResult(notes: _controller.text.trim(), heart: _heart),
+              _controller.text.trim(),
             ),
             child: Text(widget.strings.done),
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Round toggle beside the note button: tinted when off, solid when marked,
+/// in the colour the mark has on the calendar.
+class _MarkButton extends StatelessWidget {
+  const _MarkButton({
+    super.key,
+    required this.tooltip,
+    required this.selected,
+    required this.color,
+    required this.ink,
+    required this.icon,
+    required this.selectedIcon,
+    required this.onPressed,
+  });
+
+  final String tooltip;
+  final bool selected;
+  final Color color;
+  final Color ink;
+  final IconData icon;
+  final IconData selectedIcon;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      tooltip: tooltip,
+      isSelected: selected,
+      onPressed: onPressed,
+      style: ButtonStyle(
+        backgroundColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.selected)
+              ? color
+              : color.withValues(alpha: 0.16),
+        ),
+        foregroundColor: WidgetStateProperty.resolveWith(
+          (states) =>
+              states.contains(WidgetState.selected) ? ink : color,
+        ),
+      ),
+      icon: Icon(icon),
+      selectedIcon: Icon(selectedIcon),
     );
   }
 }
