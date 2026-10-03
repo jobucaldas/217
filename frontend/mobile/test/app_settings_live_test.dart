@@ -31,12 +31,14 @@ void main() {
 
     // No saved language and an en_US test device → English.
     expect(find.text('Sign in'), findsOneWidget);
-    // The self-host card is a web thing; Android links to Settings instead.
-    expect(find.byKey(const ValueKey('auth-self-host-card')), findsNothing);
+    // The guide lives in Settings, not on the sign-in screen.
+    expect(find.text('Self-hosting guide'), findsNothing);
     expect(find.byKey(const ValueKey('auth-self-host-tip')), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('auth-settings')));
     await tester.pumpAndSettle();
 
+    // The guide is reachable from Settings while signed out.
+    expect(find.byKey(const ValueKey('self-host-guide')), findsOneWidget);
     // Signed out: no account actions to show.
     expect(find.text('Delete account'), findsNothing);
     expect(find.text('Log out'), findsNothing);
@@ -82,8 +84,7 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('no saved language: follows a Portuguese device',
-      (tester) async {
+  testWidgets('no saved language: follows a Portuguese device', (tester) async {
     await pumpWithDeviceLocales(tester, const [Locale('pt', 'BR')]);
     expect(find.text('Entrar'), findsOneWidget);
   });

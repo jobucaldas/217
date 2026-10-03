@@ -85,6 +85,7 @@ Sign-in uses [WorkOS AuthKit](https://workos.com/docs/authkit) (free tier is eno
 3. Add redirect URIs for your public address, for example:
    - `https://217.example.com/api/auth/workos/callback` (web)
    - `com.jobucaldas.a217://auth/callback` (Android app)
+4. Optional branding: in **Branding**, upload `frontend/mobile/branding/logo-217-light.svg` (light) and `logo-217-dark.svg` (dark) so the hosted sign-in page shows the 217 wordmark in the app's typeface instead of the app name in WorkOS's default font.
 
 ### 2. Configure the server
 

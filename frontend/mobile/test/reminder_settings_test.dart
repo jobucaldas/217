@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -81,4 +82,27 @@ void main() {
       );
     }
   }
+
+  testWidgets('switching reminders reports the new state', (tester) async {
+    // The Android plugin has no host in tests; use the server-only path.
+    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+    final toggled = <bool>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildApp217Theme(brightness: Brightness.light),
+        home: ReminderSettingsScreen(
+          api: _FakeReminderApi(),
+          strings: const Strings(AppLanguage.en),
+          onToggled: toggled.add,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(Switch));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(Switch));
+    await tester.pumpAndSettle();
+    debugDefaultTargetPlatformOverride = null;
+    expect(toggled, [true, false]);
+  });
 }

@@ -177,10 +177,10 @@ class Strings {
         'Tem seu próprio servidor 217? Configure em Ajustes.',
         '¿Tienes tu propio servidor 217? Configúralo en Ajustes.',
       );
-  String get selfHostCard => _t(
-        'You can run 217 on your own server and keep your data there.',
-        'Você pode rodar o 217 no seu próprio servidor e manter seus dados lá.',
-        'Puedes ejecutar 217 en tu propio servidor y guardar tus datos allí.',
+  String get selfHostBlurb => _t(
+        'Run 217 on your own server and keep your data there.',
+        'Rode o 217 no seu próprio servidor e mantenha seus dados lá.',
+        'Ejecuta 217 en tu propio servidor y guarda tus datos allí.',
       );
   String get selfHostGuide =>
       _t('Self-hosting guide', 'Guia de hospedagem própria', 'Guía para alojarlo tú');
@@ -232,9 +232,9 @@ class Strings {
         'Recordatorio aún no configurado',
       );
   String get reminderHint => _t(
-        'After signing in, set a daily reminder in Settings.',
-        'Depois de entrar, configure um lembrete diário em Ajustes.',
-        'Después de iniciar sesión, configura un recordatorio diario en Ajustes.',
+        'Set a daily reminder in Settings > Reminder.',
+        'Configure um lembrete diário em Ajustes > Lembrete.',
+        'Configura un recordatorio diario en Ajustes > Recordatorio.',
       );
   String get reminderHintDismiss => _t('Got it', 'Entendi', 'Entendido');
   String get legendTaken => taken;

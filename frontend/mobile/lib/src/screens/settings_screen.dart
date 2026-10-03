@@ -29,6 +29,7 @@ class SettingsPage extends StatefulWidget {
     this.onAccountDeleted,
     this.onLogout,
     this.onJoinedCalendar,
+    this.onRemindersToggled,
     this.expandServer = false,
   });
 
@@ -50,6 +51,9 @@ class SettingsPage extends StatefulWidget {
   /// Called after this account joined another calendar with an invite code.
   final ValueChanged<ShareState>? onJoinedCalendar;
 
+  /// Called after the reminder switch was saved, with its new value.
+  final ValueChanged<bool>? onRemindersToggled;
+
   /// Open with the self-hosted server field already expanded.
   final bool expandServer;
 
@@ -60,7 +64,8 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   // Empty field = default server; only a self-hosted URL is shown here.
   late final TextEditingController _serverUrl = TextEditingController(
-    text: widget.api.config.usesCustomApiBase ? widget.api.config.apiBaseUrl : '',
+    text:
+        widget.api.config.usesCustomApiBase ? widget.api.config.apiBaseUrl : '',
   );
   late bool _advancedOpen =
       widget.expandServer || widget.api.config.usesCustomApiBase;
@@ -94,7 +99,8 @@ class _SettingsPageState extends State<SettingsPage> {
       _serverUrl.text = custom ? widget.api.config.apiBaseUrl : '';
     });
     if (changed) widget.onApiBaseChanged();
-    _showSnack(custom ? widget.strings.serverSaved : widget.strings.serverReset);
+    _showSnack(
+        custom ? widget.strings.serverSaved : widget.strings.serverReset);
   }
 
   Future<void> _openGuide() async {
@@ -165,6 +171,7 @@ class _SettingsPageState extends State<SettingsPage> {
                         builder: (_) => ReminderSettingsScreen(
                           api: widget.api,
                           strings: widget.strings,
+                          onToggled: widget.onRemindersToggled,
                         ),
                       ),
                     );
@@ -379,22 +386,25 @@ class _SettingsPageState extends State<SettingsPage> {
                       ],
                     ),
                   ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(4, 0, 16, 8),
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: TextButton.icon(
-                        key: const ValueKey('self-host-guide'),
-                        onPressed: _openGuide,
-                        icon: const Icon(Icons.open_in_new, size: 18),
-                        label: Text(widget.strings.selfHostGuide),
-                      ),
-                    ),
-                  ),
                 ],
               ],
             ),
           ],
+          // Signed in or out, on web too: where to run your own server.
+          const SizedBox(height: 20),
+          _SettingsSection(
+            children: [
+              ListTile(
+                key: const ValueKey('self-host-guide'),
+                leading: Icon(Icons.dns_outlined, color: scheme.primary),
+                title: Text(widget.strings.selfHostGuide),
+                subtitle: Text(widget.strings.selfHostBlurb),
+                trailing:
+                    Icon(Icons.open_in_new, color: scheme.onSurfaceVariant),
+                onTap: _openGuide,
+              ),
+            ],
+          ),
           // Account actions: pull away from prefs above; keep delete + logout tight.
           if (widget.onAccountDeleted != null || widget.onLogout != null) ...[
             const SizedBox(height: 40),

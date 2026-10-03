@@ -40,11 +40,13 @@ void main() {
     }
   });
 
-  test('self-host card dismissal is remembered', () async {
+  test('reminder hint dismissal is remembered until reset', () async {
     FlutterSecureStorage.setMockInitialValues({});
     final prefs = AppearancePrefs();
-    expect(await prefs.selfHostCardDismissed(), isFalse);
-    await prefs.dismissSelfHostCard();
-    expect(await AppearancePrefs().selfHostCardDismissed(), isTrue);
+    expect(await prefs.reminderHintDismissed(), isFalse);
+    await prefs.dismissReminderHint();
+    expect(await AppearancePrefs().reminderHintDismissed(), isTrue);
+    await prefs.resetReminderHint();
+    expect(await AppearancePrefs().reminderHintDismissed(), isFalse);
   });
 }
