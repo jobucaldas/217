@@ -1,4 +1,4 @@
-# `dev` stage: Go toolchain for compose (`go run`) and `make test-backend`.
+# `dev` stage: Go toolchain for compose (`go run`) and `docker compose run --rm test-backend`.
 # Default (last) stage: production API image published to GHCR by CI.
 FROM docker.io/golang:1.26-bookworm AS dev
 RUN apt-get update && apt-get install -y --no-install-recommends \

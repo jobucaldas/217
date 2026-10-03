@@ -58,14 +58,46 @@ jobs:
       - name: Build release APK
         # No API_BASE_URL on purpose: the published APK asks for a server on first launch.
         run: flutter build apk --release --dart-define=WORKOS_CLIENT_ID="$WORKOS_CLIENT_ID"
-      - if: github.event_name == 'push'
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: frontend-build
           path: |
             frontend/build/web
             frontend/build/app/outputs/flutter-apk/app-release.apk
           retention-days: 3
+
+  images:
+    name: Images (build + smoke test)
+    needs: frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-build
+          path: frontend/build
+      - name: Build the images CI publishes
+        run: |
+          docker build -t ghcr.io/jobucaldas/app-217-backend:nightly ./backend
+          docker build --target prebuilt -t ghcr.io/jobucaldas/app-217-frontend:nightly ./frontend
+      - name: Run the README compose file against them
+        run: |
+          mkdir smoke
+          # The README holds the one yaml block users copy.
+          awk '/^```yaml$/{f=1;next} /^```$/{f=0} f' readme.md > smoke/compose.yaml
+          printf '%s\n' POSTGRES_PASSWORD=ci APP_BASE_URL=http://localhost:8787 \
+            WORKOS_CLIENT_ID=client_ci > smoke/.env
+          cd smoke
+          docker compose up -d --pull never
+          for i in $(seq 1 30); do
+            curl -fsS http://localhost:8787/api/auth/config && break
+            sleep 2
+          done
+          curl -fsS http://localhost:8787/api/auth/config | grep -q workos_client_id
+          curl -fsS http://localhost:8787/ | grep -qi '<html'
+          curl -fsS http://localhost:8787/some/deep/link | grep -qi '<html'
+      - if: failure()
+        run: cd smoke && docker compose logs
 
   linux:
     name: Linux AppImage
@@ -134,7 +166,7 @@ jobs:
   publish:
     name: Publish (GHCR + GitHub Releases)
     if: github.event_name == 'push'
-    needs: [backend, frontend, linux, windows]
+    needs: [backend, frontend, images, linux, windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -179,6 +211,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: ./frontend
+          target: prebuilt
           push: true
           tags: |
             ${{ steps.tags.outputs.image }}-frontend:nightly
