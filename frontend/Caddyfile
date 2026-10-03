@@ -10,8 +10,11 @@
     }
 
     # SPA fallback so deep links / refresh serve the Flutter shell.
+    # Revalidate on every load (ETag keeps it cheap) so a new deploy shows up
+    # at once instead of an old bundle lingering in the browser cache.
     handle {
         root * /app/dist
+        header Cache-Control "no-cache"
         try_files {path} /index.html
         file_server
     }

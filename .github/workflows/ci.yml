@@ -46,7 +46,7 @@ jobs:
       - run: flutter test
       - name: Build web bundle
         run: |
-          flutter build web --release --no-web-resources-cdn
+          flutter build web --release --no-web-resources-cdn --pwa-strategy=none
           # Stamp the commit so the live site can prove which bundle is running.
           printf 'BUILD_SHA=%s\n' "$GITHUB_SHA" > build/web/BUILD_SHA.txt
       - name: Build release APK
