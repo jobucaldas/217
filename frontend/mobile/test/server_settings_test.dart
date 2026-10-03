@@ -10,6 +10,7 @@ import 'package:http/testing.dart';
 import 'package:a217/src/api/client.dart';
 import 'package:a217/src/config.dart';
 import 'package:a217/src/i18n.dart';
+import 'package:a217/src/models.dart';
 import 'package:a217/src/platform/open_url.dart';
 import 'package:a217/src/platform/share_sheet.dart';
 import 'package:a217/src/screens/settings_screen.dart';
@@ -41,8 +42,8 @@ void main() {
 
     test('parseApiBase accepts bare hosts and invite links', () {
       expect(ApiClient.parseApiBase('A.example'), 'https://a.example');
-      expect(ApiClient.parseApiBase('a.example:8443/'),
-          'https://a.example:8443');
+      expect(
+          ApiClient.parseApiBase('a.example:8443/'), 'https://a.example:8443');
       expect(ApiClient.parseApiBase('http://10.0.0.5:8787'),
           'http://10.0.0.5:8787');
       expect(ApiClient.parseApiBase('https://a.example/217/'),
@@ -55,7 +56,8 @@ void main() {
       expect(ApiClient.inviteCodeIn('https://a.example'), isNull);
     });
 
-    test('checkServer tells unreachable, foreign and sign-in-less servers apart',
+    test(
+        'checkServer tells unreachable, foreign and sign-in-less servers apart',
         () async {
       Future<ServerCheck> check(
         Future<http.Response> Function(http.Request) handler,
@@ -279,7 +281,11 @@ void main() {
     );
     await tester.pumpAndSettle();
     final guide = find.byKey(const ValueKey('self-host-guide'));
-    await tester.ensureVisible(guide);
+    await tester.scrollUntilVisible(
+      guide,
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
     await tester.pumpAndSettle();
     await tester.tap(guide);
     await tester.pumpAndSettle();
@@ -287,5 +293,35 @@ void main() {
     expect(calls.single.method, 'openUrl');
     expect((calls.single.arguments as Map)['url'], selfHostGuideUrl);
     expect(selfHostGuideUrl, endsWith('#self-hosting'));
+  });
+
+  testWidgets('self-hosting guide is in Settings when signed in too',
+      (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsPage(
+          api: ApiClient(_config()),
+          strings: const Strings(AppLanguage.en),
+          language: AppLanguage.en,
+          themeMode: ThemeMode.system,
+          palette: AppPalette.blue,
+          onLanguageChanged: (_) {},
+          onThemeModeChanged: (_) {},
+          onPaletteChanged: (_) {},
+          onApiBaseChanged: () {},
+          user: const User(id: 'u', email: 'a@b.c', name: 'A'),
+          onLogout: () async {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final guide = find.byKey(const ValueKey('self-host-guide'));
+    await tester.scrollUntilVisible(
+      guide,
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(guide, findsOneWidget);
+    expect(find.text('Self-hosting guide'), findsOneWidget);
   });
 }

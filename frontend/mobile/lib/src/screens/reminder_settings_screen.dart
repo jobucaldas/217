@@ -12,10 +12,14 @@ class ReminderSettingsScreen extends StatefulWidget {
     super.key,
     required this.api,
     required this.strings,
+    this.onToggled,
   });
 
   final ApiClient api;
   final Strings strings;
+
+  /// Called after the on/off switch was saved, with its new value.
+  final ValueChanged<bool>? onToggled;
 
   @override
   State<ReminderSettingsScreen> createState() => _ReminderSettingsScreenState();
@@ -171,6 +175,7 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen> {
           _error = widget.strings.reminderNeedsPush;
         }
       });
+      if (enabled != null) widget.onToggled?.call(saved.enabled);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(widget.strings.reminderSaved)),
       );
@@ -246,7 +251,8 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen> {
                 ],
                 if (showUnavailable) ...[
                   const SizedBox(height: 8),
-                  Text(widget.strings.reminderUnavailable, style: text.bodyMedium),
+                  Text(widget.strings.reminderUnavailable,
+                      style: text.bodyMedium),
                 ],
                 const SizedBox(height: 20),
                 FilledButton(

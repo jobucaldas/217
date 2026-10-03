@@ -10,6 +10,7 @@ import '../i18n.dart';
 import '../models.dart';
 import '../notifications/partner_alert_sync.dart';
 import '../theme/app_theme.dart';
+import 'reminder_hint.dart';
 import 'share_screens.dart';
 import 'today_nudge.dart';
 
@@ -23,6 +24,8 @@ class CalendarScreen extends StatefulWidget {
     this.share = const ShareState(status: 'none'),
     this.onShareChanged,
     this.palette = AppPalette.blue,
+    this.showReminderHint = false,
+    this.onDismissReminderHint,
   });
 
   final ApiClient api;
@@ -32,6 +35,10 @@ class CalendarScreen extends StatefulWidget {
   final VoidCallback onOpenSettings;
   final ValueChanged<ShareState>? onShareChanged;
   final AppPalette palette;
+
+  /// Bubble pointing at the reminder setting; closes itself after a while.
+  final bool showReminderHint;
+  final VoidCallback? onDismissReminderHint;
 
   @override
   State<CalendarScreen> createState() => _CalendarScreenState();
@@ -689,6 +696,19 @@ class _CalendarScreenState extends State<CalendarScreen>
                     ],
                   ),
                 ),
+              ),
+            ),
+          if (widget.showReminderHint &&
+              widget.onDismissReminderHint != null &&
+              _error == null)
+            Positioned(
+              left: 20,
+              right: 20,
+              top: 8,
+              child: ReminderHint(
+                key: const ValueKey('reminder-hint'),
+                strings: widget.strings,
+                onDismiss: widget.onDismissReminderHint!,
               ),
             ),
           if (nudgeVisible)

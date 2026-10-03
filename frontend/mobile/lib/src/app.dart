@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -42,7 +44,9 @@ class _App217State extends State<App217> {
   ThemeMode _themeMode = ThemeMode.system;
   AppPalette _palette = AppPalette.blue;
   bool _reminderHintDismissed = false;
-  bool _selfHostCardDismissed = false;
+
+  /// Whether the daily reminder is on; null until known (no bubble then).
+  bool? _remindersOn;
 
   /// Routes pushed on top of home (Settings) are built once, so they listen
   /// here to pick up theme, language and session changes made from them.
@@ -83,14 +87,12 @@ class _App217State extends State<App217> {
       final appearance = await _prefs.load();
       final language = await _prefs.loadLanguage();
       final hintGone = await _prefs.reminderHintDismissed();
-      final selfHostGone = await _prefs.selfHostCardDismissed();
       if (!mounted) return;
       setState(() {
         _themeMode = appearance.mode;
         _palette = appearance.palette;
         _language = language ?? _deviceLanguage();
         _reminderHintDismissed = hintGone;
-        _selfHostCardDismissed = selfHostGone;
       });
     } catch (_) {
       // Keep defaults.
@@ -114,7 +116,30 @@ class _App217State extends State<App217> {
       _share = share;
       _loading = false;
     });
-    if (user != null) await _offerPendingInvite();
+    if (user != null) {
+      unawaited(_loadRemindersState());
+      await _offerPendingInvite();
+    }
+  }
+
+  Future<void> _loadRemindersState() async {
+    try {
+      final pref = await _api.getReminderPreference();
+      if (mounted) setState(() => _remindersOn = pref?.enabled ?? false);
+    } catch (_) {
+      // Unknown state: stay quiet rather than nag.
+    }
+  }
+
+  /// Toggling reminders re-arms the calendar bubble for the next time they
+  /// are off.
+  Future<void> _onRemindersToggled(bool enabled) async {
+    await _prefs.resetReminderHint();
+    if (!mounted) return;
+    setState(() {
+      _remindersOn = enabled;
+      _reminderHintDismissed = false;
+    });
   }
 
   Future<void> _refreshSession() async {
@@ -229,6 +254,7 @@ class _App217State extends State<App217> {
     setState(() {
       _user = null;
       _share = const ShareState(status: 'none');
+      _remindersOn = null;
     });
   }
 
@@ -282,6 +308,7 @@ class _App217State extends State<App217> {
           _share = session.share ?? const ShareState(status: 'none');
           _loading = false;
         });
+        unawaited(_loadRemindersState());
         await _offerPendingInvite();
       } else {
         setState(() => _loading = false);
@@ -302,8 +329,10 @@ class _App217State extends State<App217> {
     await _api.logout();
     if (!mounted) return;
     setState(() {
+      _remindersOn = null;
       _user = null;
       _share = const ShareState(status: 'none');
+      _remindersOn = null;
     });
   }
 
@@ -311,6 +340,7 @@ class _App217State extends State<App217> {
     setState(() {
       _user = null;
       _share = const ShareState(status: 'none');
+      _remindersOn = null;
     });
     _messengerKey.currentState?.showSnackBar(
       SnackBar(content: Text(_strings.accountDeleted)),
@@ -338,16 +368,12 @@ class _App217State extends State<App217> {
             onLogout: _user == null ? null : _logout,
             onApiBaseChanged: _onApiBaseChanged,
             onRoleChanged: _user == null ? null : _onRoleChosen,
+            onRemindersToggled: _user == null ? null : _onRemindersToggled,
             expandServer: expandServer,
           ),
         ),
       ),
     );
-  }
-
-  Future<void> _dismissSelfHostCard() async {
-    setState(() => _selfHostCardDismissed = true);
-    await _prefs.dismissSelfHostCard();
   }
 
   Future<void> _dismissReminderHint() async {
@@ -393,14 +419,6 @@ class _App217State extends State<App217> {
             : _api.config.hasDefaultServer
                 ? () => _openSettings(expandServer: true)
                 : _openServerSetup,
-        // Web can't switch servers, so point people at the self-host guide.
-        onOpenSelfHostGuide: kIsWeb && !_selfHostCardDismissed
-            ? () => openExternalUrl(selfHostGuideUrl)
-            : null,
-        onDismissSelfHostCard:
-            kIsWeb && !_selfHostCardDismissed ? _dismissSelfHostCard : null,
-        showReminderHint: !_reminderHintDismissed,
-        onDismissReminderHint: _dismissReminderHint,
       );
     }
     if (!_user!.hasRole) {
@@ -431,6 +449,12 @@ class _App217State extends State<App217> {
       palette: _palette,
       onOpenSettings: _openSettings,
       onShareChanged: (share) => setState(() => _share = share),
+      // Partners get alerts instead of a daily reminder, so no bubble for them.
+      showReminderHint: _user!.isOwner &&
+          _remindersOn == false &&
+          !_reminderHintDismissed &&
+          _share.canEditCalendar,
+      onDismissReminderHint: _dismissReminderHint,
     );
   }
 
