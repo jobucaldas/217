@@ -297,9 +297,9 @@ class Strings {
 
   // Sharing (owner side)
   String get shareCalendar => _t(
-        'Share calendar with boyfriend',
-        'Compartilhar calendário com namorado',
-        'Compartir calendario con tu novio',
+        'Share calendar with partner',
+        'Compartilhar calendário com parceiro',
+        'Compartir calendario con tu pareja',
       );
   String get shareInviteCode =>
       _t('Invite code', 'Código do convite', 'Código de invitación');
@@ -343,9 +343,9 @@ class Strings {
   String get shareActiveWith =>
       _t('Shared with', 'Compartilhado com', 'Compartido con');
   String get shareWaiting => _t(
-        'Waiting for boyfriend to join with the link or code.',
-        'Aguardando o namorado entrar pelo link ou código.',
-        'Esperando a que tu novio se una con el enlace o el código.',
+        'Waiting for partner to join with the link or code.',
+        'Aguardando o parceiro entrar pelo link ou código.',
+        'Esperando a que tu pareja se una con el enlace o el código.',
       );
 
   // Sharing (partner side)
