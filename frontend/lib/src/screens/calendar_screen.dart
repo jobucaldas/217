@@ -1272,6 +1272,7 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
     final scheme = Theme.of(context).colorScheme;
     final hasNote = _notes.trim().isNotEmpty;
     final periodColor = App217Colors.period(Theme.of(context).brightness);
+    final heartColor = App217Colors.intimacy(Theme.of(context).brightness);
     final periodInk = ThemeData.estimateBrightnessForColor(periodColor) ==
             Brightness.dark
         ? Colors.white
@@ -1303,8 +1304,9 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
                     ? widget.strings.heartMarked
                     : widget.strings.heartMark,
                 selected: _heart,
-                color: scheme.primary,
-                ink: scheme.onPrimary,
+                color: heartColor,
+                ink: heartColor,
+                solid: false,
                 icon: Icons.favorite_border,
                 selectedIcon: Icons.favorite,
                 onPressed: _toggleHeart,
@@ -1484,6 +1486,7 @@ class _MarkButton extends StatelessWidget {
     required this.icon,
     required this.selectedIcon,
     required this.onPressed,
+    this.solid = true,
   });
 
   final String tooltip;
@@ -1494,6 +1497,10 @@ class _MarkButton extends StatelessWidget {
   final IconData selectedIcon;
   final VoidCallback onPressed;
 
+  /// Selected state fills the button with [color]; otherwise it stays a tint
+  /// and only the symbol turns [ink].
+  final bool solid;
+
   @override
   Widget build(BuildContext context) {
     return IconButton(
@@ -1503,7 +1510,7 @@ class _MarkButton extends StatelessWidget {
       style: ButtonStyle(
         backgroundColor: WidgetStateProperty.resolveWith(
           (states) => states.contains(WidgetState.selected)
-              ? color
+              ? (solid ? color : color.withValues(alpha: 0.28))
               : color.withValues(alpha: 0.16),
         ),
         foregroundColor: WidgetStateProperty.resolveWith(

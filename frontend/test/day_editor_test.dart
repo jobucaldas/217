@@ -107,11 +107,14 @@ void main() {
           of: find.byKey(const ValueKey('day-heart-toggle')),
           matching: find.byType(IconButton),
         ));
+        // Bright red symbol, not the accent and not the period's pink.
+        final red = App217Colors.intimacy(brightness);
         expect(
-          heartButton.style?.backgroundColor
-              ?.resolve({WidgetState.selected}),
-          scheme.primary,
+          heartButton.style?.foregroundColor?.resolve({WidgetState.selected}),
+          red,
         );
+        expect(red, isNot(App217Colors.period(brightness)));
+        expect(red, isNot(scheme.primary));
         expect(find.text('Taken'), findsOneWidget);
         expect(find.text('Cancel'), findsNothing);
         expect(find.text('Save'), findsNothing);

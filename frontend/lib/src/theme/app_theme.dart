@@ -27,6 +27,9 @@ abstract final class App217Colors {
 
   static Color period(Brightness b, [AppPalette palette = AppPalette.blue]) =>
       PaletteColors.resolve(palette, b).period;
+
+  static Color intimacy(Brightness b, [AppPalette palette = AppPalette.blue]) =>
+      PaletteColors.resolve(palette, b).intimacy;
 }
 
 /// Colors only — safe for unit tests (no Google Fonts / binding).
