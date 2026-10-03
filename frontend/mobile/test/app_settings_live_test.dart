@@ -148,8 +148,8 @@ void main() {
   });
 }
 
-/// Signed-in owner with nothing shared; accepting an invite turns them into
-/// a partner viewing the owner's calendar.
+/// Signed-in account that has not picked a role yet; accepting an invite
+/// makes it a partner viewing the owner's calendar.
 class _InviteServer {
   bool joined = false;
   String? acceptedCode;
@@ -165,7 +165,7 @@ class _InviteServer {
                   'id': 'u1',
                   'email': 'bf@example.com',
                   'name': 'BF',
-                  'role': joined ? 'partner' : 'owner',
+                  'role': joined ? 'partner' : '',
                 },
                 'share': joined
                     ? {
@@ -173,7 +173,7 @@ class _InviteServer {
                         'owner_name': 'Her',
                         'can_edit_calendar': false,
                       }
-                    : {'status': 'none', 'can_edit_calendar': true},
+                    : {'status': 'none', 'can_edit_calendar': false},
               }),
               200,
             );

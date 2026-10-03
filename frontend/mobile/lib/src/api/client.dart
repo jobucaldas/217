@@ -310,6 +310,58 @@ class ApiClient {
     }
   }
 
+  /// Owner (takes the pill) or partner (follows her calendar). Returns the
+  /// refreshed session.
+  Future<SessionSnapshot> setRole(String role) async {
+    final response = await _send(
+      'PUT',
+      _uri('/api/account/role'),
+      body: {'role': role},
+    );
+    if (response.statusCode != 200) {
+      throw ApiException('set role', response);
+    }
+    return SessionSnapshot.fromJson(
+      jsonDecode(response.body) as Map<String, dynamic>,
+    );
+  }
+
+  /// Period history and predictions for the visible calendar. [today] is the
+  /// device's local date (YYYY-MM-DD).
+  Future<CycleInfo> getCycle(String today) async {
+    final response = await _send('GET', _uri('/api/cycle', {'today': today}));
+    if (response.statusCode != 200) {
+      throw ApiException('cycle', response);
+    }
+    return CycleInfo.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
+  Future<PartnerAlertPreference> getPartnerAlerts() async {
+    final response = await _send('GET', _uri('/api/partner-alerts'));
+    if (response.statusCode != 200) {
+      throw ApiException('partner alerts', response);
+    }
+    return PartnerAlertPreference.fromJson(
+      jsonDecode(response.body) as Map<String, dynamic>,
+    );
+  }
+
+  Future<PartnerAlertPreference> savePartnerAlerts(
+    PartnerAlertPreference pref,
+  ) async {
+    final response = await _send(
+      'PUT',
+      _uri('/api/partner-alerts'),
+      body: pref.toJson(),
+    );
+    if (response.statusCode != 200) {
+      throw ApiException('save partner alerts', response);
+    }
+    return PartnerAlertPreference.fromJson(
+      jsonDecode(response.body) as Map<String, dynamic>,
+    );
+  }
+
   Future<List<Entry>> listEntries(int year, int month) async {
     final response = await _send(
       'GET',
@@ -333,11 +385,12 @@ class ApiClient {
     bool? taken,
     String notes = '',
     bool heart = false,
+    bool period = false,
   }) async {
     final response = await _send(
       'POST',
       _uri('/api/entries/$date'),
-      body: {'taken': taken, 'notes': notes, 'heart': heart},
+      body: {'taken': taken, 'notes': notes, 'heart': heart, 'period': period},
     );
     if (response.statusCode != 200) {
       throw ApiException('upsert entry', response);

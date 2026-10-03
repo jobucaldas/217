@@ -11,7 +11,7 @@ import (
 func (s *PGStore) GetUserByID(userID string) (*model.User, error) {
 	user := &model.User{}
 	err := s.db.QueryRow(
-		`SELECT id, email, name, COALESCE(role, 'owner'), api_key, password_hash, created_at, updated_at
+		`SELECT id, email, name, COALESCE(role, ''), api_key, password_hash, created_at, updated_at
 		 FROM users WHERE id = $1`, userID,
 	).Scan(&user.ID, &user.Email, &user.Name, &user.Role, &user.APIKey, &user.PasswordHash, &user.CreatedAt, &user.UpdatedAt)
 	if err == sql.ErrNoRows {
@@ -50,10 +50,13 @@ func (s *PGStore) DeleteUser(userID string) error {
 }
 
 func (s *PGStore) buildShareState(user *model.User) (*model.ShareState, error) {
-	role := roleOrOwner(user.Role)
+	role := model.NormalizeRole(user.Role)
 	state := &model.ShareState{
 		Status:          model.ShareNone,
 		CanEditCalendar: role == model.RoleOwner,
+	}
+	if role == "" {
+		return state, nil
 	}
 	if role == model.RoleOwner {
 		var share model.CalendarShare
@@ -106,8 +109,7 @@ func (s *PGStore) buildShareState(user *model.User) (*model.ShareState, error) {
 			 ORDER BY updated_at DESC LIMIT 1`, user.ID,
 		).Scan(&share.ID, &share.OwnerID, &share.PartnerID, &share.InviteCode, &share.Status, &share.CreatedAt, &share.UpdatedAt)
 		if err == sql.ErrNoRows {
-			state.Status = model.ShareRevoked
-			state.CanEditCalendar = false
+			// Partner who has not joined a calendar yet.
 			return state, nil
 		}
 		if err != nil {
@@ -140,7 +142,7 @@ func (s *PGStore) EnableShare(ownerID string) (*model.ShareState, error) {
 	if err != nil {
 		return nil, err
 	}
-	if roleOrOwner(user.Role) != model.RoleOwner {
+	if model.NormalizeRole(user.Role) != model.RoleOwner {
 		return nil, fmt.Errorf("only calendar owners can share")
 	}
 	if state, err := s.buildShareState(user); err == nil &&
@@ -166,7 +168,7 @@ func (s *PGStore) RevokeShare(ownerID string) (*model.ShareState, error) {
 	if err != nil {
 		return nil, err
 	}
-	if roleOrOwner(user.Role) != model.RoleOwner {
+	if model.NormalizeRole(user.Role) != model.RoleOwner {
 		return nil, fmt.Errorf("only calendar owners can revoke")
 	}
 	_, err = s.db.Exec(
@@ -193,7 +195,7 @@ func (s *PGStore) AcceptShare(partnerID, inviteCode string) (*model.ShareState, 
 
 	partner := &model.User{}
 	err = tx.QueryRow(
-		`SELECT id, email, name, COALESCE(role, 'owner'), api_key, password_hash, created_at, updated_at
+		`SELECT id, email, name, COALESCE(role, ''), api_key, password_hash, created_at, updated_at
 		 FROM users WHERE id = $1 FOR UPDATE`, partnerID,
 	).Scan(&partner.ID, &partner.Email, &partner.Name, &partner.Role, &partner.APIKey, &partner.PasswordHash, &partner.CreatedAt, &partner.UpdatedAt)
 	if err == sql.ErrNoRows {
@@ -202,16 +204,8 @@ func (s *PGStore) AcceptShare(partnerID, inviteCode string) (*model.ShareState, 
 	if err != nil {
 		return nil, err
 	}
-	if roleOrOwner(partner.Role) == model.RoleOwner {
-		var ownedLive int
-		if err := tx.QueryRow(
-			`SELECT COUNT(*) FROM calendar_shares WHERE owner_id = $1 AND status IN ('open', 'active')`, partnerID,
-		).Scan(&ownedLive); err != nil {
-			return nil, err
-		}
-		if ownedLive > 0 {
-			return nil, fmt.Errorf("owners with an active share cannot join another calendar")
-		}
+	if model.NormalizeRole(partner.Role) == model.RoleOwner {
+		return nil, fmt.Errorf("calendar owners cannot join another calendar")
 	}
 	var partnerLive int
 	if err := tx.QueryRow(
@@ -259,8 +253,11 @@ func (s *PGStore) CalendarSubjectID(userID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if roleOrOwner(user.Role) == model.RoleOwner {
+	switch model.NormalizeRole(user.Role) {
+	case model.RoleOwner:
 		return userID, nil
+	case "":
+		return "", fmt.Errorf("role not chosen")
 	}
 	var ownerID string
 	err = s.db.QueryRow(
@@ -281,7 +278,7 @@ func (s *PGStore) ListInboxNotes(ownerID string) ([]*model.PartnerNote, error) {
 	if err != nil {
 		return nil, err
 	}
-	if roleOrOwner(user.Role) != model.RoleOwner {
+	if model.NormalizeRole(user.Role) != model.RoleOwner {
 		return nil, fmt.Errorf("only owners have an inbox")
 	}
 	rows, err := s.db.Query(
@@ -327,7 +324,7 @@ func (s *PGStore) CreatePartnerNote(partnerID, body string) (*model.PartnerNote,
 	if err != nil {
 		return nil, err
 	}
-	if roleOrOwner(user.Role) != model.RolePartner {
+	if model.NormalizeRole(user.Role) != model.RolePartner {
 		return nil, fmt.Errorf("only partners can leave inbox notes")
 	}
 	var ownerID string
@@ -369,4 +366,44 @@ func (s *PGStore) MarkInboxNoteRead(ownerID, noteID string) error {
 		return fmt.Errorf("note not found")
 	}
 	return nil
+}
+
+func (s *PGStore) SetRole(userID, role string) (*model.User, error) {
+	role = model.NormalizeRole(role)
+	if role == "" {
+		return nil, fmt.Errorf("role must be owner or partner")
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var current string
+	err = tx.QueryRow(`SELECT COALESCE(role, '') FROM users WHERE id = $1 FOR UPDATE`, userID).Scan(&current)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("user not found")
+	}
+	if err != nil {
+		return nil, err
+	}
+	if current != role {
+		var live int
+		if err := tx.QueryRow(
+			`SELECT COUNT(*) FROM calendar_shares
+			 WHERE (owner_id = $1 AND status IN ('open', 'active'))
+			    OR (partner_id = $1 AND status = 'active')`, userID,
+		).Scan(&live); err != nil {
+			return nil, err
+		}
+		if live > 0 {
+			return nil, fmt.Errorf("role locked while a calendar is shared")
+		}
+		if _, err := tx.Exec(`UPDATE users SET role = $1, updated_at = NOW() WHERE id = $2`, role, userID); err != nil {
+			return nil, fmt.Errorf("setting role: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return s.GetUserByID(userID)
 }

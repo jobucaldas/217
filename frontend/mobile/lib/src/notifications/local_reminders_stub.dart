@@ -1,3 +1,4 @@
+import 'partner_alert_plan.dart';
 import 'reminder_schedule.dart';
 
 /// Default for non-IO / non-HTML (tests use conditional imports).
@@ -10,3 +11,8 @@ Future<LocalReminderSyncResult> syncLocalDailyReminder({
   required String body,
 }) async =>
     const LocalReminderSyncResult(LocalReminderSyncStatus.unsupported);
+
+Future<LocalReminderSyncStatus> syncPartnerAlerts(
+  List<PlannedAlert> alerts,
+) async =>
+    LocalReminderSyncStatus.unsupported;

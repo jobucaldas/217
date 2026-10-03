@@ -20,8 +20,15 @@ class _FakeApi extends ApiClient {
     bool? taken,
     String notes = '',
     bool heart = false,
+    bool period = false,
   }) async {
-    final e = Entry(date: date, taken: taken, notes: notes, heart: heart);
+    final e = Entry(
+      date: date,
+      taken: taken,
+      notes: notes,
+      heart: heart,
+      period: period,
+    );
     store[date] = e;
     return e;
   }
@@ -748,8 +755,15 @@ class _HeartCalendarApi extends ApiClient {
     bool? taken,
     String notes = '',
     bool heart = false,
+    bool period = false,
   }) async =>
-      Entry(date: date, taken: taken, notes: notes, heart: heart);
+      Entry(
+        date: date,
+        taken: taken,
+        notes: notes,
+        heart: heart,
+        period: period,
+      );
 
   @override
   Future<void> deleteEntry(String date) async {}

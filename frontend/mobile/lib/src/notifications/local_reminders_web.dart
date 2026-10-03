@@ -1,6 +1,7 @@
 // ignore_for_file: avoid_web_libraries_in_flutter, deprecated_member_use
 import 'dart:html' as html;
 
+import 'partner_alert_plan.dart';
 import 'reminder_schedule.dart';
 
 /// Web: no reliable background daily schedule without a service worker.
@@ -39,3 +40,9 @@ Future<LocalReminderSyncResult> syncLocalDailyReminder({
   // that the Notification API is allowed.
   return const LocalReminderSyncResult(LocalReminderSyncStatus.unsupported);
 }
+
+/// Web pages cannot schedule future notifications.
+Future<LocalReminderSyncStatus> syncPartnerAlerts(
+  List<PlannedAlert> alerts,
+) async =>
+    LocalReminderSyncStatus.unsupported;

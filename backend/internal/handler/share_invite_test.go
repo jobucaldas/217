@@ -18,6 +18,9 @@ func TestEnableShareReturnsInviteURL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s.SetRole(owner.ID, "owner"); err != nil {
+		t.Fatal(err)
+	}
 	h := New(s)
 	h.SetAppBaseURL("https://217.example.com/")
 

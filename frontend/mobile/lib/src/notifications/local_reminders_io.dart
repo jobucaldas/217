@@ -5,9 +5,11 @@ import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:timezone/data/latest_all.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
 
+import 'partner_alert_plan.dart';
 import 'reminder_schedule.dart';
 
 const _channelId = 'intake_daily';
+const _partnerChannelId = 'partner_alerts';
 const _notifId = 21701;
 
 final FlutterLocalNotificationsPlugin _plugin =
@@ -80,7 +82,7 @@ Future<LocalReminderSyncResult> syncLocalDailyReminder({
   }
 }
 
-Future<bool> _ensureReady() async {
+Future<bool> _ensureReady({bool requestPermission = true}) async {
   if (!_initialized) {
     tzdata.initializeTimeZones();
     try {
@@ -102,6 +104,7 @@ Future<bool> _ensureReady() async {
     );
     _initialized = true;
   }
+  if (!requestPermission) return true;
 
   final android = _plugin.resolvePlatformSpecificImplementation<
       AndroidFlutterLocalNotificationsPlugin>();
@@ -157,4 +160,52 @@ tz.TZDateTime _nextTz(int hour, int minute) {
     scheduled = scheduled.add(const Duration(days: 1));
   }
   return scheduled;
+}
+
+Future<LocalReminderSyncStatus> syncPartnerAlerts(
+  List<PlannedAlert> alerts,
+) async {
+  if (!supportsLocalReminders) return LocalReminderSyncStatus.unsupported;
+  try {
+    // Clearing alerts must not prompt for notification permission.
+    if (!await _ensureReady(requestPermission: alerts.isNotEmpty)) {
+      return LocalReminderSyncStatus.permissionDenied;
+    }
+    for (final base in [partnerPmsIdBase, partnerPillIdBase]) {
+      for (var i = 0; i < partnerAlertIdCount; i++) {
+        await _plugin.cancel(base + i);
+      }
+    }
+    if (alerts.isEmpty) return LocalReminderSyncStatus.cancelled;
+    final exact = await _canUseExactAlarms();
+    const details = NotificationDetails(
+      android: AndroidNotificationDetails(
+        _partnerChannelId,
+        'Partner alerts',
+        channelDescription: 'PMS heads-up and pill not logged',
+        importance: Importance.high,
+        priority: Priority.high,
+      ),
+      iOS: DarwinNotificationDetails(),
+    );
+    for (final alert in alerts) {
+      await _plugin.zonedSchedule(
+        alert.id,
+        alert.title,
+        alert.body,
+        tz.TZDateTime.from(alert.when, tz.local),
+        details,
+        androidScheduleMode: exact
+            ? AndroidScheduleMode.exactAllowWhileIdle
+            : AndroidScheduleMode.inexactAllowWhileIdle,
+        uiLocalNotificationDateInterpretation:
+            UILocalNotificationDateInterpretation.absoluteTime,
+      );
+    }
+    return LocalReminderSyncStatus.scheduled;
+  } on MissingPluginException {
+    return LocalReminderSyncStatus.unsupported;
+  } catch (_) {
+    return LocalReminderSyncStatus.failed;
+  }
 }

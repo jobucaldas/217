@@ -435,7 +435,7 @@ func (h *Handler) ListEntries(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r)
 	subjectID, err := h.calendarSubject(userID)
 	if err != nil {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "share inactive"})
+		writeCalendarSubjectError(w, err)
 		return
 	}
 	year, month := parseYearMonth(r)
@@ -463,7 +463,7 @@ func (h *Handler) GetEntry(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r)
 	subjectID, err := h.calendarSubject(userID)
 	if err != nil {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "share inactive"})
+		writeCalendarSubjectError(w, err)
 		return
 	}
 	date := r.PathValue("date")
@@ -548,7 +548,7 @@ func (h *Handler) GetStats(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r)
 	subjectID, err := h.calendarSubject(userID)
 	if err != nil {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "share inactive"})
+		writeCalendarSubjectError(w, err)
 		return
 	}
 	year, month := parseYearMonth(r)

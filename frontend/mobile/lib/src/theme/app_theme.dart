@@ -21,6 +21,12 @@ abstract final class App217Colors {
 
   static Color onFilledCell(Brightness b, [AppPalette palette = AppPalette.blue]) =>
       PaletteColors.resolve(palette, b).onFilledCell;
+
+  static Color pms(Brightness b, [AppPalette palette = AppPalette.blue]) =>
+      PaletteColors.resolve(palette, b).pms;
+
+  static Color period(Brightness b, [AppPalette palette = AppPalette.blue]) =>
+      PaletteColors.resolve(palette, b).period;
 }
 
 /// Colors only — safe for unit tests (no Google Fonts / binding).
