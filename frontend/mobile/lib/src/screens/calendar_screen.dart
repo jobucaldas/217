@@ -22,7 +22,7 @@ class CalendarScreen extends StatefulWidget {
     required this.onOpenSettings,
     this.share = const ShareState(status: 'none'),
     this.onShareChanged,
-    this.palette = AppPalette.azure,
+    this.palette = AppPalette.blue,
     this.showReminderHint = false,
     this.onDismissReminderHint,
   });

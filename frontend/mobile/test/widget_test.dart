@@ -14,7 +14,7 @@ void main() {
         var openedServerSettings = false;
         final scheme = buildApp217ColorScheme(
           brightness,
-          palette: AppPalette.azure,
+          palette: AppPalette.blue,
         );
         await tester.pumpWidget(
           MaterialApp(
@@ -24,7 +24,7 @@ void main() {
               colorScheme: scheme,
               scaffoldBackgroundColor: scaffoldBackgroundFor(
                 brightness,
-                palette: AppPalette.azure,
+                palette: AppPalette.blue,
               ),
             ),
             home: AuthScreen(

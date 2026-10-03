@@ -48,14 +48,14 @@ void main() {
       (tester) async {
         final scheme = buildApp217ColorScheme(
           brightness,
-          palette: AppPalette.azure,
+          palette: AppPalette.blue,
         );
         final strings = const Strings(AppLanguage.en);
         await tester.pumpWidget(
           MaterialApp(
             theme: buildApp217Theme(
               brightness: brightness,
-              palette: AppPalette.azure,
+              palette: AppPalette.blue,
             ),
             home: Scaffold(
               body: DayEditorSheet(
@@ -116,7 +116,7 @@ void main() {
       MaterialApp(
         theme: buildApp217Theme(
           brightness: Brightness.light,
-          palette: AppPalette.azure,
+          palette: AppPalette.blue,
         ),
         home: Scaffold(
           body: Builder(
@@ -167,7 +167,7 @@ void main() {
       MaterialApp(
         theme: buildApp217Theme(
           brightness: Brightness.dark,
-          palette: AppPalette.azure,
+          palette: AppPalette.blue,
         ),
         home: Scaffold(
           body: Builder(
@@ -221,7 +221,7 @@ void main() {
       MaterialApp(
         theme: buildApp217Theme(
           brightness: Brightness.light,
-          palette: AppPalette.azure,
+          palette: AppPalette.blue,
         ),
         home: Scaffold(
           body: Builder(
@@ -289,7 +289,7 @@ void main() {
       MaterialApp(
         theme: buildApp217Theme(
           brightness: Brightness.light,
-          palette: AppPalette.azure,
+          palette: AppPalette.blue,
         ),
         home: Scaffold(
           body: Builder(
@@ -335,7 +335,7 @@ void main() {
       MaterialApp(
         theme: buildApp217Theme(
           brightness: Brightness.light,
-          palette: AppPalette.azure,
+          palette: AppPalette.blue,
         ),
         home: Scaffold(
           body: Builder(
@@ -377,7 +377,7 @@ void main() {
       MaterialApp(
         theme: buildApp217Theme(
           brightness: Brightness.dark,
-          palette: AppPalette.azure,
+          palette: AppPalette.blue,
         ),
         home: Scaffold(
           body: Builder(
@@ -432,7 +432,7 @@ void main() {
       MaterialApp(
         theme: buildApp217Theme(
           brightness: Brightness.light,
-          palette: AppPalette.azure,
+          palette: AppPalette.blue,
         ),
         home: Scaffold(
           body: Builder(
@@ -492,7 +492,7 @@ void main() {
       MaterialApp(
         theme: buildApp217Theme(
           brightness: Brightness.dark,
-          palette: AppPalette.azure,
+          palette: AppPalette.blue,
         ),
         home: Scaffold(
           body: Builder(
@@ -544,7 +544,7 @@ void main() {
       MaterialApp(
         theme: buildApp217Theme(
           brightness: Brightness.light,
-          palette: AppPalette.azure,
+          palette: AppPalette.blue,
         ),
         home: Scaffold(
           body: Builder(
@@ -594,7 +594,7 @@ void main() {
           MaterialApp(
             theme: buildApp217Theme(
               brightness: brightness,
-              palette: AppPalette.azure,
+              palette: AppPalette.blue,
             ),
             home: Scaffold(
               body: Builder(
@@ -656,13 +656,13 @@ void main() {
             '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-01';
         final scheme = buildApp217ColorScheme(
           brightness,
-          palette: AppPalette.azure,
+          palette: AppPalette.blue,
         );
         await tester.pumpWidget(
           MaterialApp(
             theme: buildApp217Theme(
               brightness: brightness,
-              palette: AppPalette.azure,
+              palette: AppPalette.blue,
             ),
             home: CalendarScreen(
               api: _HeartCalendarApi([
@@ -675,7 +675,7 @@ void main() {
               ),
               strings: const Strings(AppLanguage.en),
               onOpenSettings: () {},
-              palette: AppPalette.azure,
+              palette: AppPalette.blue,
             ),
           ),
         );
@@ -685,10 +685,10 @@ void main() {
         expect(heart.color, isNot(const Color(0xFFE11D48)));
         expect(
           heart.color,
-          App217Colors.onFilledCell(brightness, AppPalette.azure),
+          App217Colors.onFilledCell(brightness, AppPalette.blue),
         );
         // Readable against the taken cell fill.
-        final cell = App217Colors.cellTaken(brightness, AppPalette.azure);
+        final cell = App217Colors.cellTaken(brightness, AppPalette.blue);
         final contrast =
             (heart.color!.computeLuminance() - cell.computeLuminance()).abs();
         expect(contrast, greaterThan(0.2));
@@ -709,7 +709,7 @@ void main() {
           MaterialApp(
             theme: buildApp217Theme(
               brightness: brightness,
-              palette: AppPalette.azure,
+              palette: AppPalette.blue,
             ),
             home: CalendarScreen(
               api: _HeartCalendarApi([
@@ -722,7 +722,7 @@ void main() {
               ),
               strings: const Strings(AppLanguage.en),
               onOpenSettings: () {},
-              palette: AppPalette.azure,
+              palette: AppPalette.blue,
             ),
           ),
         );

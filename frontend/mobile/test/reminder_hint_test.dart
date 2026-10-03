@@ -57,7 +57,7 @@ void main() {
         onDismiss: () => dismissed++,
       );
       final scheme =
-          buildApp217ColorScheme(brightness, palette: AppPalette.azure);
+          buildApp217ColorScheme(brightness, palette: AppPalette.blue);
       final body = find.text(hint);
       expect(body, findsOneWidget);
       expect(

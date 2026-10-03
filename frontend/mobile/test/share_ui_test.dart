@@ -17,7 +17,7 @@ void main() {
         MaterialApp(
           theme: buildApp217Theme(
             brightness: brightness,
-            palette: AppPalette.azure,
+            palette: AppPalette.blue,
           ),
           home: PartnerRevokedScreen(
             api: api,
@@ -52,7 +52,7 @@ void main() {
         MaterialApp(
           theme: buildApp217Theme(
             brightness: brightness,
-            palette: AppPalette.azure,
+            palette: AppPalette.blue,
           ),
           home: Scaffold(
             body: DeleteAccountSection(
