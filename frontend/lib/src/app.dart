@@ -18,6 +18,7 @@ import 'screens/server_setup_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/share_screens.dart';
 import 'theme/app_theme.dart';
+import 'screens/dialog_actions.dart';
 
 class App217 extends StatefulWidget {
   const App217({super.key, required this.config, this.api});
@@ -188,14 +189,16 @@ class _App217State extends State<App217> {
         title: Text(strings.pendingInviteTitle),
         content: Text(strings.pendingInviteBody(code)),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text(strings.notNow),
-          ),
-          FilledButton(
-            key: const ValueKey('pending-invite-join'),
-            onPressed: () => Navigator.pop(context, true),
-            child: Text(strings.joinCalendar),
+          DialogActionRow(
+            secondary: DialogLinkButton(
+              onPressed: () => Navigator.pop(context, false),
+              label: strings.notNow,
+            ),
+            primary: FilledButton(
+              key: const ValueKey('pending-invite-join'),
+              onPressed: () => Navigator.pop(context, true),
+              child: Text(strings.joinCalendar),
+            ),
           ),
         ],
       ),

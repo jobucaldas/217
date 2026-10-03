@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import '../api/client.dart';
 import '../errors.dart';
 import '../i18n.dart';
+import 'dialog_actions.dart';
 import '../models.dart';
 import '../platform/share_sheet.dart';
 
@@ -255,17 +256,20 @@ class _DeleteAccountSectionState extends State<DeleteAccountSection> {
         title: Text(widget.strings.deleteAccount),
         content: Text(widget.strings.deleteAccountWarn),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text(widget.strings.cancel),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: kDeleteAccountColor,
-              foregroundColor: Colors.white,
+          DialogActionRow(
+            secondary: DialogLinkButton(
+              neutral: true,
+              onPressed: () => Navigator.pop(context, false),
+              label: widget.strings.cancel,
             ),
-            onPressed: () => Navigator.pop(context, true),
-            child: Text(widget.strings.deleteAccountConfirm),
+            primary: FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: kDeleteAccountColor,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () => Navigator.pop(context, true),
+              child: Text(widget.strings.deleteAccountConfirm),
+            ),
           ),
         ],
       ),
@@ -375,17 +379,20 @@ class _PartnerJoinScreenState extends State<PartnerJoinScreen> {
         title: Text(widget.strings.deleteAccount),
         content: Text(widget.strings.deleteAccountWarn),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text(widget.strings.cancel),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: scheme.error,
-              foregroundColor: scheme.onError,
+          DialogActionRow(
+            secondary: DialogLinkButton(
+              neutral: true,
+              onPressed: () => Navigator.pop(context, false),
+              label: widget.strings.cancel,
             ),
-            onPressed: () => Navigator.pop(context, true),
-            child: Text(widget.strings.deleteAccountConfirm),
+            primary: FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: scheme.error,
+                foregroundColor: scheme.onError,
+              ),
+              onPressed: () => Navigator.pop(context, true),
+              child: Text(widget.strings.deleteAccountConfirm),
+            ),
           ),
         ],
       ),
@@ -632,13 +639,15 @@ Future<void> showPartnerNoteDialog({
           ),
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(strings.cancel),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, controller.text.trim()),
-            child: Text(strings.sendNote),
+          DialogActionRow(
+            secondary: DialogLinkButton(
+              onPressed: () => Navigator.pop(context),
+              label: strings.cancel,
+            ),
+            primary: FilledButton(
+              onPressed: () => Navigator.pop(context, controller.text.trim()),
+              child: Text(strings.sendNote),
+            ),
           ),
         ],
       );

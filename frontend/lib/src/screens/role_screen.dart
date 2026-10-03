@@ -4,6 +4,7 @@ import '../api/client.dart';
 import '../errors.dart';
 import '../i18n.dart';
 import '../models.dart';
+import 'dialog_actions.dart';
 
 /// First sign-in: pick owner (takes the pill, fills the calendar) or partner
 /// (follows her calendar with an invite).
@@ -171,14 +172,16 @@ Future<SessionSnapshot?> confirmRoleSwitch({
       title: Text(toPartner ? strings.switchToPartner : strings.switchToOwner),
       content: toPartner ? Text(strings.switchToPartnerWarn) : null,
       actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context, false),
-          child: Text(strings.cancel),
-        ),
-        FilledButton(
-          key: const ValueKey('confirm-role-switch'),
-          onPressed: () => Navigator.pop(context, true),
-          child: Text(strings.switchRoleConfirm),
+        DialogActionRow(
+          secondary: DialogLinkButton(
+            onPressed: () => Navigator.pop(context, false),
+            label: strings.cancel,
+          ),
+          primary: FilledButton(
+            key: const ValueKey('confirm-role-switch'),
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(strings.switchRoleConfirm),
+          ),
         ),
       ],
     ),
