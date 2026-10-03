@@ -1262,6 +1262,11 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
     final human = DateFormat.yMMMMd(locale).format(DateTime.parse(widget.date));
     final scheme = Theme.of(context).colorScheme;
     final hasNote = _notes.trim().isNotEmpty;
+    final periodColor = App217Colors.period(Theme.of(context).brightness);
+    final periodInk = ThemeData.estimateBrightnessForColor(periodColor) ==
+            Brightness.dark
+        ? Colors.white
+        : const Color(0xFF0B1220);
     // Outside tap dismisses; no Cancel / Save — Done or Taken/Missed commit.
     return Padding(
       padding: EdgeInsets.only(
@@ -1288,6 +1293,28 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
                   padding: const EdgeInsets.only(right: 4),
                   child: Icon(Icons.favorite, color: scheme.primary, size: 20),
                 ),
+              IconButton(
+                key: const ValueKey('day-period-toggle'),
+                tooltip: widget.strings.periodLabel,
+                isSelected: _period,
+                onPressed: () => _togglePeriod(!_period),
+                // Marked days are solid, like the drop drawn on the calendar.
+                style: ButtonStyle(
+                  backgroundColor: WidgetStateProperty.resolveWith(
+                    (states) => states.contains(WidgetState.selected)
+                        ? periodColor
+                        : periodColor.withValues(alpha: 0.16),
+                  ),
+                  foregroundColor: WidgetStateProperty.resolveWith(
+                    (states) => states.contains(WidgetState.selected)
+                        ? periodInk
+                        : periodColor,
+                  ),
+                ),
+                icon: const Icon(Icons.water_drop_outlined),
+                selectedIcon: const Icon(Icons.water_drop),
+              ),
+              const SizedBox(width: 4),
               IconButton.filledTonal(
                 tooltip:
                     hasNote ? widget.strings.notes : widget.strings.addNote,
@@ -1330,22 +1357,6 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
             ],
             selected: {if (_taken != null) _taken!},
             onSelectionChanged: _onStatusChanged,
-          ),
-          const SizedBox(height: 10),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: FilterChip(
-              key: const ValueKey('day-period-toggle'),
-              avatar: Icon(
-                _period ? Icons.water_drop : Icons.water_drop_outlined,
-                size: 18,
-                color: App217Colors.period(Theme.of(context).brightness),
-              ),
-              showCheckmark: false,
-              label: Text(widget.strings.periodLabel),
-              selected: _period,
-              onSelected: _togglePeriod,
-            ),
           ),
         ],
       ),
