@@ -44,6 +44,7 @@ type MemoryStore struct {
 	sessions       map[string]memorySession // keyed by hashed session id (sha256 hex)
 	shares         map[string]*model.CalendarShare
 	partnerNotes   map[string]*model.PartnerNote
+	partnerAlerts  map[string]model.PartnerAlertPreference
 }
 
 func NewMemoryStore() *MemoryStore {
@@ -58,6 +59,7 @@ func NewMemoryStore() *MemoryStore {
 		sessions:       make(map[string]memorySession),
 		shares:         make(map[string]*model.CalendarShare),
 		partnerNotes:   make(map[string]*model.PartnerNote),
+		partnerAlerts:  make(map[string]model.PartnerAlertPreference),
 	}
 }
 
@@ -81,7 +83,6 @@ func (s *MemoryStore) CreateUser(email, name, password string) (*model.User, err
 		ID:           generateID(),
 		Email:        email,
 		Name:         name,
-		Role:         model.RoleOwner,
 		PasswordHash: string(hash),
 		APIKey:       generateAPIKey(),
 		CreatedAt:    now,
@@ -174,6 +175,7 @@ func (s *MemoryStore) UpsertEntry(userID, date string, req model.UpsertRequest) 
 		existing.Taken = req.Taken
 		existing.Notes = req.Notes
 		existing.Heart = req.Heart
+		existing.Period = req.Period
 		existing.UpdatedAt = now
 		return existing, nil
 	}
@@ -185,6 +187,7 @@ func (s *MemoryStore) UpsertEntry(userID, date string, req model.UpsertRequest) 
 		Taken:     req.Taken,
 		Notes:     req.Notes,
 		Heart:     req.Heart,
+		Period:    req.Period,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
@@ -308,7 +311,6 @@ func (s *MemoryStore) LinkWorkOSIdentity(subject, verifiedEmail, name string, au
 		ID:        generateID(),
 		Email:     normalizedEmail,
 		Name:      name,
-		Role:      model.RoleOwner,
 		APIKey:    generateAPIKey(),
 		CreatedAt: now,
 		UpdatedAt: now,
@@ -451,13 +453,12 @@ func (s *MemoryStore) ListReminderTargets() ([]model.ReminderTarget, error) {
 		if !ok || !preference.Enabled {
 			continue
 		}
-		name := ""
-		for _, user := range s.users {
-			if user.ID == subscription.UserID {
-				name = user.Name
-				break
-			}
+		user := s.findUserLocked(subscription.UserID)
+		if user == nil || model.NormalizeRole(user.Role) == model.RolePartner {
+			// Pill reminders are for the person taking it.
+			continue
 		}
+		name := user.Name
 		result = append(result, model.ReminderTarget{
 			SubscriptionID: subscription.ID, UserID: subscription.UserID, UserName: name,
 			Endpoint: subscription.Endpoint, P256DH: subscription.P256DH, Auth: subscription.Auth,

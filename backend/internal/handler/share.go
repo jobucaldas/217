@@ -20,9 +20,7 @@ func (h *Handler) sessionPayload(user *model.User) map[string]interface{} {
 			CanEditCalendar: user.EffectiveRole() == model.RoleOwner,
 		}
 	}
-	if user.Role == "" {
-		user.Role = user.EffectiveRole()
-	}
+	user.Role = user.EffectiveRole()
 	return map[string]interface{}{
 		"user":  user,
 		"share": h.withInviteURL(share),
@@ -148,7 +146,7 @@ func (h *Handler) AcceptShare(w http.ResponseWriter, r *http.Request) {
 		case strings.Contains(msg, "invite code"),
 			strings.Contains(msg, "already linked"),
 			strings.Contains(msg, "cannot accept"),
-			strings.Contains(msg, "owners with"):
+			strings.Contains(msg, "calendar owners"):
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": msg})
 		default:
 			log.Printf("accept share: %v", err)

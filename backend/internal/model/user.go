@@ -13,10 +13,20 @@ type User struct {
 	UpdatedAt    time.Time `json:"updated_at"`
 }
 
-// EffectiveRole returns owner when role is unset (pre-migration rows).
+// EffectiveRole returns owner, partner, or "" while the user has not chosen.
 func (u *User) EffectiveRole() string {
-	if u == nil || u.Role == "" {
-		return RoleOwner
+	if u == nil {
+		return ""
 	}
-	return u.Role
+	return NormalizeRole(u.Role)
+}
+
+// NormalizeRole maps a stored role to owner, partner, or "" (not chosen yet).
+func NormalizeRole(role string) string {
+	switch role {
+	case RoleOwner, RolePartner:
+		return role
+	default:
+		return ""
+	}
 }

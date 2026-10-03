@@ -42,7 +42,7 @@ func (s *PGStore) CreateUser(email, name, password string) (*model.User, error) 
 	user := &model.User{}
 	err = s.db.QueryRow(
 		`INSERT INTO users (email, name, api_key, password_hash) VALUES ($1, $2, $3, $4)
-		 RETURNING id, email, name, COALESCE(role, 'owner'), api_key, created_at, updated_at`,
+		 RETURNING id, email, name, COALESCE(role, ''), api_key, created_at, updated_at`,
 		email, name, apiKey, string(hash),
 	).Scan(&user.ID, &user.Email, &user.Name, &user.Role, &user.APIKey, &user.CreatedAt, &user.UpdatedAt)
 	if err != nil {
@@ -103,10 +103,10 @@ func (s *PGStore) GetEntry(userID, date string) (*model.Entry, error) {
 	e := &model.Entry{}
 	var dateVal time.Time
 	err := s.db.QueryRow(
-		`SELECT id, user_id, date, taken, notes, heart, created_at, updated_at
+		`SELECT id, user_id, date, taken, notes, heart, period, created_at, updated_at
 		 FROM entries WHERE user_id = $1 AND date = $2`,
 		userID, date,
-	).Scan(&e.ID, &e.UserID, &dateVal, &e.Taken, &e.Notes, &e.Heart, &e.CreatedAt, &e.UpdatedAt)
+	).Scan(&e.ID, &e.UserID, &dateVal, &e.Taken, &e.Notes, &e.Heart, &e.Period, &e.CreatedAt, &e.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("entry not found")
 	}
@@ -122,7 +122,7 @@ func (s *PGStore) ListEntries(userID string, year, month int) ([]*model.Entry, e
 	lastDay := time.Date(year, time.Month(month)+1, 0, 0, 0, 0, 0, time.UTC).Format("2006-01-02")
 
 	rows, err := s.db.Query(
-		`SELECT id, user_id, date, taken, notes, heart, created_at, updated_at
+		`SELECT id, user_id, date, taken, notes, heart, period, created_at, updated_at
 		 FROM entries WHERE user_id = $1 AND date >= $2 AND date <= $3
 		 ORDER BY date ASC`,
 		userID, firstDay, lastDay,
@@ -136,7 +136,7 @@ func (s *PGStore) ListEntries(userID string, year, month int) ([]*model.Entry, e
 	for rows.Next() {
 		e := &model.Entry{}
 		var dateVal time.Time
-		if err := rows.Scan(&e.ID, &e.UserID, &dateVal, &e.Taken, &e.Notes, &e.Heart, &e.CreatedAt, &e.UpdatedAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.UserID, &dateVal, &e.Taken, &e.Notes, &e.Heart, &e.Period, &e.CreatedAt, &e.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scanning entry: %w", err)
 		}
 		e.Date = dateVal.Format("2006-01-02")
@@ -152,16 +152,17 @@ func (s *PGStore) UpsertEntry(userID, date string, req model.UpsertRequest) (*mo
 	e := &model.Entry{}
 	var dateVal time.Time
 	err := s.db.QueryRow(
-		`INSERT INTO entries (user_id, date, taken, notes, heart)
-		 VALUES ($1, $2, $3, $4, $5)
+		`INSERT INTO entries (user_id, date, taken, notes, heart, period)
+		 VALUES ($1, $2, $3, $4, $5, $6)
 		 ON CONFLICT (user_id, date) DO UPDATE SET
 		   taken = EXCLUDED.taken,
 		   notes = EXCLUDED.notes,
 		   heart = EXCLUDED.heart,
+		   period = EXCLUDED.period,
 		   updated_at = NOW()
-		 RETURNING id, user_id, date, taken, notes, heart, created_at, updated_at`,
-		userID, date, req.Taken, req.Notes, req.Heart,
-	).Scan(&e.ID, &e.UserID, &dateVal, &e.Taken, &e.Notes, &e.Heart, &e.CreatedAt, &e.UpdatedAt)
+		 RETURNING id, user_id, date, taken, notes, heart, period, created_at, updated_at`,
+		userID, date, req.Taken, req.Notes, req.Heart, req.Period,
+	).Scan(&e.ID, &e.UserID, &dateVal, &e.Taken, &e.Notes, &e.Heart, &e.Period, &e.CreatedAt, &e.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("upserting entry: %w", err)
 	}
@@ -277,7 +278,7 @@ func (s *PGStore) LinkWorkOSIdentity(subject, verifiedEmail, name string, author
 	}
 
 	user := &model.User{}
-	err = tx.QueryRow(`SELECT u.id, u.email, u.name, COALESCE(u.role, 'owner'), u.api_key, u.password_hash, u.created_at, u.updated_at
+	err = tx.QueryRow(`SELECT u.id, u.email, u.name, COALESCE(u.role, ''), u.api_key, u.password_hash, u.created_at, u.updated_at
 		FROM workos_identities gi
 		JOIN users u ON u.id = gi.user_id
 		WHERE gi.subject = $1`, subject).
@@ -313,7 +314,7 @@ func (s *PGStore) LinkWorkOSIdentity(subject, verifiedEmail, name string, author
 		}
 	}
 
-	err = tx.QueryRow(`SELECT id, email, name, COALESCE(role, 'owner'), api_key, password_hash, created_at, updated_at
+	err = tx.QueryRow(`SELECT id, email, name, COALESCE(role, ''), api_key, password_hash, created_at, updated_at
 		FROM users WHERE LOWER(email) = $1 FOR UPDATE`, normalizedEmail).
 		Scan(&user.ID, &user.Email, &user.Name, &user.Role, &user.APIKey, &user.PasswordHash, &user.CreatedAt, &user.UpdatedAt)
 	if err == sql.ErrNoRows {
@@ -321,7 +322,7 @@ func (s *PGStore) LinkWorkOSIdentity(subject, verifiedEmail, name string, author
 			name = normalizedEmail
 		}
 		err = tx.QueryRow(`INSERT INTO users (email, name, api_key, password_hash)
-			VALUES ($1, $2, $3, '') RETURNING id, email, name, COALESCE(role, 'owner'), api_key, password_hash, created_at, updated_at`,
+			VALUES ($1, $2, $3, '') RETURNING id, email, name, COALESCE(role, ''), api_key, password_hash, created_at, updated_at`,
 			normalizedEmail, name, generateAPIKey()).
 			Scan(&user.ID, &user.Email, &user.Name, &user.Role, &user.APIKey, &user.PasswordHash, &user.CreatedAt, &user.UpdatedAt)
 	}
@@ -437,7 +438,7 @@ func (s *PGStore) ListReminderTargets() ([]model.ReminderTarget, error) {
 		FROM push_subscriptions ps
 		JOIN users u ON u.id = ps.user_id
 		JOIN reminder_preferences rp ON rp.user_id = ps.user_id
-		WHERE rp.enabled = TRUE`)
+		WHERE rp.enabled = TRUE AND COALESCE(u.role, '') <> 'partner'`)
 	if err != nil {
 		return nil, fmt.Errorf("listing reminder targets: %w", err)
 	}
@@ -557,7 +558,7 @@ func (s *PGStore) GetUserBySession(sessionID string) (*model.User, error) {
 	hash := hashString(sessionID)
 	user := &model.User{}
 	var expires sql.NullTime
-	err := s.db.QueryRow(`SELECT u.id, u.email, u.name, COALESCE(u.role, 'owner'), u.api_key, u.password_hash, u.created_at, u.updated_at, s.expires_at
+	err := s.db.QueryRow(`SELECT u.id, u.email, u.name, COALESCE(u.role, ''), u.api_key, u.password_hash, u.created_at, u.updated_at, s.expires_at
 		FROM sessions s JOIN users u ON u.id = s.user_id
 		WHERE s.id = $1`, hash).Scan(&user.ID, &user.Email, &user.Name, &user.Role, &user.APIKey, &user.PasswordHash, &user.CreatedAt, &user.UpdatedAt, &expires)
 	if err == sql.ErrNoRows {

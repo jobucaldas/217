@@ -27,13 +27,6 @@ func normalizeInviteCode(code string) string {
 	return strings.ToUpper(strings.TrimSpace(code))
 }
 
-func roleOrOwner(role string) string {
-	if role == model.RolePartner {
-		return model.RolePartner
-	}
-	return model.RoleOwner
-}
-
 func (s *MemoryStore) GetUserByID(userID string) (*model.User, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -78,6 +71,7 @@ func (s *MemoryStore) DeleteUser(userID string) error {
 		}
 	}
 	delete(s.preferences, userID)
+	delete(s.partnerAlerts, userID)
 	for endpoint, sub := range s.subscriptions {
 		if sub.UserID == userID {
 			delete(s.subscriptions, endpoint)
@@ -158,10 +152,13 @@ func (s *MemoryStore) unreadNotesLocked(ownerID string) int {
 }
 
 func (s *MemoryStore) shareStateLocked(user *model.User) *model.ShareState {
-	role := roleOrOwner(user.Role)
+	role := model.NormalizeRole(user.Role)
 	state := &model.ShareState{
 		Status:          model.ShareNone,
 		CanEditCalendar: role == model.RoleOwner,
+	}
+	if role == "" {
+		return state
 	}
 	if role == model.RoleOwner {
 		live := s.liveShareForOwnerLocked(user.ID)
@@ -186,8 +183,7 @@ func (s *MemoryStore) shareStateLocked(user *model.User) *model.ShareState {
 	if live == nil {
 		latest := s.latestShareForPartnerLocked(user.ID)
 		if latest == nil {
-			state.Status = model.ShareRevoked
-			state.CanEditCalendar = false
+			// Partner who has not joined a calendar yet.
 			return state
 		}
 		state.Status = latest.Status
@@ -224,7 +220,7 @@ func (s *MemoryStore) EnableShare(ownerID string) (*model.ShareState, error) {
 	if user == nil {
 		return nil, fmt.Errorf("user not found")
 	}
-	if roleOrOwner(user.Role) != model.RoleOwner {
+	if model.NormalizeRole(user.Role) != model.RoleOwner {
 		return nil, fmt.Errorf("only calendar owners can share")
 	}
 	if live := s.liveShareForOwnerLocked(ownerID); live != nil {
@@ -254,7 +250,7 @@ func (s *MemoryStore) RevokeShare(ownerID string) (*model.ShareState, error) {
 	if user == nil {
 		return nil, fmt.Errorf("user not found")
 	}
-	if roleOrOwner(user.Role) != model.RoleOwner {
+	if model.NormalizeRole(user.Role) != model.RoleOwner {
 		return nil, fmt.Errorf("only calendar owners can revoke")
 	}
 	live := s.liveShareForOwnerLocked(ownerID)
@@ -277,10 +273,8 @@ func (s *MemoryStore) AcceptShare(partnerID, inviteCode string) (*model.ShareSta
 	if partner == nil {
 		return nil, fmt.Errorf("user not found")
 	}
-	if roleOrOwner(partner.Role) == model.RoleOwner {
-		if s.liveShareForOwnerLocked(partnerID) != nil {
-			return nil, fmt.Errorf("owners with an active share cannot join another calendar")
-		}
+	if model.NormalizeRole(partner.Role) == model.RoleOwner {
+		return nil, fmt.Errorf("calendar owners cannot join another calendar")
 	}
 	if live := s.liveShareForPartnerLocked(partnerID); live != nil {
 		return nil, fmt.Errorf("already linked to a calendar")
@@ -313,8 +307,11 @@ func (s *MemoryStore) CalendarSubjectID(userID string) (string, error) {
 	if user == nil {
 		return "", fmt.Errorf("user not found")
 	}
-	if roleOrOwner(user.Role) == model.RoleOwner {
+	switch model.NormalizeRole(user.Role) {
+	case model.RoleOwner:
 		return userID, nil
+	case "":
+		return "", fmt.Errorf("role not chosen")
 	}
 	live := s.liveShareForPartnerLocked(userID)
 	if live == nil || live.Status != model.ShareActive {
@@ -330,7 +327,7 @@ func (s *MemoryStore) ListInboxNotes(ownerID string) ([]*model.PartnerNote, erro
 	if user == nil {
 		return nil, fmt.Errorf("user not found")
 	}
-	if roleOrOwner(user.Role) != model.RoleOwner {
+	if model.NormalizeRole(user.Role) != model.RoleOwner {
 		return nil, fmt.Errorf("only owners have an inbox")
 	}
 	out := make([]*model.PartnerNote, 0)
@@ -370,7 +367,7 @@ func (s *MemoryStore) CreatePartnerNote(partnerID, body string) (*model.PartnerN
 	if partner == nil {
 		return nil, fmt.Errorf("user not found")
 	}
-	if roleOrOwner(partner.Role) != model.RolePartner {
+	if model.NormalizeRole(partner.Role) != model.RolePartner {
 		return nil, fmt.Errorf("only partners can leave inbox notes")
 	}
 	live := s.liveShareForPartnerLocked(partnerID)
@@ -404,4 +401,28 @@ func (s *MemoryStore) MarkInboxNoteRead(ownerID, noteID string) error {
 		note.ReadAt = &now
 	}
 	return nil
+}
+
+func (s *MemoryStore) SetRole(userID, role string) (*model.User, error) {
+	role = model.NormalizeRole(role)
+	if role == "" {
+		return nil, fmt.Errorf("role must be owner or partner")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	user := s.findUserLocked(userID)
+	if user == nil {
+		return nil, fmt.Errorf("user not found")
+	}
+	if model.NormalizeRole(user.Role) != role {
+		if s.liveShareForOwnerLocked(userID) != nil {
+			return nil, fmt.Errorf("role locked while a calendar is shared")
+		}
+		if live := s.liveShareForPartnerLocked(userID); live != nil && live.Status == model.ShareActive {
+			return nil, fmt.Errorf("role locked while a calendar is shared")
+		}
+		user.Role = role
+		user.UpdatedAt = time.Now().UTC()
+	}
+	return sanitizeUser(user), nil
 }

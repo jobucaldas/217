@@ -298,6 +298,9 @@ func TestSessionCookieAuthExpiryAndLogout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s.SetRole(user.ID, "owner"); err != nil {
+		t.Fatal(err)
+	}
 	cookie := sessionCookie(t, s, user.ID)
 
 	listReq := authedRequest(http.MethodGet, "/api/entries?year=2026&month=1", cookie, nil)
@@ -454,6 +457,9 @@ func TestProtectedRoutesStillTrackEntriesWithCookieAuth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s.SetRole(user.ID, "owner"); err != nil {
+		t.Fatal(err)
+	}
 	cookie := sessionCookie(t, s, user.ID)
 
 	upsertBody := `{"taken":true,"notes":"testado","heart":true}`
@@ -491,6 +497,9 @@ func TestUpsertNoteHeartWithoutTakenStatus(t *testing.T) {
 	h, s := newTestHandler(t)
 	user, err := s.CreateUser("open@example.com", "Open Day", "password123")
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetRole(user.ID, "owner"); err != nil {
 		t.Fatal(err)
 	}
 	cookie := sessionCookie(t, s, user.ID)

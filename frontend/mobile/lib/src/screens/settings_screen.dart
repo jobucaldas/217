@@ -7,7 +7,9 @@ import '../i18n.dart';
 import '../models.dart';
 import '../platform/open_url.dart';
 import '../theme/app_theme.dart';
+import 'partner_alerts_screen.dart';
 import 'reminder_settings_screen.dart';
+import 'role_screen.dart';
 import 'share_screens.dart';
 
 /// Grouped inset settings (Material 3 / iOS Settings style).
@@ -28,7 +30,7 @@ class SettingsPage extends StatefulWidget {
     this.onShareChanged,
     this.onAccountDeleted,
     this.onLogout,
-    this.onJoinedCalendar,
+    this.onRoleChanged,
     this.expandServer = false,
   });
 
@@ -47,8 +49,8 @@ class SettingsPage extends StatefulWidget {
   final VoidCallback? onAccountDeleted;
   final Future<void> Function()? onLogout;
 
-  /// Called after this account joined another calendar with an invite code.
-  final ValueChanged<ShareState>? onJoinedCalendar;
+  /// Called after an owner with nothing shared switched to partner.
+  final ValueChanged<SessionSnapshot>? onRoleChanged;
 
   /// Open with the self-hosted server field already expanded.
   final bool expandServer;
@@ -152,24 +154,47 @@ class _SettingsPageState extends State<SettingsPage> {
           if (widget.onLogout != null) ...[
             _SettingsSection(
               children: [
-                ListTile(
-                  title: Text(widget.strings.reminders),
-                  subtitle: Text(widget.strings.reminderEnable),
-                  trailing: Icon(
-                    Icons.chevron_right,
-                    color: scheme.onSurfaceVariant,
-                  ),
-                  onTap: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => ReminderSettingsScreen(
-                          api: widget.api,
-                          strings: widget.strings,
+                if (widget.user?.isPartner ?? false)
+                  ListTile(
+                    key: const ValueKey('settings-partner-alerts'),
+                    title: Text(widget.strings.partnerAlerts),
+                    subtitle: Text(widget.strings.partnerAlertsSubtitle),
+                    trailing: Icon(
+                      Icons.chevron_right,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => PartnerAlertsScreen(
+                            api: widget.api,
+                            strings: widget.strings,
+                            share: widget.share ??
+                                const ShareState(status: 'none'),
+                          ),
                         ),
-                      ),
-                    );
-                  },
-                ),
+                      );
+                    },
+                  )
+                else
+                  ListTile(
+                    title: Text(widget.strings.reminders),
+                    subtitle: Text(widget.strings.reminderEnable),
+                    trailing: Icon(
+                      Icons.chevron_right,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => ReminderSettingsScreen(
+                            api: widget.api,
+                            strings: widget.strings,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
               ],
             ),
             const SizedBox(height: 20),
@@ -285,8 +310,34 @@ class _SettingsPageState extends State<SettingsPage> {
               user: widget.user!,
               share: widget.share!,
               onShareChanged: widget.onShareChanged!,
-              onJoined: widget.onJoinedCalendar,
             ),
+            // Picked the wrong role: only while nothing is shared.
+            if (widget.share!.isNone && widget.onRoleChanged != null) ...[
+              const SizedBox(height: 12),
+              _SettingsSection(
+                children: [
+                  ListTile(
+                    key: const ValueKey('settings-switch-partner'),
+                    title: Text(widget.strings.switchToPartner),
+                    trailing: Icon(
+                      Icons.swap_horiz,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                    onTap: () async {
+                      final session = await confirmRoleSwitch(
+                        context: context,
+                        api: widget.api,
+                        strings: widget.strings,
+                        role: 'partner',
+                      );
+                      if (session == null || !context.mounted) return;
+                      widget.onRoleChanged!(session);
+                      Navigator.of(context).pop();
+                    },
+                  ),
+                ],
+              ),
+            ],
           ],
           // Signed out only: the server is picked before signing in, since
           // an account lives on one server. Never on web, which is served by
