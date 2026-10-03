@@ -7,14 +7,20 @@ import 'package:a217/src/theme/app_theme.dart';
 
 void main() {
   test('palette ids round-trip', () {
-    expect(AppPaletteX.fromId('mint'), AppPalette.mint);
-    expect(AppPaletteX.fromId('plum'), AppPalette.plum);
-    expect(AppPaletteX.fromId('azure'), AppPalette.azure);
-    expect(AppPaletteX.fromId('blue'), AppPalette.azure);
-    expect(AppPaletteX.fromId('forest'), AppPalette.azure);
-    expect(AppPaletteX.fromId(null), AppPalette.azure);
-    expect(AppPalette.azure.id, 'azure');
-    expect(AppPalette.mint.id, 'mint');
+    expect(AppPaletteX.fromId('blue'), AppPalette.blue);
+    expect(AppPaletteX.fromId('cyan'), AppPalette.cyan);
+    expect(AppPaletteX.fromId('purple'), AppPalette.purple);
+    expect(AppPaletteX.fromId(null), AppPalette.blue);
+    expect(AppPalette.blue.id, 'blue');
+    expect(AppPalette.cyan.id, 'cyan');
+    expect(AppPalette.purple.id, 'purple');
+  });
+
+  test('legacy palette ids still resolve', () {
+    expect(AppPaletteX.fromId('azure'), AppPalette.blue);
+    expect(AppPaletteX.fromId('mint'), AppPalette.cyan);
+    expect(AppPaletteX.fromId('plum'), AppPalette.purple);
+    expect(AppPaletteX.fromId('forest'), AppPalette.blue);
   });
 
   test('theme mode ids used by AppearancePrefs', () {

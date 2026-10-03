@@ -27,7 +27,7 @@ Future<void> _pump(
     MaterialApp(
       theme: buildApp217Theme(
         brightness: brightness,
-        palette: AppPalette.azure,
+        palette: AppPalette.blue,
       ),
       home: Scaffold(
         body: SingleChildScrollView(

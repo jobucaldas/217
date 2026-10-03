@@ -26,16 +26,19 @@ class TodayNudge extends StatefulWidget {
       todayEntry == null || todayEntry.taken == null;
 
   /// Pill height (logical px).
-  static const double pillHeight = 48;
+  static const double pillHeight = 56;
 
   /// Plus accessory diameter (logical px).
-  static const double plusSize = 28;
+  static const double plusSize = 32;
 
   /// How far the plus overhangs past the pill’s outer top corner.
-  static const double plusOverhang = 10;
+  static const double plusOverhang = 12;
 
   /// Horizontal padding inside the text pill.
-  static const double pillPadX = 14;
+  static const double pillPadX = 24;
+
+  /// Label font size (logical px).
+  static const double labelSize = 16;
 
   /// Total control height including corner plus overhang.
   static double get height => pillHeight + plusOverhang;
@@ -47,7 +50,7 @@ class TodayNudge extends StatefulWidget {
         text: label,
         style: style ??
             const TextStyle(
-              fontSize: 14,
+              fontSize: labelSize,
               fontWeight: FontWeight.w700,
             ),
       ),
@@ -212,6 +215,7 @@ class _TodayNudgeState extends State<TodayNudge> with TickerProviderStateMixin {
     final label = widget.strings.updateToday;
     final labelStyle = Theme.of(context).textTheme.labelLarge?.copyWith(
           color: scheme.onPrimaryContainer,
+          fontSize: TodayNudge.labelSize,
           fontWeight: FontWeight.w700,
           letterSpacing: 0.1,
         );
@@ -256,16 +260,24 @@ class _TodayNudgeState extends State<TodayNudge> with TickerProviderStateMixin {
                           child: InkWell(
                             onTap: widget.onRecord,
                             customBorder: const StadiumBorder(),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: TodayNudge.pillPadX,
-                                vertical: 12,
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(
+                                minHeight: TodayNudge.pillHeight,
                               ),
-                              child: Text(
-                                label,
-                                maxLines: 1,
-                                softWrap: false,
-                                style: labelStyle,
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: TodayNudge.pillPadX,
+                                  vertical: 16,
+                                ),
+                                child: Center(
+                                  widthFactor: 1,
+                                  child: Text(
+                                    label,
+                                    maxLines: 1,
+                                    softWrap: false,
+                                    style: labelStyle,
+                                  ),
+                                ),
                               ),
                             ),
                           ),
@@ -290,7 +302,7 @@ class _TodayNudgeState extends State<TodayNudge> with TickerProviderStateMixin {
                               child: Icon(
                                 Icons.add,
                                 color: scheme.onPrimary,
-                                size: 18,
+                                size: 20,
                                 semanticLabel: label,
                               ),
                             ),

@@ -100,7 +100,7 @@ void main() {
             MaterialApp(
               theme: buildApp217Theme(
                 brightness: brightness,
-                palette: AppPalette.azure,
+                palette: AppPalette.blue,
               ),
               home: MediaQuery(
                 data: MediaQueryData(size: size),
@@ -113,7 +113,7 @@ void main() {
                   ),
                   strings: Strings(AppLanguage.en),
                   onOpenSettings: () {},
-                  palette: AppPalette.azure,
+                  palette: AppPalette.blue,
                 ),
               ),
             ),
@@ -176,7 +176,7 @@ void main() {
         MaterialApp(
           theme: buildApp217Theme(
             brightness: Brightness.light,
-            palette: AppPalette.azure,
+            palette: AppPalette.blue,
           ),
           home: MediaQuery(
             data: const MediaQueryData(size: size),
@@ -189,7 +189,7 @@ void main() {
               ),
               strings: const Strings(AppLanguage.en),
               onOpenSettings: () {},
-              palette: AppPalette.azure,
+              palette: AppPalette.blue,
             ),
           ),
         ),
@@ -218,7 +218,7 @@ void main() {
       MaterialApp(
         theme: buildApp217Theme(
           brightness: Brightness.light,
-          palette: AppPalette.azure,
+          palette: AppPalette.blue,
         ),
         home: MediaQuery(
           data: const MediaQueryData(size: size),
@@ -231,7 +231,7 @@ void main() {
             ),
             strings: const Strings(AppLanguage.en),
             onOpenSettings: () {},
-            palette: AppPalette.azure,
+            palette: AppPalette.blue,
           ),
         ),
       ),
@@ -273,7 +273,7 @@ void main() {
       MaterialApp(
         theme: buildApp217Theme(
           brightness: Brightness.light,
-          palette: AppPalette.azure,
+          palette: AppPalette.blue,
         ),
         home: MediaQuery(
           data: const MediaQueryData(size: size),
@@ -286,7 +286,7 @@ void main() {
             ),
             strings: const Strings(AppLanguage.en),
             onOpenSettings: () {},
-            palette: AppPalette.azure,
+            palette: AppPalette.blue,
           ),
         ),
       ),

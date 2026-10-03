@@ -73,7 +73,7 @@ class _CycleApi extends ApiClient {
 }
 
 Widget _app(Brightness brightness, Widget home) => MaterialApp(
-      theme: buildApp217Theme(brightness: brightness, palette: AppPalette.azure),
+      theme: buildApp217Theme(brightness: brightness, palette: AppPalette.blue),
       home: home,
     );
 
@@ -378,7 +378,7 @@ void main() {
             strings: _en,
             language: AppLanguage.en,
             themeMode: ThemeMode.system,
-            palette: AppPalette.azure,
+            palette: AppPalette.blue,
             onLanguageChanged: (_) {},
             onThemeModeChanged: (_) {},
             onPaletteChanged: (_) {},

@@ -40,7 +40,7 @@ class _App217State extends State<App217> {
   bool _loading = true;
   AppLanguage _language = _deviceLanguage();
   ThemeMode _themeMode = ThemeMode.system;
-  AppPalette _palette = AppPalette.azure;
+  AppPalette _palette = AppPalette.blue;
   bool _reminderHintDismissed = false;
   bool _selfHostCardDismissed = false;
 
