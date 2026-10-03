@@ -86,6 +86,7 @@ void main() {
           for (final (name, color) in [
             ('PMS ring', App217Colors.pms(brightness, palette)),
             ('period drop', App217Colors.period(brightness, palette)),
+            ('intimacy heart', App217Colors.intimacy(brightness, palette)),
           ]) {
             expect(
               meetsLargeContrast(color, scaffold),
