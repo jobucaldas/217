@@ -8,7 +8,7 @@ Anticonceptional (birth control) intake tracker with a shared calendar, in Engli
 
 Your calendar lives on a server you run. You only need Docker; no clone of this repo.
 
-## Run your own server
+## Self-hosting
 
 **1. WorkOS.** You bring your own sign-in: create a project at [WorkOS](https://workos.com/docs/authkit) and enable AuthKit (free tier is enough). Copy the **Client ID** (public) and an **API key** (secret). Nothing of the maintainers' is built in, and the apps pick up your client ID from your server. Add these redirect URIs, with your public address:
 
