@@ -18,6 +18,9 @@ func TestAccountDeleteAndShareHTTP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s.SetRole(owner.ID, "owner"); err != nil {
+		t.Fatal(err)
+	}
 	partner, err := s.CreateUser("bf@example.com", "Boyfriend", "pw")
 	if err != nil {
 		t.Fatal(err)

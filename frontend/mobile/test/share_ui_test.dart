@@ -19,9 +19,10 @@ void main() {
             brightness: brightness,
             palette: AppPalette.azure,
           ),
-          home: PartnerRevokedScreen(
+          home: PartnerJoinScreen(
             api: api,
             strings: const Strings(AppLanguage.en),
+            revoked: true,
             onJoined: (_) {},
             onAccountDeleted: () {},
             onOpenSettings: () {},
@@ -85,7 +86,12 @@ void main() {
   test('user role helpers', () {
     const owner = User(id: '1', email: 'a@b.c', name: 'A', role: 'owner');
     const partner = User(id: '2', email: 'b@b.c', name: 'B', role: 'partner');
+    final fresh = User.fromJson({'id': '3', 'email': 'c@b.c', 'role': ''});
     expect(owner.isOwner, isTrue);
+    expect(owner.isPartner, isFalse);
     expect(partner.isPartner, isTrue);
+    expect(partner.isOwner, isFalse);
+    expect(fresh.hasRole, isFalse);
+    expect(fresh.isOwner, isFalse);
   });
 }

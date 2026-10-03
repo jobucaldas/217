@@ -154,6 +154,10 @@ func StartWithPush(addr, databaseURL, appBaseURL string, push PushConfig, workos
 	mux.HandleFunc("GET /api/stats", h.AuthMiddleware(h.GetStats))
 
 	mux.HandleFunc("DELETE /api/account", h.AuthMiddleware(h.DeleteAccount))
+	mux.HandleFunc("PUT /api/account/role", h.AuthMiddleware(h.SetRole))
+	mux.HandleFunc("GET /api/cycle", h.AuthMiddleware(h.GetCycle))
+	mux.HandleFunc("GET /api/partner-alerts", h.AuthMiddleware(h.GetPartnerAlerts))
+	mux.HandleFunc("PUT /api/partner-alerts", h.AuthMiddleware(h.UpsertPartnerAlerts))
 	mux.HandleFunc("GET /api/share", h.AuthMiddleware(h.GetShare))
 	mux.HandleFunc("POST /api/share/enable", h.AuthMiddleware(h.EnableShare))
 	mux.HandleFunc("POST /api/share/revoke", h.AuthMiddleware(h.RevokeShare))

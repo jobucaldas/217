@@ -11,6 +11,7 @@ import 'platform/open_url.dart';
 import 'prefs.dart';
 import 'screens/auth_screen.dart';
 import 'screens/calendar_screen.dart';
+import 'screens/role_screen.dart';
 import 'screens/server_setup_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/share_screens.dart';
@@ -141,13 +142,13 @@ class _App217State extends State<App217> {
   }
 
   /// After sign-in, offers to join the calendar from an opened invite link
-  /// when this account can join one (nothing shared yet, or access revoked).
+  /// when this account can join one: no role picked yet (joining makes it a
+  /// partner), or a partner not linked to a calendar. Owners never join.
   Future<void> _offerPendingInvite() async {
     final code = (await _prefs.pendingInvite())?.trim() ?? '';
     final user = _user;
     if (code.isEmpty || user == null || !mounted) return;
-    final canJoin = (user.isOwner && _share.isNone) ||
-        (user.isPartner && _share.isRevoked);
+    final canJoin = !user.hasRole || (user.isPartner && !_share.isActive);
     if (!canJoin) {
       // e.g. the owner opened their own link: nothing to offer.
       await _prefs.clearPendingInvite();
@@ -194,6 +195,32 @@ class _App217State extends State<App217> {
       SnackBar(content: Text(_strings.joinedCalendar)),
     );
     await _refreshSession();
+  }
+
+  void _applySession(SessionSnapshot session) {
+    setState(() {
+      _user = session.user ?? _user;
+      _share = session.share ?? const ShareState(status: 'none');
+    });
+  }
+
+  /// Role picked (first sign-in) or switched.
+  Future<void> _onRoleChosen(SessionSnapshot session) async {
+    _applySession(session);
+    _navKey.currentState?.popUntil((route) => route.isFirst);
+    await _offerPendingInvite();
+  }
+
+  Future<void> _switchToOwner() async {
+    final navContext = _navKey.currentContext;
+    if (navContext == null) return;
+    final session = await confirmRoleSwitch(
+      context: navContext,
+      api: _api,
+      strings: _strings,
+      role: 'owner',
+    );
+    if (session != null && mounted) _applySession(session);
   }
 
   /// A different server means a different account: the API client already
@@ -310,7 +337,7 @@ class _App217State extends State<App217> {
             onAccountDeleted: _user == null ? null : _onAccountDeleted,
             onLogout: _user == null ? null : _logout,
             onApiBaseChanged: _onApiBaseChanged,
-            onJoinedCalendar: _user == null ? null : _onJoinedCalendar,
+            onRoleChanged: _user == null ? null : _onRoleChosen,
             expandServer: expandServer,
           ),
         ),
@@ -376,13 +403,24 @@ class _App217State extends State<App217> {
         onDismissReminderHint: _dismissReminderHint,
       );
     }
-    if (_user!.isPartner && _share.isRevoked) {
-      return PartnerRevokedScreen(
+    if (!_user!.hasRole) {
+      return RoleChoiceScreen(
         api: _api,
         strings: _strings,
+        onChosen: _onRoleChosen,
+        onOpenSettings: _openSettings,
+      );
+    }
+    if (_user!.isPartner && !_share.isActive) {
+      return PartnerJoinScreen(
+        api: _api,
+        strings: _strings,
+        revoked: _share.isRevoked,
         onJoined: _onJoinedCalendar,
         onAccountDeleted: _onAccountDeleted,
         onOpenSettings: _openSettings,
+        // Allowed while unlinked, in case the wrong role was picked.
+        onSwitchToOwner: _switchToOwner,
       );
     }
     return CalendarScreen(

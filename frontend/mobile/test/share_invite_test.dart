@@ -17,24 +17,11 @@ const _openShare = ShareState(
   inviteUrl: 'https://217.example.com/?invite=ABCD1234',
 );
 
-class _JoinApi extends ApiClient {
-  _JoinApi() : super(AppConfig.fromEnvironment());
-
-  String? accepted;
-
-  @override
-  Future<ShareState> acceptShare(String code) async {
-    accepted = code;
-    return const ShareState(status: 'active', canEditCalendar: false);
-  }
-}
-
 Future<void> _pump(
   WidgetTester tester, {
   required ShareState share,
   Brightness brightness = Brightness.light,
   ApiClient? api,
-  ValueChanged<ShareState>? onJoined,
 }) async {
   await tester.pumpWidget(
     MaterialApp(
@@ -50,7 +37,6 @@ Future<void> _pump(
             user: _owner,
             share: share,
             onShareChanged: (_) {},
-            onJoined: onJoined,
           ),
         ),
       ),
@@ -160,27 +146,9 @@ void main() {
     expect(find.text('Revoke access'), findsOneWidget);
   });
 
-  testWidgets('nothing shared: join someone else with a code', (tester) async {
-    final api = _JoinApi();
-    ShareState? joined;
-    await _pump(
-      tester,
-      share: const ShareState(status: 'none'),
-      api: api,
-      onJoined: (share) => joined = share,
-    );
-
+  testWidgets('owners only create invites, never join', (tester) async {
+    await _pump(tester, share: const ShareState(status: 'none'));
     expect(find.text('Create invite'), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('share-join-with-code')));
-    await tester.pumpAndSettle();
-    await tester.enterText(
-      find.byKey(const ValueKey('join-code-field')),
-      ' abcd1234 ',
-    );
-    await tester.tap(find.text('Join'));
-    await tester.pumpAndSettle();
-
-    expect(api.accepted, 'abcd1234');
-    expect(joined?.isActive, isTrue);
+    expect(find.textContaining('code'), findsNothing);
   });
 }

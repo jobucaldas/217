@@ -8,8 +8,8 @@ import '../i18n.dart';
 import '../models.dart';
 import '../platform/share_sheet.dart';
 
-/// Owner settings: send/copy the invite link or code, revoke, or — with
-/// nothing shared yet — join someone else's calendar with their code.
+/// Owner settings: send/copy the invite link or code, or revoke. Owners
+/// never join other calendars; that is the partner role.
 class ShareSettingsSection extends StatefulWidget {
   const ShareSettingsSection({
     super.key,
@@ -18,7 +18,6 @@ class ShareSettingsSection extends StatefulWidget {
     required this.user,
     required this.share,
     required this.onShareChanged,
-    this.onJoined,
   });
 
   final ApiClient api;
@@ -26,9 +25,6 @@ class ShareSettingsSection extends StatefulWidget {
   final User user;
   final ShareState share;
   final ValueChanged<ShareState> onShareChanged;
-
-  /// Called after this account joined another calendar with a code.
-  final ValueChanged<ShareState>? onJoined;
 
   @override
   State<ShareSettingsSection> createState() => _ShareSettingsSectionState();
@@ -87,15 +83,6 @@ class _ShareSettingsSectionState extends State<ShareSettingsSection> {
     }
   }
 
-  Future<void> _join() async {
-    final joined = await showJoinCalendarDialog(
-      context: context,
-      api: widget.api,
-      strings: widget.strings,
-    );
-    if (joined != null) widget.onJoined?.call(joined);
-  }
-
   @override
   Widget build(BuildContext context) {
     if (!widget.user.isOwner) return const SizedBox.shrink();
@@ -145,16 +132,6 @@ class _ShareSettingsSectionState extends State<ShareSettingsSection> {
                             widget.onShareChanged(next);
                           }),
                 ),
-                if (widget.onJoined != null) ...[
-                  divider,
-                  ListTile(
-                    key: const ValueKey('share-join-with-code'),
-                    title: Text(strings.joinWithCode),
-                    subtitle: Text(strings.joinWithCodeHint),
-                    trailing: Icon(Icons.login, color: scheme.onSurfaceVariant),
-                    onTap: _busy ? null : _join,
-                  ),
-                ],
               ] else ...[
                 if (share.isOpen) ...[
                   Padding(
@@ -244,78 +221,6 @@ String joinErrorText(Strings strings, Object err) =>
     err is ApiException && err.statusCode == 400
         ? strings.inviteCodeRejected
         : friendlyError(strings, err);
-
-/// Asks for an invite code and joins that calendar. Returns the new share
-/// state, or null when cancelled or rejected (the error is shown).
-Future<ShareState?> showJoinCalendarDialog({
-  required BuildContext context,
-  required ApiClient api,
-  required Strings strings,
-}) async {
-  final code = await showDialog<String>(
-    context: context,
-    builder: (context) => _JoinCodeDialog(strings: strings),
-  );
-  if (code == null || code.isEmpty || !context.mounted) return null;
-  try {
-    return await api.acceptShare(code);
-  } catch (err) {
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(joinErrorText(strings, err))),
-      );
-    }
-    return null;
-  }
-}
-
-class _JoinCodeDialog extends StatefulWidget {
-  const _JoinCodeDialog({required this.strings});
-
-  final Strings strings;
-
-  @override
-  State<_JoinCodeDialog> createState() => _JoinCodeDialogState();
-}
-
-class _JoinCodeDialogState extends State<_JoinCodeDialog> {
-  final _code = TextEditingController();
-
-  @override
-  void dispose() {
-    _code.dispose();
-    super.dispose();
-  }
-
-  void _submit() => Navigator.pop(context, _code.text.trim());
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(widget.strings.joinWithCode),
-      content: TextField(
-        key: const ValueKey('join-code-field'),
-        controller: _code,
-        autofocus: true,
-        textCapitalization: TextCapitalization.characters,
-        autocorrect: false,
-        textInputAction: TextInputAction.done,
-        onSubmitted: (_) => _submit(),
-        decoration: InputDecoration(labelText: widget.strings.enterInviteCode),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: Text(widget.strings.cancel),
-        ),
-        FilledButton(
-          onPressed: _submit,
-          child: Text(widget.strings.joinCalendar),
-        ),
-      ],
-    );
-  }
-}
 
 /// Bright danger red for irreversible account deletion.
 const kDeleteAccountColor = Color(0xFFDC2626);
@@ -407,15 +312,18 @@ class _DeleteAccountSectionState extends State<DeleteAccountSection> {
   }
 }
 
-/// Partner reconnect / delete after revoke.
-class PartnerRevokedScreen extends StatefulWidget {
-  const PartnerRevokedScreen({
+/// Partner without a calendar yet (or whose access was revoked): join with
+/// her code, switch to owner, or delete the account.
+class PartnerJoinScreen extends StatefulWidget {
+  const PartnerJoinScreen({
     super.key,
     required this.api,
     required this.strings,
     required this.onJoined,
     required this.onAccountDeleted,
     required this.onOpenSettings,
+    this.revoked = false,
+    this.onSwitchToOwner,
   });
 
   final ApiClient api;
@@ -424,11 +332,17 @@ class PartnerRevokedScreen extends StatefulWidget {
   final VoidCallback onAccountDeleted;
   final VoidCallback onOpenSettings;
 
+  /// Access was revoked (vs. never joined).
+  final bool revoked;
+
+  /// Picked the wrong role at first sign-in.
+  final VoidCallback? onSwitchToOwner;
+
   @override
-  State<PartnerRevokedScreen> createState() => _PartnerRevokedScreenState();
+  State<PartnerJoinScreen> createState() => _PartnerJoinScreenState();
 }
 
-class _PartnerRevokedScreenState extends State<PartnerRevokedScreen> {
+class _PartnerJoinScreenState extends State<PartnerJoinScreen> {
   final _code = TextEditingController();
   bool _busy = false;
 
@@ -506,22 +420,25 @@ class _PartnerRevokedScreenState extends State<PartnerRevokedScreen> {
           ),
         ],
       ),
-      body: Padding(
+      body: ListView(
         padding: const EdgeInsets.fromLTRB(24, 32, 24, 24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              widget.strings.partnerRevokedTitle,
+              widget.revoked
+                  ? widget.strings.partnerRevokedTitle
+                  : widget.strings.partnerJoinTitle,
               style: text.headlineMedium?.copyWith(color: scheme.onSurface),
             ),
             const SizedBox(height: 12),
             Text(
-              widget.strings.partnerRevokedBody,
+              widget.revoked
+                  ? widget.strings.partnerRevokedBody
+                  : widget.strings.partnerJoinBody,
               style: text.bodyLarge?.copyWith(color: scheme.onSurfaceVariant),
             ),
             const SizedBox(height: 28),
             TextField(
+              key: const ValueKey('partner-join-code'),
               controller: _code,
               textCapitalization: TextCapitalization.characters,
               decoration: InputDecoration(
@@ -535,13 +452,21 @@ class _PartnerRevokedScreenState extends State<PartnerRevokedScreen> {
               child: Text(widget.strings.joinCalendar),
             ),
             const SizedBox(height: 8),
+            if (widget.onSwitchToOwner != null) ...[
+              const SizedBox(height: 8),
+              TextButton(
+                key: const ValueKey('switch-to-owner'),
+                onPressed: _busy ? null : widget.onSwitchToOwner,
+                child: Text(widget.strings.switchToOwner),
+              ),
+            ],
+            const SizedBox(height: 24),
             OutlinedButton(
               onPressed: _busy ? null : _delete,
               style: OutlinedButton.styleFrom(foregroundColor: scheme.error),
               child: Text(widget.strings.deleteAccount),
             ),
           ],
-        ),
       ),
     );
   }

@@ -349,16 +349,6 @@ class Strings {
       );
 
   // Sharing (partner side)
-  String get joinWithCode => _t(
-        'Join a calendar with a code',
-        'Entrar em um calendário com código',
-        'Unirse a un calendario con un código',
-      );
-  String get joinWithCodeHint => _t(
-        'Got an invite? Enter the code here.',
-        'Recebeu um convite? Use o código aqui.',
-        '¿Recibiste una invitación? Introduce el código aquí.',
-      );
   String get pendingInviteTitle => _t(
         'Join the shared calendar?',
         'Entrar no calendário compartilhado?',
@@ -403,5 +393,149 @@ class Strings {
         'Read-only calendar',
         'Calendário em modo leitura',
         'Calendario de solo lectura',
+      );
+
+  // Roles: owner (takes the pill) vs partner (follows her calendar)
+  String get roleChoiceTitle => _t(
+        'How will you use 217?',
+        'Como você vai usar o 217?',
+        '¿Cómo usarás 217?',
+      );
+  String get roleOwnerTitle =>
+      _t('I take the pill', 'Eu tomo a pílula', 'Yo tomo la píldora');
+  String get roleOwnerBody => _t(
+        'Log your pills and period. Invite your partner to follow along.',
+        'Registre a pílula e a menstruação. Convide seu parceiro para acompanhar.',
+        'Registra la píldora y la regla. Invita a tu pareja a seguirlo.',
+      );
+  String get rolePartnerTitle =>
+      _t("I'm the partner", 'Sou o parceiro', 'Soy la pareja');
+  String get rolePartnerBody => _t(
+        'Follow her calendar with an invite. Get PMS and missed-pill alerts.',
+        'Acompanhe o calendário dela com um convite. Receba avisos de TPM e de pílula esquecida.',
+        'Sigue su calendario con una invitación. Recibe avisos de SPM y de píldora olvidada.',
+      );
+  String get roleChangeLater => _t(
+        'You can change this later while nothing is shared.',
+        'Dá para mudar depois, enquanto nada estiver compartilhado.',
+        'Puedes cambiarlo después mientras no haya nada compartido.',
+      );
+  String get switchToPartner => _t(
+        "Switch to partner mode",
+        'Mudar para modo parceiro',
+        'Cambiar a modo pareja',
+      );
+  String get switchToOwner => _t(
+        'I take the pill instead',
+        'Na verdade, eu tomo a pílula',
+        'En realidad, yo tomo la píldora',
+      );
+  String get switchToPartnerWarn => _t(
+        "Your logged days stay saved but are hidden while you're in partner mode.",
+        'Seus dias registrados continuam salvos, mas ficam ocultos no modo parceiro.',
+        'Tus días registrados se guardan, pero se ocultan en modo pareja.',
+      );
+  String get switchRoleConfirm => _t('Switch', 'Mudar', 'Cambiar');
+  String get roleLocked => _t(
+        'Stop sharing the calendar before changing this.',
+        'Pare de compartilhar o calendário antes de mudar isso.',
+        'Deja de compartir el calendario antes de cambiar esto.',
+      );
+  String get partnerJoinTitle => _t(
+        'Join her calendar',
+        'Entre no calendário dela',
+        'Únete a su calendario',
+      );
+  String get partnerJoinBody => _t(
+        'Ask her for the invite link or code from her 217 settings.',
+        'Peça a ela o link ou código de convite nos ajustes do 217.',
+        'Pídele el enlace o código de invitación de sus ajustes de 217.',
+      );
+
+  // Cycle / PMS
+  String get periodLabel => _t('Period', 'Menstruação', 'Regla');
+  String get legendPeriod => periodLabel;
+  String get legendPms => _t('PMS', 'TPM', 'SPM');
+  String cycleNext(String period, String pms) => _t(
+        'Next period ~$period · PMS from $pms',
+        'Próxima menstruação ~$period · TPM a partir de $pms',
+        'Próxima regla ~$period · SPM desde $pms',
+      );
+  String cyclePmsNow(String period) => _t(
+        'PMS likely now · period ~$period',
+        'Provável TPM agora · menstruação ~$period',
+        'Posible SPM ahora · regla ~$period',
+      );
+  String get cyclePeriodNow => _t(
+        'Period expected around now',
+        'Menstruação prevista para agora',
+        'Regla prevista para estos días',
+      );
+  String get cycleHintOwner => _t(
+        'Mark period days to see PMS predictions',
+        'Marque os dias de menstruação para ver a previsão de TPM',
+        'Marca los días de regla para ver la previsión de SPM',
+      );
+
+  // Partner alerts
+  String get partnerAlerts => _t('Alerts', 'Avisos', 'Avisos');
+  String get partnerAlertsSubtitle => _t(
+        'PMS and pill not logged',
+        'TPM e pílula não registrada',
+        'SPM y píldora no registrada',
+      );
+  String get pmsAlertTitle =>
+      _t('PMS heads-up', 'Aviso de TPM', 'Aviso de SPM');
+  String get pmsAlertBody => _t(
+        'On the day her PMS is predicted to start',
+        'No dia em que a TPM dela deve começar',
+        'El día en que se prevé que empiece su SPM',
+      );
+  String get pillAlertTitle => _t(
+        'Pill not logged',
+        'Pílula não registrada',
+        'Píldora no registrada',
+      );
+  String get pillAlertBody => _t(
+        "If today's pill isn't logged by this time",
+        'Se a pílula de hoje não estiver registrada até esse horário',
+        'Si la píldora de hoy no está registrada a esta hora',
+      );
+  String get partnerAlertsNote => _t(
+        'Alerts are scheduled on this phone from her latest calendar each time 217 syncs, so open it now and then.',
+        'Os avisos são agendados neste celular com o calendário mais recente dela sempre que o 217 sincroniza, então abra o app de vez em quando.',
+        'Los avisos se programan en este teléfono con su calendario más reciente cada vez que 217 se sincroniza, así que ábrelo de vez en cuando.',
+      );
+  String get partnerAlertsWeb => _t(
+        'Alerts are delivered by the Android app.',
+        'Os avisos são entregues pelo app Android.',
+        'Los avisos los entrega la app de Android.',
+      );
+  String get partnerAlertsNeedLink => _t(
+        'Alerts start once you join her calendar.',
+        'Os avisos começam quando você entrar no calendário dela.',
+        'Los avisos empiezan cuando te unas a su calendario.',
+      );
+  String partnerName(String name) =>
+      name.trim().isEmpty ? _t('She', 'Ela', 'Ella') : name.trim();
+  String get pmsNotifTitle => _t(
+        'PMS may start today',
+        'A TPM pode começar hoje',
+        'El SPM puede empezar hoy',
+      );
+  String pmsNotifBody(String name, String period) => _t(
+        '${partnerName(name)}: PMS days predicted from today, period ~$period.',
+        '${partnerName(name)}: TPM prevista a partir de hoje, menstruação ~$period.',
+        '${partnerName(name)}: SPM previsto desde hoy, regla ~$period.',
+      );
+  String get pillNotifTitle => _t(
+        'Pill not logged yet',
+        'Pílula ainda não registrada',
+        'Píldora aún no registrada',
+      );
+  String pillNotifBody(String name) => _t(
+        "${partnerName(name)} hadn't logged today's pill when 217 last synced.",
+        '${partnerName(name)} não tinha registrado a pílula de hoje na última sincronização do 217.',
+        '${partnerName(name)} no había registrado la píldora de hoy en la última sincronización de 217.',
       );
 }

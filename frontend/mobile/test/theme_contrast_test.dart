@@ -82,6 +82,30 @@ void main() {
             isTrue,
             reason: 'day number on taken cell (${palette.name}/$brightness)',
           );
+          // Cycle marks sit on the scaffold gap and on empty day cells.
+          for (final (name, color) in [
+            ('PMS ring', App217Colors.pms(brightness, palette)),
+            ('period drop', App217Colors.period(brightness, palette)),
+          ]) {
+            expect(
+              meetsLargeContrast(color, scaffold),
+              isTrue,
+              reason: '$name on scaffold (${palette.name}/$brightness)',
+            );
+            expect(
+              meetsLargeContrast(color, scheme.surface),
+              isTrue,
+              reason: '$name on day cell (${palette.name}/$brightness)',
+            );
+          }
+          expect(
+            meetsLargeContrast(
+              App217Colors.onFilledCell(brightness, palette),
+              App217Colors.cellMissed(brightness, palette),
+            ),
+            isTrue,
+            reason: 'cell icons on missed cell (${palette.name}/$brightness)',
+          );
           expect(
             meetsBodyContrast(scheme.onErrorContainer, scheme.errorContainer),
             isTrue,

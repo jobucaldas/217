@@ -8,6 +8,7 @@ import '../api/client.dart';
 import '../errors.dart';
 import '../i18n.dart';
 import '../models.dart';
+import '../notifications/partner_alert_sync.dart';
 import '../theme/app_theme.dart';
 import 'share_screens.dart';
 import 'today_nudge.dart';
@@ -37,8 +38,12 @@ class CalendarScreen extends StatefulWidget {
 }
 
 class _CalendarScreenState extends State<CalendarScreen>
-    with TickerProviderStateMixin {
+    with TickerProviderStateMixin, WidgetsBindingObserver {
   late DateTime _month;
+  CycleInfo _cycle = CycleInfo.empty;
+
+  /// Inputs of the last partner-alert sync; month swipes don't replan.
+  String? _alertSyncKey;
   Map<String, Entry> _entries = {};
   Map<String, Entry> _prevEntries = {};
   Map<String, Entry> _nextEntries = {};
@@ -82,11 +87,20 @@ class _CalendarScreenState extends State<CalendarScreen>
           setState(() => _dragPx = _monthSnapAnim!.value);
         }
       });
+    WidgetsBinding.instance.addObserver(this);
     _load();
+  }
+
+  /// Back in the foreground: her calendar may have changed (and partner
+  /// alerts are replanned from it).
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) _load();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _wheelIdle?.cancel();
     _monthSnap.dispose();
     super.dispose();
@@ -141,6 +155,49 @@ class _CalendarScreenState extends State<CalendarScreen>
     } catch (err) {
       if (!mounted) return;
       setState(() => _error = friendlyError(widget.strings, err));
+      return;
+    }
+    await _loadCycle();
+  }
+
+  /// Predictions are a bonus on top of the calendar: failures (older
+  /// servers) leave the grid as is.
+  Future<void> _loadCycle() async {
+    CycleInfo cycle;
+    try {
+      cycle = await widget.api.getCycle(_todayKey);
+    } catch (_) {
+      return;
+    }
+    if (!mounted) return;
+    setState(() => _cycle = cycle);
+    if (widget.user.isPartner) await _syncPartnerAlerts(cycle);
+  }
+
+  Future<void> _syncPartnerAlerts(CycleInfo cycle) async {
+    final todayLogged = _todayEntry?.taken == true;
+    final key = [
+      _todayKey,
+      todayLogged,
+      widget.share.isActive,
+      for (final w in cycle.predictions) w.pmsStart.toIso8601String(),
+    ].join('|');
+    if (key == _alertSyncKey) return;
+    try {
+      final pref = await widget.api.getPartnerAlerts();
+      // Only touch the OS scheduler once the partner opted in.
+      if (!pref.pmsEnabled && !pref.pillEnabled) return;
+      await syncPartnerAlertsFrom(
+        strings: widget.strings,
+        pref: pref,
+        cycle: cycle,
+        linked: widget.share.isActive,
+        todayLogged: todayLogged,
+        ownerName: widget.share.ownerName,
+      );
+      _alertSyncKey = key;
+    } catch (_) {
+      // Alerts are best-effort; the calendar still works.
     }
   }
 
@@ -272,6 +329,7 @@ class _CalendarScreenState extends State<CalendarScreen>
         taken: result.taken,
         notes: result.notes,
         heart: result.heart,
+        period: result.period,
       );
     }
     await _load();
@@ -296,6 +354,7 @@ class _CalendarScreenState extends State<CalendarScreen>
         initialTaken: existing?.taken,
         initialNotes: existing?.notes ?? '',
         initialHeart: existing?.heart ?? false,
+        initialPeriod: existing?.period ?? false,
         hadEntry: existing != null,
         onCommit: (result) {
           _persistDay(key, result).catchError((Object err) {
@@ -328,6 +387,25 @@ class _CalendarScreenState extends State<CalendarScreen>
     final humanDate = DateFormat.MMMMd(locale).format(_today);
     final nudgeVisible =
         TodayNudge.isVisible(_todayEntry) && widget.share.canEditCalendar;
+    final pmsColor = App217Colors.pms(brightness, widget.palette);
+    final periodColor = App217Colors.period(brightness, widget.palette);
+    final todayKind = _cycle.kindOf(_today);
+    final inPms = todayKind == CycleDayKind.pms;
+    final next = _cycle.nextWindow(_today);
+    final shortDay = DateFormat.MMMd(locale);
+    final String? cycleLine;
+    if (next == null) {
+      cycleLine = widget.share.canEditCalendar ? widget.strings.cycleHintOwner : null;
+    } else if (inPms) {
+      cycleLine = widget.strings.cyclePmsNow(shortDay.format(next.periodStart));
+    } else if (todayKind == CycleDayKind.predictedPeriod) {
+      cycleLine = widget.strings.cyclePeriodNow;
+    } else {
+      cycleLine = widget.strings.cycleNext(
+        shortDay.format(next.periodStart),
+        shortDay.format(next.pmsStart),
+      );
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -414,25 +492,59 @@ class _CalendarScreenState extends State<CalendarScreen>
                   ],
                 ),
               ),
+              if (cycleLine != null)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
+                  child: Row(
+                    key: const ValueKey('cycle-line'),
+                    children: [
+                      Icon(
+                        Icons.water_drop_outlined,
+                        size: 16,
+                        color: inPms ? pmsColor : periodColor,
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          cycleLine,
+                          style: text.bodyMedium?.copyWith(
+                            color: inPms ? scheme.onSurface : scheme.onSurfaceVariant,
+                            fontWeight: inPms ? FontWeight.w600 : null,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
-                child: Row(
+                child: Wrap(
+                  spacing: 14,
+                  runSpacing: 4,
                   children: [
                     _LegendDot(
                       color: App217Colors.statusTaken(brightness, widget.palette),
                       label: widget.strings.legendTaken,
                     ),
-                    const SizedBox(width: 14),
                     _LegendDot(
                       color:
                           App217Colors.statusMissed(brightness, widget.palette),
                       label: widget.strings.legendMissed,
                     ),
-                    const SizedBox(width: 14),
                     _LegendDot(
                       color: scheme.onSurfaceVariant,
                       label: widget.strings.legendUnrecorded,
                       outlined: true,
+                    ),
+                    _LegendDot(
+                      color: periodColor,
+                      label: widget.strings.legendPeriod,
+                      icon: Icons.water_drop,
+                    ),
+                    _LegendDot(
+                      color: pmsColor,
+                      label: widget.strings.legendPms,
+                      dashed: true,
                     ),
                   ],
                 ),
@@ -493,6 +605,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                                     month: _prevMonth,
                                     today: _today,
                                     entries: _prevEntries,
+                                    cycle: _cycle,
                                     onDayTap: _openDay,
                                     todayLabel: widget.strings.today,
                                     weekdayLabels: widget.strings.weekdayInitials,
@@ -509,6 +622,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                                     month: _month,
                                     today: _today,
                                     entries: _entries,
+                                    cycle: _cycle,
                                     onDayTap: _openDay,
                                     todayLabel: widget.strings.today,
                                     weekdayLabels: widget.strings.weekdayInitials,
@@ -525,6 +639,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                                     month: _nextMonth,
                                     today: _today,
                                     entries: _nextEntries,
+                                    cycle: _cycle,
                                     onDayTap: _openDay,
                                     todayLabel: widget.strings.today,
                                     weekdayLabels: widget.strings.weekdayInitials,
@@ -593,26 +708,43 @@ class _LegendDot extends StatelessWidget {
     required this.color,
     required this.label,
     this.outlined = false,
+    this.dashed = false,
+    this.icon,
   });
 
   final Color color;
   final String label;
   final bool outlined;
 
+  /// Dashed rounded square, as drawn around PMS days.
+  final bool dashed;
+  final IconData? icon;
+
   @override
   Widget build(BuildContext context) {
+    final Widget mark;
+    if (icon != null) {
+      mark = Icon(icon, size: 14, color: color);
+    } else if (dashed) {
+      mark = CustomPaint(
+        size: const Size(14, 14),
+        painter: DashedRingPainter(color: color, radius: 4, strokeWidth: 1.6),
+      );
+    } else {
+      mark = Container(
+        width: 12,
+        height: 12,
+        decoration: BoxDecoration(
+          color: outlined ? Colors.transparent : color,
+          shape: BoxShape.circle,
+          border: Border.all(color: color, width: 1.5),
+        ),
+      );
+    }
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Container(
-          width: 12,
-          height: 12,
-          decoration: BoxDecoration(
-            color: outlined ? Colors.transparent : color,
-            shape: BoxShape.circle,
-            border: Border.all(color: color, width: 1.5),
-          ),
-        ),
+        mark,
         const SizedBox(width: 6),
         Text(
           label,
@@ -636,11 +768,13 @@ class _MonthGrid extends StatelessWidget {
     required this.weekdayLabels,
     required this.palette,
     required this.bottomInset,
+    this.cycle = CycleInfo.empty,
   });
 
   final DateTime month;
   final DateTime today;
   final Map<String, Entry> entries;
+  final CycleInfo cycle;
   final Future<void> Function(DateTime day) onDayTap;
   final String todayLabel;
   final List<String> weekdayLabels;
@@ -665,6 +799,7 @@ class _MonthGrid extends StatelessWidget {
         today: today,
         todayLabel: todayLabel,
         entry: entries[DateFormat('yyyy-MM-dd').format(date)],
+        cycleKind: cycle.kindOf(date),
         onTap: onDayTap,
         palette: palette,
       );
@@ -729,12 +864,14 @@ class _DayCell extends StatelessWidget {
     required this.entry,
     required this.onTap,
     required this.palette,
+    this.cycleKind = CycleDayKind.none,
   });
 
   final DateTime day;
   final DateTime today;
   final String todayLabel;
   final Entry? entry;
+  final CycleDayKind cycleKind;
   final Future<void> Function(DateTime day) onTap;
   final AppPalette palette;
 
@@ -761,12 +898,30 @@ class _DayCell extends StatelessWidget {
         : App217Colors.onFilledCell(brightness, palette);
     final hasNote = entry != null && entry!.notes.trim().isNotEmpty;
     final hasHeart = entry != null && entry!.heart;
+    final loggedPeriod = entry != null && entry!.period;
+    final predictedPeriod =
+        !loggedPeriod && cycleKind == CycleDayKind.predictedPeriod;
+    final isPms = cycleKind == CycleDayKind.pms;
+    final periodColor = bg == null
+        ? App217Colors.period(brightness, palette)
+        : onCell;
 
     return InkWell(
       onTap: isFuture ? null : () => onTap(day),
       borderRadius: BorderRadius.circular(12),
-      child: Container(
-        margin: const EdgeInsets.all(2),
+      // PMS days: dashed ring in the gap around the cell, so it reads on
+      // top of Taken/Missed fills and next to today's solid border.
+      child: CustomPaint(
+        key: isPms ? ValueKey('pms-${day.month}-${day.day}') : null,
+        foregroundPainter: isPms
+            ? DashedRingPainter(
+                color: App217Colors.pms(brightness, palette),
+                radius: 14,
+                strokeWidth: 2,
+              )
+            : null,
+        child: Container(
+        margin: const EdgeInsets.all(3),
         decoration: BoxDecoration(
           color: bg ?? emptyBg,
           borderRadius: BorderRadius.circular(12),
@@ -801,10 +956,29 @@ class _DayCell extends StatelessWidget {
                       color: bg == null ? scheme.primary : onCell,
                     ),
                   ),
-                if (hasNote || hasHeart)
+                if (hasNote || hasHeart || loggedPeriod || predictedPeriod)
                   Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      if (loggedPeriod)
+                        Icon(
+                          Icons.water_drop,
+                          key: ValueKey('period-${day.month}-${day.day}'),
+                          size: 11,
+                          color: periodColor,
+                        ),
+                      if (predictedPeriod)
+                        Icon(
+                          Icons.water_drop_outlined,
+                          key: ValueKey(
+                            'predicted-period-${day.month}-${day.day}',
+                          ),
+                          size: 11,
+                          color: periodColor,
+                        ),
+                      if ((loggedPeriod || predictedPeriod) &&
+                          (hasHeart || hasNote))
+                        const SizedBox(width: 2),
                       if (hasHeart)
                         Icon(Icons.favorite, size: 11, color: onCell),
                       if (hasHeart && hasNote) const SizedBox(width: 2),
@@ -818,8 +992,51 @@ class _DayCell extends StatelessWidget {
           ),
         ),
       ),
+      ),
     );
   }
+}
+
+/// Dashed rounded-rect outline hugging the widget's bounds.
+class DashedRingPainter extends CustomPainter {
+  const DashedRingPainter({
+    required this.color,
+    required this.radius,
+    this.strokeWidth = 2,
+    this.dash = 4,
+    this.gap = 3,
+  });
+
+  final Color color;
+  final double radius;
+  final double strokeWidth;
+  final double dash;
+  final double gap;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = (Offset.zero & size).deflate(strokeWidth / 2);
+    final path = Path()
+      ..addRRect(RRect.fromRectAndRadius(rect, Radius.circular(radius)));
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth
+      ..strokeCap = StrokeCap.round;
+    for (final metric in path.computeMetrics()) {
+      var d = 0.0;
+      while (d < metric.length) {
+        canvas.drawPath(metric.extractPath(d, d + dash), paint);
+        d += dash + gap;
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(DashedRingPainter old) =>
+      old.color != color ||
+      old.radius != radius ||
+      old.strokeWidth != strokeWidth;
 }
 
 class DayEditResult {
@@ -827,17 +1044,20 @@ class DayEditResult {
     required this.taken,
     required this.notes,
     this.heart = false,
+    this.period = false,
   }) : clear = false;
   const DayEditResult.clear()
       : clear = true,
         taken = null,
         notes = '',
-        heart = false;
+        heart = false,
+        period = false;
 
   final bool clear;
   final bool? taken;
   final String notes;
   final bool heart;
+  final bool period;
 }
 
 /// Day mark bottom sheet: status + note affordance aligned with the date.
@@ -850,6 +1070,7 @@ class DayEditorSheet extends StatefulWidget {
     required this.initialNotes,
     required this.hadEntry,
     this.initialHeart = false,
+    this.initialPeriod = false,
     this.onCommit,
   });
 
@@ -858,6 +1079,7 @@ class DayEditorSheet extends StatefulWidget {
   final bool? initialTaken;
   final String initialNotes;
   final bool initialHeart;
+  final bool initialPeriod;
   final bool hadEntry;
 
   /// When set (production calendar), persist immediately — do not rely on the
@@ -872,13 +1094,42 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
   late bool? _taken = widget.initialTaken;
   late String _notes = widget.initialNotes;
   late bool _heart = widget.initialHeart;
+  late bool _period = widget.initialPeriod;
+  late bool _hadEntry = widget.hadEntry;
 
   DayEditResult _saveResult({
     required bool? taken,
     required String notes,
     required bool heart,
   }) =>
-      DayEditResult.save(taken: taken, notes: notes.trim(), heart: heart);
+      DayEditResult.save(
+        taken: taken,
+        notes: notes.trim(),
+        heart: heart,
+        period: _period,
+      );
+
+  /// Period toggles persist at once and keep the sheet open, like notes.
+  void _togglePeriod(bool value) {
+    setState(() => _period = value);
+    final status = _taken ?? widget.initialTaken;
+    final DayEditResult result;
+    if (!value && status == null && _notes.trim().isEmpty && !_heart) {
+      if (!_hadEntry) return;
+      result = const DayEditResult.clear();
+      _hadEntry = false;
+    } else {
+      result = _saveResult(taken: status, notes: _notes, heart: _heart);
+      _hadEntry = true;
+    }
+    final onCommit = widget.onCommit;
+    if (onCommit != null) {
+      onCommit(result);
+    } else if (Navigator.of(context).canPop()) {
+      // Test harness without onCommit: return the result via sheet pop.
+      Navigator.pop(context, result);
+    }
+  }
 
   void _emit(DayEditResult result) {
     final onCommit = widget.onCommit;
@@ -917,7 +1168,7 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
   void _onStatusChanged(Set<bool> value) {
     if (value.isEmpty) {
       // Unselect — clear existing day mark (and note/heart) immediately.
-      if (widget.hadEntry) {
+      if (_hadEntry) {
         _commitClear();
       } else {
         setState(() => _taken = null);
@@ -958,8 +1209,9 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
 
     // Empty note + no heart + no status → clear any existing note-only entry.
     // Keep the day sheet open — only the note dialog closed.
-    if (status == null && notes.trim().isEmpty && !heart) {
-      if (widget.hadEntry) {
+    if (status == null && notes.trim().isEmpty && !heart && !_period) {
+      if (_hadEntry) {
+        _hadEntry = false;
         final clear = const DayEditResult.clear();
         if (onCommit != null) {
           onCommit(clear);
@@ -975,6 +1227,7 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
     // Close only the note dialog (already dismissed by showDialog); keep the
     // day sheet open so Taken/Missed/heart remain tappable without reopen.
     final save = _saveResult(taken: status, notes: notes, heart: heart);
+    _hadEntry = true;
     if (onCommit != null) {
       onCommit(save);
     } else if (mounted && Navigator.of(context).canPop()) {
@@ -1057,6 +1310,22 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
             ],
             selected: {if (_taken != null) _taken!},
             onSelectionChanged: _onStatusChanged,
+          ),
+          const SizedBox(height: 10),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: FilterChip(
+              key: const ValueKey('day-period-toggle'),
+              avatar: Icon(
+                _period ? Icons.water_drop : Icons.water_drop_outlined,
+                size: 18,
+                color: App217Colors.period(Theme.of(context).brightness),
+              ),
+              showCheckmark: false,
+              label: Text(widget.strings.periodLabel),
+              selected: _period,
+              onSelected: _togglePeriod,
+            ),
           ),
         ],
       ),

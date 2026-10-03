@@ -19,6 +19,8 @@ type Store interface {
 	UpsertEntry(userID, date string, req model.UpsertRequest) (*model.Entry, error)
 	DeleteEntry(userID, date string) error
 	GetStats(userID string, year, month int) (*model.Stats, error)
+	// ListPeriodDays returns YYYY-MM-DD dates marked as period within [from, to].
+	ListPeriodDays(userID, from, to string) ([]string, error)
 
 	GetReminderPreference(userID string) (*model.ReminderPreference, error)
 	UpsertReminderPreference(userID string, preference model.ReminderPreference) (*model.ReminderPreference, error)
@@ -45,6 +47,12 @@ type Store interface {
 	RevokeShare(ownerID string) (*model.ShareState, error)
 	AcceptShare(partnerID, inviteCode string) (*model.ShareState, error)
 	CalendarSubjectID(userID string) (string, error)
+	// SetRole picks owner or partner; switching is refused while a share is live.
+	SetRole(userID, role string) (*model.User, error)
+
+	// Partner notification preferences (PMS heads-up, pill not logged)
+	GetPartnerAlerts(userID string) (*model.PartnerAlertPreference, error)
+	UpsertPartnerAlerts(userID string, pref model.PartnerAlertPreference) (*model.PartnerAlertPreference, error)
 
 	// Partner → owner inbox notes
 	ListInboxNotes(ownerID string) ([]*model.PartnerNote, error)

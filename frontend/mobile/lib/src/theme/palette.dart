@@ -83,6 +83,8 @@ class PaletteColors {
     required this.takenFill,
     required this.missedFill,
     required this.onFilledCell,
+    required this.pms,
+    required this.period,
   });
 
   final Color primary;
@@ -106,6 +108,12 @@ class PaletteColors {
   final Color takenFill;
   final Color missedFill;
   final Color onFilledCell;
+
+  /// PMS window outline (dashed ring around predicted PMS days).
+  final Color pms;
+
+  /// Period marks (logged and predicted drops).
+  final Color period;
 
   static PaletteColors resolve(AppPalette palette, Brightness brightness) {
     final dark = brightness == Brightness.dark;
@@ -148,6 +156,12 @@ class PaletteColors {
   static const _missedDark = Color(0xFFFB7185);
   static const _takenFillDark = Color(0xFF14532D);
   static const _missedFillDark = Color(0xFF7F1D1D);
+
+  // Cycle marks (shared): amber PMS ring, pink period drop.
+  static const _pmsLight = Color(0xFFB45309);
+  static const _pmsDark = Color(0xFFFBBF24);
+  static const _periodLight = Color(0xFFBE185D);
+  static const _periodDark = Color(0xFFF472B6);
 
   static const _azureLight = _Accent(
     primary: Color(0xFF2563EB),
@@ -210,6 +224,8 @@ class PaletteColors {
         takenFill: _takenLight,
         missedFill: _missedLight,
         onFilledCell: Colors.white,
+        pms: _pmsLight,
+        period: _periodLight,
       );
 
   static PaletteColors _composeDark(_Accent a) => PaletteColors(
@@ -234,5 +250,7 @@ class PaletteColors {
         takenFill: _takenFillDark,
         missedFill: _missedFillDark,
         onFilledCell: const Color(0xFFF5F5F5),
+        pms: _pmsDark,
+        period: _periodDark,
       );
 }

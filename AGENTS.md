@@ -5,6 +5,11 @@ Cross-platform application for tracking anticonceptional intake.
 ## Overview
 Android-first Flutter app for tracking anticonceptional intake via a calendar UI. Multi-user support with WorkOS AuthKit authentication, dark mode, and English, Português and Español UI (follows the device language; English otherwise).
 
+Roles are picked once after first sign-in (`users.role` is NULL until then):
+- **owner** — takes the pill; logs Taken/Missed, notes, intimacy and period days; creates the invite. Never joins another calendar.
+- **partner** — joins one owner's calendar read-only via invite; gets optional PMS and pill-not-logged alerts (separate toggles + times).
+Switching role is refused while a calendar is shared. Period days drive cycle/PMS predictions (`backend/internal/cycle`), drawn on both calendars (dashed amber ring = PMS, pink drop = period, outlined drop = predicted period).
+
 ## Tech Stack
 - Client: Flutter (Android + web)
 - Backend: Go — REST API
@@ -61,8 +66,14 @@ Android deep-link PKCE:
 
 ### Entries (auth required)
 - `GET /api/entries?year=YYYY&month=MM`
-- `GET|POST|DELETE /api/entries/{date}`
+- `GET|POST|DELETE /api/entries/{date}` — body `{taken, notes, heart, period}`
 - `GET /api/stats?year=YYYY&month=MM`
+- `GET /api/cycle?today=YYYY-MM-DD` — period starts + next predicted periods/PMS windows
+
+### Roles, sharing, alerts (auth required)
+- `PUT /api/account/role` — `{role: owner|partner}`; 409 while shared
+- `POST /api/share/enable|revoke` (owner), `POST /api/share/accept` (unset role or partner)
+- `GET|PUT /api/partner-alerts` (partner) — `{pms_enabled, pms_time, pill_enabled, pill_time}`
 
 ## Testing expectations
 - Backend: `make test-backend`
@@ -74,3 +85,4 @@ Android deep-link PKCE:
 ## Remaining gaps
 - Live WorkOS sign-in / authenticated calendar not verified in CI
 - Reminder delivery on native Android (previous Web Push/PWA path) not ported
+- Partner alerts are local Android notifications planned from the last sync (app open/resume); no server push, so a pill logged after his last sync can still trigger that day's alert. Web shows the toggles but cannot deliver.
