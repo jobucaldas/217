@@ -1,4 +1,8 @@
-version: "3.8"
+# Development stack: builds everything from this checkout.
+#   docker compose up --build        # http://localhost:8787
+#   docker compose run --rm test-backend
+# Running 217 rather than hacking on it? Use the compose file in the README.
+name: "217"
 
 services:
   postgres:
@@ -24,44 +28,78 @@ services:
       target: dev
     environment:
       DATABASE_URL: "postgres://app_217:app_217@postgres:5432/app_217?sslmode=disable"
-      BACKEND_ADDR: ":3000"
+      WORKOS_API_KEY: "${WORKOS_API_KEY:-}"
+      WORKOS_CLIENT_ID: "${WORKOS_CLIENT_ID:-}"
+      APP_BASE_URL: "${APP_BASE_URL:-http://localhost:8787}"
       VAPID_PUBLIC_KEY: "${VAPID_PUBLIC_KEY:-}"
       VAPID_PRIVATE_KEY: "${VAPID_PRIVATE_KEY:-}"
       VAPID_SUBJECT: "${VAPID_SUBJECT:-}"
-      WORKOS_API_KEY: "${WORKOS_API_KEY:-}"
-      WORKOS_CLIENT_ID: "${WORKOS_CLIENT_ID:-client_01M3QCMK75B35RPC8EAJA5GREP}"
-      APP_BASE_URL: "${APP_BASE_URL:-http://localhost:8787}"
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     volumes:
       - ./backend:/app:Z
     working_dir: /app
     restart: unless-stopped
-    command:
-      - sh
-      - -c
-      - |
-        echo "Waiting for postgres..."
-        for i in $$(seq 1 30); do
-          pg_isready -h postgres -U app_217 -d app_217 2>/dev/null && break
-          echo "attempt $$i..."
-          sleep 1
-        done
-        echo "Starting backend..."
-        go run ./cmd/server -addr "$$BACKEND_ADDR" -db "$$DATABASE_URL"
+    command: ["go", "run", "./cmd/server", "-addr", ":3000"]
 
-  caddy:
-    image: docker.io/caddy:alpine
+  # Flutter web bundle built from ./frontend, served by Caddy next to the API.
+  # Rebuild after changing the app: docker compose up --build web
+  web:
+    build:
+      context: ./frontend
+      target: local
     ports:
-      # Override with HTTP_PORT=... if 8787 is taken on the host.
+      # HTTP_PORT must match the port in APP_BASE_URL and the WorkOS redirect URI.
       - "${HTTP_PORT:-8787}:8787"
-    volumes:
-      # Flutter web release build (`make web`).
-      - ./frontend/build/web:/srv/web:Z
-      - ./frontend/Caddyfile:/etc/caddy/Caddyfile:Z
     depends_on:
       - backend
     restart: unless-stopped
+
+  # Tooling: nothing to install on the host.
+  #   docker compose run --rm test-backend | test-frontend | apk | vapid-keys
+  test-backend:
+    profiles: [tools]
+    build:
+      context: ./backend
+      target: dev
+    volumes:
+      - ./backend:/app:Z
+    working_dir: /app
+    command: ["sh", "-c", 'test -z "$$(gofmt -l .)" && go vet -mod=readonly ./... && go test -mod=readonly ./...']
+
+  test-frontend:
+    profiles: [tools]
+    image: ghcr.io/cirruslabs/flutter:stable
+    volumes:
+      - ./frontend:/workspace:Z
+    working_dir: /workspace
+    command: ["bash", "-lc", "git config --global --add safe.directory /sdks/flutter; flutter pub get && flutter analyze && flutter test"]
+
+  # Debug APK for the emulator (host reachable at 10.0.2.2); override with API_BASE_URL.
+  # Output: frontend/build/app/outputs/flutter-apk/
+  apk:
+    profiles: [tools]
+    image: ghcr.io/cirruslabs/flutter:stable
+    environment:
+      API_BASE_URL: "${API_BASE_URL:-http://10.0.2.2:8787}"
+    volumes:
+      - ./frontend:/workspace:Z
+    working_dir: /workspace
+    command:
+      - bash
+      - -lc
+      - git config --global --add safe.directory /sdks/flutter; flutter pub get && flutter build apk --debug --dart-define=API_BASE_URL="$$API_BASE_URL"
+
+  vapid-keys:
+    profiles: [tools]
+    build:
+      context: ./backend
+      target: dev
+    volumes:
+      - ./backend:/app:Z
+    working_dir: /app
+    command: ["go", "run", "./cmd/vapid"]
 
 volumes:
   pgdata:

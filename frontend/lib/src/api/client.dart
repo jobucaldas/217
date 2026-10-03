@@ -11,7 +11,8 @@ import '../models.dart';
 import 'platform_http.dart';
 
 class ApiClient {
-  ApiClient(this.config, {http.Client? httpClient, FlutterSecureStorage? storage})
+  ApiClient(this.config,
+      {http.Client? httpClient, FlutterSecureStorage? storage})
       : _http = httpClient ?? createPlatformHttpClient(),
         _storage = storage ?? const FlutterSecureStorage();
 
@@ -115,14 +116,16 @@ class ApiClient {
     if (body != null) {
       request.body = jsonEncode(body);
     }
-    final streamed = await _http.send(request).timeout(const Duration(seconds: 20));
+    final streamed =
+        await _http.send(request).timeout(const Duration(seconds: 20));
     return http.Response.fromStream(streamed);
   }
 
   /// Whether [baseUrl] (default: the current server) is a 217 API that
   /// people can sign in to.
   Future<ServerCheck> checkServer({String? baseUrl}) async {
-    final base = baseUrl == null ? config.apiBaseUrl : normalizeApiBase(baseUrl);
+    final base =
+        baseUrl == null ? config.apiBaseUrl : normalizeApiBase(baseUrl);
     final http.Response response;
     try {
       response = await _send(
@@ -148,7 +151,7 @@ class ApiClient {
   }
 
   /// The server's public WorkOS client ID, so one APK can sign in to any
-  /// self-hosted server. Older servers don't report it: use the build's.
+  /// self-hosted server. Older servers don't report it: use the build's, if any.
   Future<String> signInClientId() async {
     final response = await _send('GET', _uri('/api/auth/config'), auth: false);
     if (response.statusCode != 200) {
@@ -159,9 +162,9 @@ class ApiClient {
       throw StateError('sign-in is not configured on this server');
     }
     final clientId = decoded['workos_client_id'];
-    return clientId is String && clientId.isNotEmpty
-        ? clientId
-        : config.workosClientId;
+    if (clientId is String && clientId.isNotEmpty) return clientId;
+    if (config.workosClientId.isNotEmpty) return config.workosClientId;
+    throw StateError('server did not report a WorkOS client ID');
   }
 
   Future<SessionSnapshot> currentSession() async {
@@ -180,7 +183,8 @@ class ApiClient {
   Future<User> signInWithWorkOS() async {
     final clientId = await signInClientId();
     final pkce = _Pkce.generate();
-    final authorize = Uri.https('api.workos.com', '/user_management/authorize', {
+    final authorize =
+        Uri.https('api.workos.com', '/user_management/authorize', {
       'client_id': clientId,
       'redirect_uri': config.redirectUri,
       'response_type': 'code',
@@ -221,7 +225,8 @@ class ApiClient {
       auth: false,
     );
     if (response.statusCode != 200) {
-      throw StateError('WorkOS exchange failed (${response.statusCode}): ${response.body}');
+      throw StateError(
+          'WorkOS exchange failed (${response.statusCode}): ${response.body}');
     }
     final decoded = jsonDecode(response.body) as Map<String, dynamic>;
     final token = decoded['session_token'] as String?;
@@ -255,7 +260,8 @@ class ApiClient {
     if (response.statusCode != 200) {
       throw ApiException('get share', response);
     }
-    return ShareState.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+    return ShareState.fromJson(
+        jsonDecode(response.body) as Map<String, dynamic>);
   }
 
   Future<ShareState> enableShare() async {
@@ -263,7 +269,8 @@ class ApiClient {
     if (response.statusCode != 200) {
       throw ApiException('enable share', response);
     }
-    return ShareState.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+    return ShareState.fromJson(
+        jsonDecode(response.body) as Map<String, dynamic>);
   }
 
   Future<ShareState> revokeShare() async {
@@ -271,7 +278,8 @@ class ApiClient {
     if (response.statusCode != 200) {
       throw ApiException('revoke share', response);
     }
-    return ShareState.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+    return ShareState.fromJson(
+        jsonDecode(response.body) as Map<String, dynamic>);
   }
 
   Future<ShareState> acceptShare(String code) async {
@@ -283,7 +291,8 @@ class ApiClient {
     if (response.statusCode != 200) {
       throw ApiException('accept share', response);
     }
-    return ShareState.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+    return ShareState.fromJson(
+        jsonDecode(response.body) as Map<String, dynamic>);
   }
 
   Future<List<PartnerNote>> listInbox() async {
@@ -306,7 +315,8 @@ class ApiClient {
     if (response.statusCode != 201 && response.statusCode != 200) {
       throw ApiException('partner note', response);
     }
-    return PartnerNote.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+    return PartnerNote.fromJson(
+        jsonDecode(response.body) as Map<String, dynamic>);
   }
 
   Future<void> markInboxNoteRead(String id) async {
@@ -339,7 +349,8 @@ class ApiClient {
     if (response.statusCode != 200) {
       throw ApiException('cycle', response);
     }
-    return CycleInfo.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+    return CycleInfo.fromJson(
+        jsonDecode(response.body) as Map<String, dynamic>);
   }
 
   Future<PartnerAlertPreference> getPartnerAlerts() async {
@@ -420,7 +431,8 @@ class ApiClient {
     if (response.statusCode != 200) {
       throw ApiException('reminder preference', response);
     }
-    return ReminderPreference.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+    return ReminderPreference.fromJson(
+        jsonDecode(response.body) as Map<String, dynamic>);
   }
 
   Future<ReminderPreference> upsertReminderPreference({
@@ -440,11 +452,13 @@ class ApiClient {
     if (response.statusCode != 200) {
       throw ApiException('save reminder', response);
     }
-    return ReminderPreference.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+    return ReminderPreference.fromJson(
+        jsonDecode(response.body) as Map<String, dynamic>);
   }
 
   Future<({bool configured, String publicKey})> vapidConfig() async {
-    final response = await _send('GET', _uri('/api/reminders/vapid-public-key'));
+    final response =
+        await _send('GET', _uri('/api/reminders/vapid-public-key'));
     if (response.statusCode != 200) {
       return (configured: false, publicKey: '');
     }
@@ -499,8 +513,10 @@ class _Pkce {
     }
 
     final verifier = randomUrl(32);
-    final challenge = base64UrlEncode(sha256.convert(utf8.encode(verifier)).bytes)
-        .replaceAll('=', '');
-    return _Pkce(verifier: verifier, challenge: challenge, state: randomUrl(16));
+    final challenge =
+        base64UrlEncode(sha256.convert(utf8.encode(verifier)).bytes)
+            .replaceAll('=', '');
+    return _Pkce(
+        verifier: verifier, challenge: challenge, state: randomUrl(16));
   }
 }

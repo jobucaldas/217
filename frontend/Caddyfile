@@ -1,15 +1,17 @@
-# 217 — local (compose) proxy: Flutter web UI + Go API (same origin for cookie AuthKit).
-# Host port defaults to 8787 (avoids common :8080 conflicts / port-forward clashes).
-:8787 {
+# 217 web: the Flutter bundle plus the Go API on one origin (cookie AuthKit needs it).
+#
+# SITE_ADDRESS      ":8787" (plain HTTP, the default) or a domain for automatic HTTPS
+# BACKEND_UPSTREAM  where the API listens
+{$SITE_ADDRESS::8787} {
     encode gzip
 
     handle /api/* {
-        reverse_proxy backend:3000
+        reverse_proxy {$BACKEND_UPSTREAM:backend:3000}
     }
 
     # SPA fallback so deep links / refresh serve the Flutter shell.
     handle {
-        root * /srv/web
+        root * /app/dist
         try_files {path} /index.html
         file_server
     }

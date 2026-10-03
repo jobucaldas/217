@@ -1,4 +1,9 @@
-*
-!build/
+# Context for frontend/Dockerfile: sources for `local`, build/web for `prebuilt`.
+.dart_tool
 build/*
-!build/web/
+!build/web
+android/.gradle
+android/build
+linux/flutter/ephemeral
+windows/flutter/ephemeral
+packaging

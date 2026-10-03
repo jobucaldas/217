@@ -14,25 +14,27 @@ Switching role is refused while a calendar is shared. Period days drive cycle/PM
 - Client: Flutter (Android + web)
 - Backend: Go — REST API
 - Auth: WorkOS AuthKit (PKCE; API key server-side only)
-- Database: PostgreSQL 16 — containerized via Podman
+- Database: PostgreSQL 16 — containerized (Docker Compose; Podman works too)
 - Reverse Proxy: Caddy — Flutter web UI + `/api/*`
 
 ## Layout
 - `backend/` — Go API (`Dockerfile`: `dev` stage + production image)
-- `frontend/` — Flutter app (web, Android, Windows, Linux), `Dockerfile` (web bundle image), `Caddyfile` (local proxy)
-- `docker-compose.yml` — local stack
+- `frontend/` — Flutter app (web, Android, Windows, Linux), `Dockerfile` (web image: `local` stage builds from source, `prebuilt` is what CI publishes), `Caddyfile` (serves the bundle, proxies `/api/*`)
+- `docker-compose.yml` — dev stack + tooling (built from local code); end users run the compose file embedded in `readme.md` against GHCR images
+- `docs/development.md` — developer guide
 - Deployment manifests live in a separate infra repo; this repo only publishes images and APKs.
 
 ## Development Environment
-Fully containerized with Podman. DO NOT install project SDKs on the host. Go tooling runs in `localhost/217-dev` (the `dev` stage of `backend/Dockerfile`); Flutter tooling runs in `ghcr.io/cirruslabs/flutter:stable`.
+Fully containerized with Docker Compose (Podman works too). DO NOT install project SDKs on the host. No Makefile: everything is a compose service (see `docs/development.md`).
 
 ```sh
-make dev-up          # postgres + backend + caddy
-make web      # Flutter web → frontend/build/web (served at :8787)
-make test-backend    # gofmt/test/vet/build in container
-make test-frontend     # flutter analyze + test in container
-make apk      # debug APK in container
+docker compose up --build                 # postgres + backend + web (built from local code) at :8787
+docker compose run --rm test-backend      # gofmt/vet/test
+docker compose run --rm test-frontend     # flutter analyze + test
+docker compose run --rm apk               # debug APK
 ```
+
+Docs stay infrastructure-agnostic: users get the README compose file (GHCR images, no clone); developers use `docker-compose.yml` with local code.
 
 ## Architecture
 ```
@@ -76,10 +78,10 @@ Android deep-link PKCE:
 - `GET|PUT /api/partner-alerts` (partner) — `{pms_enabled, pms_time, pill_enabled, pill_time}`
 
 ## Testing expectations
-- Backend: `make test-backend`
-- Mobile: `make test-frontend`
-- Web tryout: `make web` then open http://localhost:8787/
-- APK: `make apk`
+- Backend: `docker compose run --rm test-backend`
+- Frontend: `docker compose run --rm test-frontend`
+- Web tryout: `docker compose up --build` then open http://localhost:8787/
+- APK: `docker compose run --rm apk`
 - **UI quality (agent directive, not a testing preference):** never ship Flutter UI without dark **and** light coverage. CI must fail unreadable contrast and broken “today” CTA persistence (`frontend/test/theme_contrast_test.dart`, `frontend/test/today_nudge_test.dart`). **Not running those checks is unacceptable agent behavior** — same class as skipping the PR merge loop.
 
 ## Remaining gaps

@@ -12,11 +12,6 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-env:
-  # Public staging client id: fallback when the secret is unset (fork PRs).
-  # Servers report their own client id, so this only seeds the default.
-  WORKOS_CLIENT_ID: ${{ secrets.WORKOS_CLIENT_ID || 'client_01M3QCMK75B35RPC8EAJA5GREP' }}
-
 jobs:
   backend:
     name: Backend (gofmt, vet, test)
@@ -51,21 +46,54 @@ jobs:
       - run: flutter test
       - name: Build web bundle
         run: |
-          flutter build web --release --no-web-resources-cdn \
-            --dart-define=WORKOS_CLIENT_ID="$WORKOS_CLIENT_ID"
+          flutter build web --release --no-web-resources-cdn
           # Stamp the commit so the live site can prove which bundle is running.
           printf 'BUILD_SHA=%s\n' "$GITHUB_SHA" > build/web/BUILD_SHA.txt
       - name: Build release APK
         # No API_BASE_URL on purpose: the published APK asks for a server on first launch.
-        run: flutter build apk --release --dart-define=WORKOS_CLIENT_ID="$WORKOS_CLIENT_ID"
-      - if: github.event_name == 'push'
-        uses: actions/upload-artifact@v4
+        run: flutter build apk --release
+      - uses: actions/upload-artifact@v4
         with:
           name: frontend-build
           path: |
             frontend/build/web
             frontend/build/app/outputs/flutter-apk/app-release.apk
           retention-days: 3
+
+  images:
+    name: Images (build + smoke test)
+    needs: frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-build
+          path: frontend/build
+      - name: Build the images CI publishes
+        run: |
+          docker build -t ghcr.io/jobucaldas/217-backend:nightly ./backend
+          docker build --target prebuilt -t ghcr.io/jobucaldas/217-frontend:nightly ./frontend
+      - name: Run the README compose file against them
+        run: |
+          mkdir smoke
+          # The README holds the one yaml block users copy.
+          awk '/^```yaml$/{f=1;next} /^```$/{f=0} f' readme.md > smoke/compose.yaml
+          printf '%s\n' POSTGRES_PASSWORD=ci APP_BASE_URL=http://localhost:8787 \
+            WORKOS_CLIENT_ID=client_ci > smoke/.env
+          cd smoke
+          # Only postgres comes from a registry; the app images were just built.
+          docker compose pull postgres
+          docker compose up -d --pull never
+          for i in $(seq 1 30); do
+            curl -fsS http://localhost:8787/api/auth/config && break
+            sleep 2
+          done
+          curl -fsS http://localhost:8787/api/auth/config | grep -q workos_client_id
+          curl -fsS http://localhost:8787/ | grep -qi '<html'
+          curl -fsS http://localhost:8787/some/deep/link | grep -qi '<html'
+      - if: failure()
+        run: cd smoke && docker compose logs
 
   linux:
     name: Linux AppImage
@@ -86,7 +114,7 @@ jobs:
       - run: flutter pub get
       - name: Build release bundle
         # No API_BASE_URL on purpose: like the APK, it asks for a server on first launch.
-        run: flutter build linux --release --dart-define=WORKOS_CLIENT_ID="$WORKOS_CLIENT_ID"
+        run: flutter build linux --release
       - run: packaging/linux/build-appimage.sh
       - if: github.event_name == 'push'
         uses: actions/upload-artifact@v4
@@ -111,7 +139,7 @@ jobs:
       - run: flutter pub get
       - name: Build release bundle
         # No API_BASE_URL on purpose: like the APK, it asks for a server on first launch.
-        run: flutter build windows --release --dart-define=WORKOS_CLIENT_ID="$env:WORKOS_CLIENT_ID"
+        run: flutter build windows --release
       - name: Bundle the Visual C++ runtime (app-local)
         run: |
           foreach ($dll in 'msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll') {
@@ -134,7 +162,7 @@ jobs:
   publish:
     name: Publish (GHCR + GitHub Releases)
     if: github.event_name == 'push'
-    needs: [backend, frontend, linux, windows]
+    needs: [backend, frontend, images, linux, windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -160,7 +188,7 @@ jobs:
         run: |
           DT="$(date -u -d "${COMMIT_TIMESTAMP:-now}" +%Y%m%d%H%M%S)"
           echo "datetime_sha=${DT}_${GITHUB_SHA:0:7}" >> "$GITHUB_OUTPUT"
-          echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/app-217" >> "$GITHUB_OUTPUT"
+          echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/217" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
@@ -179,6 +207,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: ./frontend
+          target: prebuilt
           push: true
           tags: |
             ${{ steps.tags.outputs.image }}-frontend:nightly

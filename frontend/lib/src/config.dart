@@ -60,10 +60,7 @@ class AppConfig {
             : (isDesktopPlatform
                 ? 'http://localhost:8787'
                 : 'http://10.0.2.2:8787'));
-    const workosClientId = String.fromEnvironment(
-      'WORKOS_CLIENT_ID',
-      defaultValue: 'client_01M3QCMK75B35RPC8EAJA5GREP',
-    );
+    const workosClientId = String.fromEnvironment('WORKOS_CLIENT_ID');
     const redirectOverride = String.fromEnvironment('WORKOS_REDIRECT_URI');
     return AppConfig(
       apiBaseUrl: apiBaseUrl,
