@@ -82,6 +82,8 @@ jobs:
           printf '%s\n' POSTGRES_PASSWORD=ci APP_BASE_URL=http://localhost:8787 \
             WORKOS_CLIENT_ID=client_ci > smoke/.env
           cd smoke
+          # Only postgres comes from a registry; the app images were just built.
+          docker compose pull postgres
           docker compose up -d --pull never
           for i in $(seq 1 30); do
             curl -fsS http://localhost:8787/api/auth/config && break
