@@ -128,7 +128,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    final shareIdx = textIndex('SHARE CALENDAR WITH BOYFRIEND');
+    final shareIdx = textIndex('SHARE CALENDAR WITH PARTNER');
     final deleteIdx = textIndex('Delete account');
     final logoutIdx = textIndex('Log out');
     expect(shareIdx, greaterThanOrEqualTo(0));
