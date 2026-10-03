@@ -41,7 +41,7 @@ jobs:
       image: ghcr.io/cirruslabs/flutter:stable
     defaults:
       run:
-        working-directory: frontend/mobile
+        working-directory: frontend
     steps:
       - uses: actions/checkout@v4
       - run: |
@@ -63,15 +63,78 @@ jobs:
         with:
           name: frontend-build
           path: |
-            frontend/mobile/build/web
-            frontend/mobile/build/app/outputs/flutter-apk/app-release.apk
+            frontend/build/web
+            frontend/build/app/outputs/flutter-apk/app-release.apk
           retention-days: 3
 
-  # main only: GHCR images + APK releases, both as `nightly` and immutable `datetime_sha`.
+  linux:
+    name: Linux AppImage
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libsecret-1-dev
+      - run: flutter pub get
+      - name: Build release bundle
+        # No API_BASE_URL on purpose: like the APK, it asks for a server on first launch.
+        run: flutter build linux --release --dart-define=WORKOS_CLIENT_ID="$WORKOS_CLIENT_ID"
+      - run: packaging/linux/build-appimage.sh
+      - if: github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-build
+          path: frontend/build/217-x86_64.AppImage
+          retention-days: 3
+
+  windows:
+    name: Windows installer
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - name: Build release bundle
+        # No API_BASE_URL on purpose: like the APK, it asks for a server on first launch.
+        run: flutter build windows --release --dart-define=WORKOS_CLIENT_ID="$env:WORKOS_CLIENT_ID"
+      - name: Bundle the Visual C++ runtime (app-local)
+        run: |
+          foreach ($dll in 'msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll') {
+            Copy-Item "$env:SystemRoot\System32\$dll" build\windows\x64\runner\Release\
+          }
+      - name: Build installer
+        run: |
+          $version = (Select-String -Path pubspec.yaml -Pattern '^version:\s*([0-9.]+)').Matches[0].Groups[1].Value
+          choco install innosetup -y --no-progress
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$version" packaging\windows\217.iss
+      - if: github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: frontend/build/217-setup.exe
+          retention-days: 3
+
+  # main only: GHCR images + app releases (APK, Windows installer, AppImage),
+  # both as `nightly` and immutable `datetime_sha`.
   publish:
     name: Publish (GHCR + GitHub Releases)
     if: github.event_name == 'push'
-    needs: [backend, frontend]
+    needs: [backend, frontend, linux, windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -81,7 +144,15 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: frontend-build
-          path: frontend/mobile/build
+          path: frontend/build
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-build
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-build
+          path: dist
       - name: Compute tags
         id: tags
         env:
@@ -112,7 +183,7 @@ jobs:
           tags: |
             ${{ steps.tags.outputs.image }}-frontend:nightly
             ${{ steps.tags.outputs.image }}-frontend:${{ steps.tags.outputs.datetime_sha }}
-      - name: Publish APK releases
+      - name: Publish app releases
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.tags.outputs.datetime_sha }}
@@ -120,19 +191,27 @@ jobs:
           set -euo pipefail
           SHORT_SHA="${GITHUB_SHA:0:7}"
           COMMIT_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}"
-          APK=frontend/mobile/build/app/outputs/flutter-apk/app-release.apk
-          cp "$APK" 217-nightly.apk
-          cp "$APK" "217-${TAG}.apk"
+          APK=frontend/build/app/outputs/flutter-apk/app-release.apk
+          for tag in nightly "${TAG}"; do
+            cp "$APK" "217-${tag}.apk"
+            cp dist/217-x86_64.AppImage "217-${tag}-x86_64.AppImage"
+            cp dist/217-setup.exe "217-${tag}-setup.exe"
+          done
 
           NOTES="$(printf '%s\n' \
             "Built from \`${SHORT_SHA}\` on \`main\` (${COMMIT_URL})." \
             "" \
-            "Release build, debug-signed for sideloading. Asks for your 217 server on first launch (see the README's Self-hosting section).")"
+            "- \`.apk\`: Android (release build, debug-signed for sideloading)" \
+            "- \`-setup.exe\`: Windows installer (per-user, unsigned: SmartScreen may warn)" \
+            "- \`.AppImage\`: Linux (\`chmod +x\` and run)" \
+            "" \
+            "Every app asks for your 217 server on first launch (see the README's Self-hosting section).")"
 
           if gh release view nightly >/dev/null 2>&1; then
             gh release edit nightly --target "$GITHUB_SHA" --notes "${NOTES}" --prerelease
           else
             gh release create nightly --title Nightly --target "$GITHUB_SHA" --notes "${NOTES}" --prerelease
           fi
-          gh release upload nightly 217-nightly.apk --clobber
-          gh release create "$TAG" --title "$TAG" --target "$GITHUB_SHA" --notes "${NOTES}" --prerelease "217-${TAG}.apk"
+          gh release upload nightly 217-nightly.apk 217-nightly-x86_64.AppImage 217-nightly-setup.exe --clobber
+          gh release create "$TAG" --title "$TAG" --target "$GITHUB_SHA" --notes "${NOTES}" --prerelease \
+            "217-${TAG}.apk" "217-${TAG}-x86_64.AppImage" "217-${TAG}-setup.exe"

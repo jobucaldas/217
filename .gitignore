@@ -11,14 +11,14 @@ backend/server
 # generated validation artifacts
 artifacts/
 
-# Flutter / mobile
-frontend/mobile/.dart_tool/
-frontend/mobile/.flutter-plugins
-frontend/mobile/.flutter-plugins-dependencies
-frontend/mobile/.packages
-frontend/mobile/build/
-frontend/mobile/.pub-cache/
-frontend/mobile/**/GeneratedPluginRegistrant.*
+# Flutter
+frontend/.dart_tool/
+frontend/.flutter-plugins
+frontend/.flutter-plugins-dependencies
+frontend/.packages
+frontend/build/
+frontend/.pub-cache/
+frontend/**/GeneratedPluginRegistrant.*
 
 .env
 *.apk

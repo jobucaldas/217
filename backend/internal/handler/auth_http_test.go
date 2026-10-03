@@ -605,6 +605,21 @@ func TestWorkOSExchangeReturnsBearerSession(t *testing.T) {
 	}
 }
 
+func TestWorkOSExchangeAcceptsDesktopLoopbackRedirect(t *testing.T) {
+	h, _ := newTestHandler(t)
+	h.SetOAuthProvider(&fakeOAuthProvider{userInfo: &auth.OAuthUserInfo{
+		Subject: "workos-desktop-1", Email: "desktop@example.com", EmailVerified: true, Name: "Desktop",
+	}})
+	body := []byte(`{"code":"auth-code","code_verifier":"verifier","redirect_uri":"` + auth.DesktopAuthRedirectURI + `"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/workos/exchange", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.ExchangeWorkOS(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected desktop exchange success, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestWorkOSExchangeRejectsUnregisteredRedirect(t *testing.T) {
 	h, _ := newTestHandler(t)
 	provider := &fakeOAuthProvider{userInfo: &auth.OAuthUserInfo{
