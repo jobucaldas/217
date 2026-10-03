@@ -59,7 +59,7 @@ Future<void> _pumpCalendar(WidgetTester tester, {Size size = const Size(390, 844
 Offset _carouselCenter(WidgetTester tester) =>
     tester.getCenter(find.byKey(const ValueKey('month-carousel')));
 
-/// Wheel / web-touchpad scroll: a burst of scroll signals, then idle.
+/// Web touchpad (or mouse wheel) scroll: a burst of signals, then idle.
 Future<void> _scroll(
   WidgetTester tester,
   List<Offset> deltas, {
@@ -115,23 +115,32 @@ void main() {
       expect(find.text(_label(-1)), findsOneWidget);
     });
 
-    testWidgets('vertical scroll pages months (down = next, up = previous)',
+    testWidgets('vertical touchpad scroll never changes month',
         (tester) async {
       await _pumpCalendar(tester);
-      await _scroll(tester, const [Offset(0, 100)],
-          kind: PointerDeviceKind.mouse);
-      expect(find.text(_label(1)), findsOneWidget);
-      await _scroll(tester, const [Offset(0, -100)],
-          kind: PointerDeviceKind.mouse);
-      await _scroll(tester, const [Offset(0, -100)],
-          kind: PointerDeviceKind.mouse);
-      expect(find.text(_label(-1)), findsOneWidget);
+      await _scroll(tester, const [Offset(0, 120), Offset(4, 150)]);
+      expect(find.text(_label(0)), findsOneWidget);
+      await _scroll(tester, const [Offset(0, -120), Offset(-4, -150)]);
+      expect(find.text(_label(0)), findsOneWidget);
     });
 
-    testWidgets('one wheel notch is enough on wide layouts', (tester) async {
+    testWidgets('mouse wheel never changes month (vertical or shift/tilt)',
+        (tester) async {
+      await _pumpCalendar(tester);
+      for (final d in const [
+        Offset(0, 100),
+        Offset(0, -100),
+        Offset(100, 0),
+        Offset(-100, 0),
+      ]) {
+        await _scroll(tester, [d, d, d], kind: PointerDeviceKind.mouse);
+        expect(find.text(_label(0)), findsOneWidget);
+      }
+    });
+
+    testWidgets('a short swipe is enough on wide layouts', (tester) async {
       await _pumpCalendar(tester, size: const Size(1440, 900));
-      await _scroll(tester, const [Offset(0, 100)],
-          kind: PointerDeviceKind.mouse);
+      await _scroll(tester, const [Offset(30, 0), Offset(40, 0)]);
       expect(find.text(_label(1)), findsOneWidget);
     });
 
@@ -158,11 +167,20 @@ void main() {
       expect(find.text(_label(1)), findsOneWidget);
     });
 
-    testWidgets('vertical two-finger pan down → previous month',
+    testWidgets('horizontal two-finger pan right → previous month',
         (tester) async {
       await _pumpCalendar(tester);
-      await _panZoom(tester, const Offset(0, 200));
+      await _panZoom(tester, const Offset(200, 0));
       expect(find.text(_label(-1)), findsOneWidget);
+    });
+
+    testWidgets('vertical two-finger pan never changes month',
+        (tester) async {
+      await _pumpCalendar(tester);
+      await _panZoom(tester, const Offset(0, 300));
+      expect(find.text(_label(0)), findsOneWidget);
+      await _panZoom(tester, const Offset(0, -300));
+      expect(find.text(_label(0)), findsOneWidget);
     });
 
     testWidgets('short slow pan snaps back', (tester) async {

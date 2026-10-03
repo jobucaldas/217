@@ -51,18 +51,13 @@ class _CalendarScreenState extends State<CalendarScreen>
   late final AnimationController _monthSnap;
   Animation<double>? _monthSnapAnim;
 
-  /// Wheel / web-trackpad scroll has no end event: an idle gap ends the
-  /// gesture, and a committed month change swallows the rest of it
-  /// (momentum tail) so one swipe moves exactly one month.
+  /// Web touchpad scroll has no end event: an idle gap ends the gesture,
+  /// and a committed month change swallows the rest of it (momentum tail)
+  /// so one swipe moves exactly one month.
   Timer? _wheelIdle;
   bool _wheelLocked = false;
   bool _wheelDragging = false;
   static const _wheelIdleGap = Duration(milliseconds: 140);
-
-  /// Native trackpad pan (PointerPanZoom): axis locked per gesture so a
-  /// vertical two-finger swipe also pages months.
-  bool? _panZoomVertical;
-  VelocityTracker? _panZoomVelocity;
 
   DateTime get _today {
     final now = DateTime.now();
@@ -180,10 +175,7 @@ class _CalendarScreenState extends State<CalendarScreen>
   }
 
   void _onMonthDragEnd(DragEndDetails details, double width) {
-    _settleMonthDrag(details.primaryVelocity ?? 0, width);
-  }
-
-  void _settleMonthDrag(double v, double width) {
+    final v = details.primaryVelocity ?? 0;
     final threshold = width * 0.22;
     int commit = 0;
     if (_dragPx <= -threshold || v < -480) {
@@ -195,18 +187,22 @@ class _CalendarScreenState extends State<CalendarScreen>
     _animateMonthTo(target, commitDelta: commit);
   }
 
-  /// Mouse wheel and (on web) two-finger touchpad scroll. Scrolling right or
-  /// down peeks the next month; past a small threshold the month commits.
+  /// Horizontal two-finger touchpad swipes on web arrive as scroll signals
+  /// (native touchpads send pan/zoom, which the drag recognizer handles).
+  /// Mouse wheels and vertical scrolls never change the month.
   void _onMonthPointerSignal(PointerSignalEvent event, double width) {
-    if (event is! PointerScrollEvent) return;
+    if (event is! PointerScrollEvent ||
+        event.kind != PointerDeviceKind.trackpad) {
+      return;
+    }
+    final d = event.scrollDelta;
+    if (d.dx.abs() <= d.dy.abs()) return;
     GestureBinding.instance.pointerSignalResolver.register(event, (e) {
-      final d = (e as PointerScrollEvent).scrollDelta;
-      final delta = d.dx.abs() >= d.dy.abs() ? d.dx : d.dy;
-      if (delta == 0) return;
+      final delta = (e as PointerScrollEvent).scrollDelta.dx;
       _wheelIdle?.cancel();
       _wheelIdle = Timer(_wheelIdleGap, _onWheelIdle);
       if (_wheelLocked || _monthSnap.isAnimating || width <= 0) return;
-      // One wheel notch is enough even on wide layouts.
+      // A short swipe is enough even on wide layouts.
       final threshold = (width * 0.22).clamp(0.0, 60.0);
       final next = (_dragPx - delta).clamp(-width, width);
       if (next.abs() >= threshold) {
@@ -233,32 +229,6 @@ class _CalendarScreenState extends State<CalendarScreen>
     if (_monthSnap.isAnimating) return;
     // Scroll stopped short of the threshold: spring back.
     _animateMonthTo(0, commitDelta: 0);
-  }
-
-  void _onMonthPanZoomStart(PointerPanZoomStartEvent event) {
-    _panZoomVertical = null;
-    _panZoomVelocity = VelocityTracker.withKind(event.kind);
-    _onMonthDragStart(DragStartDetails());
-  }
-
-  void _onMonthPanZoomUpdate(PointerPanZoomUpdateEvent event) {
-    final d = event.panDelta;
-    if (d == Offset.zero) return;
-    final vertical = _panZoomVertical ??= d.dy.abs() > d.dx.abs();
-    // Track along the locked axis so a vertical flick reads as horizontal.
-    final p = event.pan;
-    _panZoomVelocity?.addPosition(
-      event.timeStamp,
-      vertical ? Offset(p.dy, 0) : Offset(p.dx, 0),
-    );
-    setState(() => _dragPx += vertical ? d.dy : d.dx);
-  }
-
-  void _onMonthPanZoomEnd(PointerPanZoomEndEvent _, double width) {
-    final v = _panZoomVelocity?.getVelocity().pixelsPerSecond.dx ?? 0;
-    _panZoomVertical = null;
-    _panZoomVelocity = null;
-    _settleMonthDrag(v, width);
   }
 
   void _animateMonthTo(double target, {required int commitDelta}) {
@@ -497,25 +467,13 @@ class _CalendarScreenState extends State<CalendarScreen>
                 child: LayoutBuilder(
                   builder: (context, constraints) {
                     final pageW = constraints.maxWidth;
-                    // Touchpads: two-finger swipes arrive as scroll signals
-                    // (web, wheel) or pan/zoom (native); both page months.
+                    // Web touchpad swipes arrive as scroll signals; native
+                    // touchpad pan/zoom reaches the horizontal drag below.
                     return Listener(
                       behavior: HitTestBehavior.opaque,
                       onPointerSignal: (e) => _onMonthPointerSignal(e, pageW),
-                      onPointerPanZoomStart: _onMonthPanZoomStart,
-                      onPointerPanZoomUpdate: _onMonthPanZoomUpdate,
-                      onPointerPanZoomEnd: (e) => _onMonthPanZoomEnd(e, pageW),
                       child: GestureDetector(
                         behavior: HitTestBehavior.opaque,
-                        // Trackpad pan/zoom is handled by the Listener above
-                        // (both axes); keep the drag recognizer off it.
-                        supportedDevices: const {
-                          PointerDeviceKind.touch,
-                          PointerDeviceKind.mouse,
-                          PointerDeviceKind.stylus,
-                          PointerDeviceKind.invertedStylus,
-                          PointerDeviceKind.unknown,
-                        },
                         onHorizontalDragStart: _onMonthDragStart,
                         onHorizontalDragUpdate: _onMonthDragUpdate,
                         onHorizontalDragEnd: (d) => _onMonthDragEnd(d, pageW),
