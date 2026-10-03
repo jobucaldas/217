@@ -590,6 +590,40 @@ void main() {
   });
 
   for (final brightness in Brightness.values) {
+    testWidgets('add-note plus is a bare accent plus ($brightness)',
+        (tester) async {
+      final scheme = buildApp217ColorScheme(
+        brightness,
+        palette: AppPalette.blue,
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildApp217Theme(
+            brightness: brightness,
+            palette: AppPalette.blue,
+          ),
+          home: Scaffold(
+            body: DayEditorSheet(
+              strings: const Strings(AppLanguage.en),
+              date: '2026-10-01',
+              initialTaken: null,
+              initialNotes: '',
+              initialHeart: false,
+              hadEntry: false,
+              onCommit: (_) {},
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byIcon(Icons.add_circle), findsNothing);
+      final plus = tester.widget<Icon>(find.byIcon(Icons.add));
+      expect(plus.color, scheme.primary);
+    });
+  }
+
+  for (final brightness in Brightness.values) {
     testWidgets(
       'onCommit: Pronto keeps day sheet open for Taken ($brightness)',
       (tester) async {
