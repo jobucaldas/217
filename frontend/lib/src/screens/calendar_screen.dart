@@ -10,6 +10,7 @@ import '../i18n.dart';
 import '../models.dart';
 import '../notifications/partner_alert_sync.dart';
 import '../theme/app_theme.dart';
+import 'dialog_actions.dart';
 import 'reminder_hint.dart';
 import 'share_screens.dart';
 import 'today_nudge.dart';
@@ -1457,24 +1458,27 @@ class _NoteDialogState extends State<_NoteDialog> {
         ),
       ),
       actions: [
-        if (hasText)
-          TextButton(
+        // No Cancel — barrier / outside tap dismisses without saving.
+        DialogActionRow(
+          secondary: hasText
+              ? DialogLinkButton(
+                  onPressed: () => Navigator.pop(
+                    context,
+                    _NoteDialogResult(notes: '', heart: _heart),
+                  ),
+                  label: widget.strings.clearNote,
+                )
+              : null,
+          primary: FilledButton(
+            style: FilledButton.styleFrom(
+              minimumSize: const Size(88, 48),
+            ),
             onPressed: () => Navigator.pop(
               context,
-              _NoteDialogResult(notes: '', heart: _heart),
+              _NoteDialogResult(notes: _controller.text.trim(), heart: _heart),
             ),
-            child: Text(widget.strings.clearNote),
+            child: Text(widget.strings.done),
           ),
-        // No Cancel — barrier / outside tap dismisses without saving.
-        FilledButton(
-          style: FilledButton.styleFrom(
-            minimumSize: const Size(88, 44),
-          ),
-          onPressed: () => Navigator.pop(
-            context,
-            _NoteDialogResult(notes: _controller.text.trim(), heart: _heart),
-          ),
-          child: Text(widget.strings.done),
         ),
       ],
     );
