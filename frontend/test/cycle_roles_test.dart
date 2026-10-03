@@ -315,6 +315,11 @@ void main() {
         lessThan(1),
       );
       expect(find.byTooltip('Period'), findsOneWidget);
+      final heart = find.byKey(const ValueKey('day-heart-toggle'));
+      expect(
+        (tester.getCenter(heart).dy - tester.getCenter(notes).dy).abs(),
+        lessThan(1),
+      );
       expect(find.descendant(of: chip, matching: find.byIcon(Icons.water_drop)),
           findsNothing);
       await tester.tap(chip);
