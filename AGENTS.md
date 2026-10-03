@@ -20,12 +20,11 @@ Switching role is refused while a calendar is shared. Period days drive cycle/PM
 ## Layout
 - `backend/` — Go API (`Dockerfile`: `dev` stage + production image)
 - `frontend/` — Flutter app (web, Android, Windows, Linux), `Dockerfile` (web image: `local` stage builds from source, `prebuilt` is what CI publishes), `Caddyfile` (serves the bundle, proxies `/api/*`)
-- `docker-compose.yml` — dev stack + tooling (built from local code); end users run the compose file embedded in `readme.md` against GHCR images
-- `docs/development.md` — developer guide
+- `docker-compose.yml` — dev stack + tooling (built from local code); end users run the compose file embedded in `README.md` against GHCR images
 - Deployment manifests live in a separate infra repo; this repo only publishes images and APKs.
 
 ## Development Environment
-Fully containerized with Docker Compose (Podman works too). DO NOT install project SDKs on the host. No Makefile: everything is a compose service (see `docs/development.md`).
+Fully containerized with Docker Compose (Podman works too). DO NOT install project SDKs on the host. No Makefile: everything is a compose service (see the Development section of `README.md`).
 
 ```sh
 docker compose up --build                 # postgres + backend + web (built from local code) at :8787

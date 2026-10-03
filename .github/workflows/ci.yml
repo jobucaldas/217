@@ -78,8 +78,8 @@ jobs:
         run: |
           mkdir smoke
           # The README holds the one yaml block users copy.
-          awk '/^```yaml$/{f=1;next} /^```$/{f=0} f' readme.md > smoke/compose.yaml
-          printf '%s\n' POSTGRES_PASSWORD=ci APP_BASE_URL=http://localhost:8787 \
+          awk '/^```yaml$/{f=1;next} /^```$/{f=0} f' README.md > smoke/compose.yaml
+          printf '%s\n' POSTGRES_PASSWORD="$(openssl rand -hex 24)" APP_BASE_URL=http://localhost:8787 \
             WORKOS_CLIENT_ID=client_ci > smoke/.env
           cd smoke
           # Only postgres comes from a registry; the app images were just built.
