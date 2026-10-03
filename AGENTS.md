@@ -12,12 +12,18 @@ Android-first Flutter app for tracking anticonceptional intake via a calendar UI
 - Database: PostgreSQL 16 — containerized via Podman
 - Reverse Proxy: Caddy — Flutter web UI + `/api/*`
 
+## Layout
+- `backend/` — Go API (`Dockerfile`: `dev` stage + production image)
+- `frontend/` — `mobile/` Flutter app (web + Android), `Dockerfile` (web bundle image), `Caddyfile` (local proxy)
+- `docker-compose.yml` — local stack
+- Deployment manifests live in a separate infra repo; this repo only publishes images and APKs.
+
 ## Development Environment
-Fully containerized with Podman. DO NOT install project SDKs on the host. Go tooling runs in `localhost/217-dev`; Flutter tooling runs in `ghcr.io/cirruslabs/flutter:stable`.
+Fully containerized with Podman. DO NOT install project SDKs on the host. Go tooling runs in `localhost/217-dev` (the `dev` stage of `backend/Dockerfile`); Flutter tooling runs in `ghcr.io/cirruslabs/flutter:stable`.
 
 ```sh
 make dev-up          # postgres + backend + caddy
-make mobile-web      # Flutter web → mobile/build/web (served at :8787)
+make mobile-web      # Flutter web → frontend/mobile/build/web (served at :8787)
 make test-backend    # gofmt/test/vet/build in container
 make test-mobile     # flutter analyze + test in container
 make mobile-apk      # debug APK in container
@@ -63,7 +69,7 @@ Android deep-link PKCE:
 - Mobile: `make test-mobile`
 - Web tryout: `make mobile-web` then open http://localhost:8787/
 - APK: `make mobile-apk`
-- **UI quality (agent directive, not a testing preference):** never ship Flutter UI without dark **and** light coverage. CI must fail unreadable contrast and broken “today” CTA persistence (`mobile/test/theme_contrast_test.dart`, `mobile/test/today_nudge_test.dart`). **Not running those checks is unacceptable agent behavior** — same class as skipping the PR merge loop.
+- **UI quality (agent directive, not a testing preference):** never ship Flutter UI without dark **and** light coverage. CI must fail unreadable contrast and broken “today” CTA persistence (`frontend/mobile/test/theme_contrast_test.dart`, `frontend/mobile/test/today_nudge_test.dart`). **Not running those checks is unacceptable agent behavior** — same class as skipping the PR merge loop.
 
 ## Remaining gaps
 - Live WorkOS sign-in / authenticated calendar not verified in CI

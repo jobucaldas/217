@@ -21,7 +21,7 @@ services:
   backend:
     build:
       context: ./backend
-      dockerfile: Dockerfile
+      target: dev
     environment:
       DATABASE_URL: "postgres://app_217:app_217@postgres:5432/app_217?sslmode=disable"
       BACKEND_ADDR: ":3000"
@@ -57,8 +57,8 @@ services:
       - "${HTTP_PORT:-8787}:8787"
     volumes:
       # Flutter web release build (`make mobile-web`).
-      - ./mobile/build/web:/srv/web:Z
-      - ./Caddyfile:/etc/caddy/Caddyfile:Z
+      - ./frontend/mobile/build/web:/srv/web:Z
+      - ./frontend/Caddyfile:/etc/caddy/Caddyfile:Z
     depends_on:
       - backend
     restart: unless-stopped

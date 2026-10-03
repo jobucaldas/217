@@ -1,6 +1,3 @@
-# dependencies
-node_modules/
-
 # Build output
 backend/bin/
 backend/server
@@ -13,23 +10,15 @@ backend/server
 
 # generated validation artifacts
 artifacts/
-artifacts/screenshots/
-artifacts/test-results/
-artifacts/run-recovery/
-artifacts/android/
 
 # Flutter / mobile
-mobile/.dart_tool/
-mobile/.flutter-plugins
-mobile/.flutter-plugins-dependencies
-mobile/.packages
-mobile/build/
-mobile/.pub-cache/
-mobile/**/GeneratedPluginRegistrant.*
-
-# Local Go module caches used by containers
-.gomodcache/
-.gocache/
+frontend/mobile/.dart_tool/
+frontend/mobile/.flutter-plugins
+frontend/mobile/.flutter-plugins-dependencies
+frontend/mobile/.packages
+frontend/mobile/build/
+frontend/mobile/.pub-cache/
+frontend/mobile/**/GeneratedPluginRegistrant.*
 
 .env
 *.apk

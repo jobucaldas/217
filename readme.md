@@ -21,7 +21,7 @@ Copy `.env.example` to ignored `.env.local`. Set `WORKOS_API_KEY` from the WorkO
 
 ```sh
 make dev-up       # postgres + Go API + Caddy
-make mobile-web   # Flutter web → mobile/build/web
+make mobile-web   # Flutter web → frontend/mobile/build/web
 ```
 
 Open <http://localhost:8787/>. Stop with `make dev-down`.
@@ -35,24 +35,22 @@ make test-mobile
 make mobile-apk
 ```
 
-Install `mobile/build/app/outputs/flutter-apk/app-debug.apk`. Emulator API base defaults to `http://10.0.2.2:8787` (`--dart-define=API_BASE_URL=...` to override at build time, or **Settings → Advanced options → Self-hosted server URL** in the app).
+Install `frontend/mobile/build/app/outputs/flutter-apk/app-debug.apk`. Emulator API base defaults to `http://10.0.2.2:8787` (`--dart-define=API_BASE_URL=...` to override at build time, or **Settings → Advanced options → Self-hosted server URL** in the app).
 
 The published APK has **no built-in server**: on first launch it asks for the address of a 217 server (see [Self-hosting](#self-hosting)), or an invite link from someone who runs one. Release builds only connect over `https://`.
 
 Every push to `main` (after CI is green) publishes APK + GHCR with the same dual names:
-- **nightly** — rolling GitHub Release (`217-nightly.apk`) and GHCR tags `:nightly` / `:dev`
+- **nightly** — rolling GitHub Release (`217-nightly.apk`) and GHCR tag `:nightly`
 - **datetime_sha** — immutable GitHub Release `YYYYMMDDHHMMSS_<shortsha>` (`217-<tag>.apk`) and matching GHCR tags
 
 ## Layout
 
 | Path | Role |
 |---|---|
-| `mobile/` | Flutter client |
-| `backend/` | Go API |
-| `frontend/` | Caddy image that serves the Flutter web bundle |
-| `deploy/` | Kubernetes (kustomize) manifests; `overlays/dev` is the maintainer's own deployment, kept as an example |
-| `dev/Containerfile` | Go toolchain image used by `make test-backend` |
-| `scripts/` | CI helpers |
+| `backend/` | Go API; its `Dockerfile` has a `dev` stage (toolchain for compose and `make test-backend`) and the production image |
+| `frontend/` | Web/Android client: `mobile/` is the Flutter app, `Dockerfile` packages its web bundle, `Caddyfile` is the local proxy |
+| `docker-compose.yml` | Local stack: Postgres + API + Caddy |
+| `.github/workflows/ci.yml` | Backend and Flutter checks; on `main`, publishes GHCR images and the APK |
 
 ## Validate
 
@@ -101,9 +99,8 @@ Sign-in uses [WorkOS AuthKit](https://workos.com/docs/authkit) (free tier is eno
 
 ### 3. Run it
 
-- **Compose (simplest):** `docker-compose.yml` runs Postgres, the API and Caddy. Put the variables above in `.env.local`, build the web app with `make mobile-web`, then `make dev-up`. Change the default database password and serve it over HTTPS (for example a reverse proxy in front of port 8787, or Caddy itself with your domain in the `Caddyfile` and ports 80/443 published).
-- **Kubernetes:** `deploy/kustomize/base` has backend and frontend deployments plus a production `Caddyfile`; see `deploy/kustomize/overlays/dev` for a working overlay. Put `DATABASE_URL`, `WORKOS_API_KEY` and friends in a Secret.
-- **Images:** CI publishes `app-217-backend` and `app-217-frontend` images to GHCR on every push to `main`.
+- **Compose (simplest):** `docker-compose.yml` runs Postgres, the API and Caddy. Put the variables above in `.env.local`, build the web app with `make mobile-web`, then `make dev-up`. Change the default database password and serve it over HTTPS (for example a reverse proxy in front of port 8787, or Caddy itself with your domain in `frontend/Caddyfile` and ports 80/443 published).
+- **Images:** CI publishes `app-217-backend` (the API) and `app-217-frontend` (the web bundle in `/app/dist`, to serve with Caddy next to the API) to GHCR on every push to `main`. Put `DATABASE_URL`, `WORKOS_API_KEY` and friends in your orchestrator's secrets.
 
 Check it with `curl https://217.example.com/api/auth/config` — it should answer `{"authkit":true,...,"workos_client_id":"client_..."}`.
 
