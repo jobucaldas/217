@@ -249,7 +249,7 @@ void main() {
       MaterialApp(
         theme: buildApp217Theme(
           brightness: Brightness.light,
-          palette: AppPalette.azure,
+          palette: AppPalette.blue,
         ),
         home: ServerSetupScreen(
           api: api,

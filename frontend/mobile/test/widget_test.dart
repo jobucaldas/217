@@ -14,7 +14,7 @@ void main() {
         var openedServerSettings = false;
         final scheme = buildApp217ColorScheme(
           brightness,
-          palette: AppPalette.azure,
+          palette: AppPalette.blue,
         );
         await tester.pumpWidget(
           MaterialApp(
@@ -24,7 +24,7 @@ void main() {
               colorScheme: scheme,
               scaffoldBackgroundColor: scaffoldBackgroundFor(
                 brightness,
-                palette: AppPalette.azure,
+                palette: AppPalette.blue,
               ),
             ),
             home: AuthScreen(
@@ -85,12 +85,12 @@ void main() {
       var opened = 0;
       var dismissed = 0;
       final scheme =
-          buildApp217ColorScheme(brightness, palette: AppPalette.azure);
+          buildApp217ColorScheme(brightness, palette: AppPalette.blue);
       await tester.pumpWidget(
         MaterialApp(
           theme: buildApp217Theme(
             brightness: brightness,
-            palette: AppPalette.azure,
+            palette: AppPalette.blue,
           ),
           home: AuthScreen(
             strings: const Strings(AppLanguage.en),
