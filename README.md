@@ -27,13 +27,13 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_DB: app_217
-      POSTGRES_USER: app_217
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: "217"
+      POSTGRES_USER: "217"
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?create a password and set POSTGRES_PASSWORD in .env}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U app_217 -d app_217"]
+      test: ["CMD-SHELL", "pg_isready -U 217 -d 217"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -42,7 +42,7 @@ services:
   backend:
     image: ghcr.io/jobucaldas/217-backend:nightly
     environment:
-      DATABASE_URL: postgres://app_217:${POSTGRES_PASSWORD}@postgres:5432/app_217?sslmode=disable
+      DATABASE_URL: postgres://217:${POSTGRES_PASSWORD}@postgres:5432/217?sslmode=disable
       APP_BASE_URL: ${APP_BASE_URL:?set APP_BASE_URL in .env}
       WORKOS_CLIENT_ID: ${WORKOS_CLIENT_ID:?set WORKOS_CLIENT_ID in .env}
       WORKOS_API_KEY: ${WORKOS_API_KEY:-}
@@ -72,10 +72,11 @@ volumes:
   caddy:
 ```
 
-**3. Save this as `.env` next to it** (keep it private):
+**3. Save this as `.env` next to it** (keep it private) and fill in every value. Create the database password yourself (the command in the comment prints a good one); it is only used between the containers, so you never type it again:
 
 ```sh
-POSTGRES_PASSWORD=change-me
+# Create your own database password, e.g. with: openssl rand -hex 24
+POSTGRES_PASSWORD=
 APP_BASE_URL=https://217.example.com   # or http://localhost:8787 to try it
 WORKOS_CLIENT_ID=client_...
 WORKOS_API_KEY=sk_...                  # recommended: "Delete account" needs it
@@ -113,6 +114,36 @@ Every push to `main` publishes the apps and images as `nightly` (rolling) and as
 - Never commit `WORKOS_API_KEY` or other secrets; the apps only get the public client ID
 - Session tokens are stored as SHA-256 digests in PostgreSQL
 
-## Contributing
+## Development
 
-Developing 217 with your local code: [docs/development.md](docs/development.md).
+Everything runs through Docker Compose (Podman works too); do not install Go or Flutter on the host. The root `docker-compose.yml` builds **your checkout**, unlike the compose file above, which runs the published images.
+
+```sh
+cp .env.example .env     # set POSTGRES_PASSWORD (openssl rand -hex 24) and your own WorkOS client ID and API key
+docker compose up --build
+```
+
+Open <http://localhost:8787/>. This starts Postgres, the Go API (`go run` on the mounted `backend/`) and `web`, which builds the Flutter web app from `frontend/` and serves it with Caddy next to the API. Sign-in needs your own [WorkOS](https://workos.com) project with `http://localhost:8787/api/auth/workos/callback` as a redirect URI; without it the stack runs but nobody can sign in. Change the port with `HTTP_PORT` and a matching `APP_BASE_URL`. Stop with `docker compose down` (`-v` also wipes the database).
+
+| Changed | Do |
+|---|---|
+| `backend/` | `docker compose restart backend` |
+| `frontend/` | `docker compose up --build -d web` |
+
+Checks and tools (Flutter UI needs dark **and** light coverage; `test/theme_contrast_test.dart` and `test/today_nudge_test.dart` must pass):
+
+```sh
+docker compose run --rm test-backend    # gofmt, vet, test
+docker compose run --rm test-frontend   # flutter analyze + test
+docker compose run --rm apk             # debug APK -> frontend/build/app/outputs/flutter-apk/ (API_BASE_URL defaults to the emulator host 10.0.2.2:8787)
+docker compose run --rm vapid-keys      # web push key pair
+```
+
+Windows and Linux builds need their own OS: `flutter build windows|linux --release` inside `frontend/` (Linux: `clang cmake ninja-build libgtk-3-dev libsecret-1-dev`). `frontend/packaging/` wraps the output into the installer and AppImage that CI publishes. Desktop debug builds default to `http://localhost:8787`.
+
+| Path | Role |
+|---|---|
+| `backend/` | Go API. `Dockerfile`: `dev` stage (toolchain used by compose) and the production image |
+| `frontend/` | Flutter app (web, Android, Windows, Linux). `Dockerfile`: `local` builds the web bundle from source, `prebuilt` (default, what CI publishes) copies `build/web`; `Caddyfile` serves it and proxies `/api/*` (`SITE_ADDRESS`, `BACKEND_UPSTREAM`) |
+| `docker-compose.yml` | Dev stack and tooling |
+| `.github/workflows/ci.yml` | Checks on every PR; on `main`, publishes the GHCR images and the app releases |

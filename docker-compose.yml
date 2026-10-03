@@ -1,22 +1,22 @@
 # Development stack: builds everything from this checkout.
 #   docker compose up --build        # http://localhost:8787
 #   docker compose run --rm test-backend
-# Running 217 rather than hacking on it? Use the compose file in the README.
+# Needs .env (copy .env.example). Running 217 rather than hacking on it? Use the compose file in the README.
 name: "217"
 
 services:
   postgres:
     image: docker.io/postgres:16-alpine
     environment:
-      POSTGRES_DB: app_217
-      POSTGRES_USER: app_217
-      POSTGRES_PASSWORD: app_217
+      POSTGRES_DB: "217"
+      POSTGRES_USER: "217"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?create a password and set POSTGRES_PASSWORD in .env}"
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U app_217 -d app_217"]
+      test: ["CMD-SHELL", "pg_isready -U 217 -d 217"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -27,7 +27,7 @@ services:
       context: ./backend
       target: dev
     environment:
-      DATABASE_URL: "postgres://app_217:app_217@postgres:5432/app_217?sslmode=disable"
+      DATABASE_URL: "postgres://217:${POSTGRES_PASSWORD}@postgres:5432/217?sslmode=disable"
       WORKOS_API_KEY: "${WORKOS_API_KEY:-}"
       WORKOS_CLIENT_ID: "${WORKOS_CLIENT_ID:-}"
       APP_BASE_URL: "${APP_BASE_URL:-http://localhost:8787}"
