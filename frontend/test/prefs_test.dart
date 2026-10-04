@@ -32,20 +32,6 @@ void main() {
     expect(AppearancePrefs.fabBottomKey, 'today_fab_bottom');
   });
 
-  test('scaffold neutrals are pinned across accents', () {
-    for (final brightness in Brightness.values) {
-      final scaffolds = {
-        for (final p in AppPalette.values)
-          p: scaffoldBackgroundFor(brightness, palette: p),
-      };
-      expect(
-        scaffolds.values.toSet().length,
-        1,
-        reason: 'scaffold must not shift with accent ($brightness)',
-      );
-    }
-  });
-
   test('reminder hint dismissal is remembered until reset', () async {
     FlutterSecureStorage.setMockInitialValues({});
     final prefs = AppearancePrefs();

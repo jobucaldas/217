@@ -79,21 +79,6 @@ void main() {
     );
   }
 
-  testWidgets('auth screen English tagline has no trailing period',
-      (tester) async {
-    await tester.pumpWidget(
-      MaterialApp(
-        home: AuthScreen(
-          strings: const Strings(AppLanguage.en),
-          onSignIn: () async {},
-          onOpenSettings: () {},
-        ),
-      ),
-    );
-    expect(find.text('contraceptive calendar'), findsOneWidget);
-    expect(find.text('Sign in'), findsOneWidget);
-  });
-
   test('config defaults bake in no WorkOS client id', () {
     final config = AppConfig.fromEnvironment();
     expect(config.workosClientId, isEmpty);

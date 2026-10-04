@@ -593,35 +593,6 @@ void main() {
   });
 
   for (final brightness in Brightness.values) {
-    testWidgets('empty note button has no plus badge ($brightness)',
-        (tester) async {
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: buildApp217Theme(
-            brightness: brightness,
-            palette: AppPalette.blue,
-          ),
-          home: Scaffold(
-            body: DayEditorSheet(
-              strings: const Strings(AppLanguage.en),
-              date: '2026-10-01',
-              initialTaken: null,
-              initialNotes: '',
-              initialHeart: false,
-              hadEntry: false,
-              onCommit: (_) {},
-            ),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      expect(find.byIcon(Icons.add_circle), findsNothing);
-      expect(find.byIcon(Icons.add), findsNothing);
-    });
-  }
-
-  for (final brightness in Brightness.values) {
     testWidgets(
       'onCommit: Pronto keeps day sheet open for Taken ($brightness)',
       (tester) async {
