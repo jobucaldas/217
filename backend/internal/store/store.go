@@ -36,7 +36,7 @@ type Store interface {
 	ConsumeOAuthAttempt(state, binding string) (OAuthAttempt, error)
 
 	// Session management
-	CreateSession(userID, sessionID string, expiresAt time.Time, userAgent, ip string) error
+	CreateSession(userID, sessionID string, expiresAt time.Time) error
 	GetUserBySession(sessionID string) (*model.User, error)
 	DeleteSession(sessionID string) error
 	DeleteAllSessionsForUser(userID string) error

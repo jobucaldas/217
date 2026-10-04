@@ -1,32 +1,35 @@
 package store
 
 import (
+	"crypto/rand"
+	"database/sql"
 	"net/url"
 	"os"
 	"strings"
 	"testing"
 
 	"217/backend/db"
+	"217/backend/internal/fieldcrypt"
 	"217/backend/internal/model"
 )
 
-// pgTestStore returns a migrated PGStore in a throwaway schema, or skips.
-func pgTestStore(t *testing.T) *PGStore {
+// pgTestDSN points at a throwaway schema in TEST_DATABASE_URL, or skips.
+func pgTestDSN(t *testing.T) string {
 	t.Helper()
 	dsn := os.Getenv("TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("set TEST_DATABASE_URL to a disposable PostgreSQL database")
 	}
-	admin, err := NewPGStore(dsn)
+	admin, err := sql.Open("pgx", dsn)
 	if err != nil {
 		t.Fatal(err)
 	}
-	schema := "test_roles_" + strings.ReplaceAll(generateID(), "-", "")
-	if _, err := admin.db.Exec(`CREATE SCHEMA "` + schema + `"`); err != nil {
+	schema := "test_" + generateID()
+	if _, err := admin.Exec(`CREATE SCHEMA "` + schema + `"`); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		if _, err := admin.db.Exec(`DROP SCHEMA "` + schema + `" CASCADE`); err != nil {
+		if _, err := admin.Exec(`DROP SCHEMA "` + schema + `" CASCADE`); err != nil {
 			t.Error(err)
 		}
 		admin.Close()
@@ -38,12 +41,42 @@ func pgTestStore(t *testing.T) *PGStore {
 	q := u.Query()
 	q.Set("search_path", schema)
 	u.RawQuery = q.Encode()
-	s, err := NewPGStore(u.String())
+	return u.String()
+}
+
+func testKeyring(t *testing.T) *fieldcrypt.Keyring {
+	t.Helper()
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		t.Fatal(err)
+	}
+	kr, err := fieldcrypt.New(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return kr
+}
+
+// openPG connects to dsn with kr, closing the store when the test ends.
+func openPG(t *testing.T, dsn string, kr *fieldcrypt.Keyring) *PGStore {
+	t.Helper()
+	s, err := NewPGStore(dsn, kr)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { s.Close() })
-	if err := db.Migrate(s.db); err != nil {
+	return s
+}
+
+// pgTestStore returns a migrated PGStore in a throwaway schema, or skips.
+func pgTestStore(t *testing.T) *PGStore {
+	t.Helper()
+	kr := testKeyring(t)
+	s := openPG(t, pgTestDSN(t), kr)
+	if err := db.Migrate(s.db, MigrationSteps(kr)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Prepare(); err != nil {
 		t.Fatal(err)
 	}
 	return s
@@ -121,7 +154,12 @@ func testRolesCycleAlerts(t *testing.T, s Store) {
 }
 
 func TestMigrationLetsUnusedOwnersPickRole(t *testing.T) {
-	s := pgTestStore(t)
+	kr := testKeyring(t)
+	s := openPG(t, pgTestDSN(t), kr)
+	// Seed the schema as it was before 016, then upgrade.
+	if err := db.MigrateBefore(s.db, nil, "016"); err != nil {
+		t.Fatal(err)
+	}
 	mustExec := func(q string, args ...any) {
 		t.Helper()
 		if _, err := s.db.Exec(q, args...); err != nil {
@@ -139,9 +177,7 @@ func TestMigrationLetsUnusedOwnersPickRole(t *testing.T) {
 		}
 	}
 	mustExec(`INSERT INTO entries (user_id, date, taken) VALUES ($1, '2026-09-01', true)`, active)
-	// Re-run 016 as if upgrading a database that already had these rows.
-	mustExec(`DELETE FROM schema_migrations WHERE version = '016_roles_cycle_partner_alerts.sql'`)
-	if err := db.Migrate(s.db); err != nil {
+	if err := db.Migrate(s.db, MigrationSteps(kr)); err != nil {
 		t.Fatal(err)
 	}
 	for id, want := range map[string]string{active: "owner", idle: "", partner: "partner"} {

@@ -19,6 +19,21 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    services:
+      # The store tests run against PostgreSQL too (each in its own schema).
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U test -d test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://test:test@localhost:5432/test?sslmode=disable
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -79,8 +94,8 @@ jobs:
           mkdir smoke
           # The README holds the one yaml block users copy.
           awk '/^```yaml$/{f=1;next} /^```$/{f=0} f' README.md > smoke/compose.yaml
-          printf '%s\n' POSTGRES_PASSWORD="$(openssl rand -hex 24)" APP_BASE_URL=http://localhost:8787 \
-            WORKOS_CLIENT_ID=client_ci > smoke/.env
+          printf '%s\n' POSTGRES_PASSWORD="$(openssl rand -hex 24)" DATA_ENCRYPTION_KEY="$(openssl rand -base64 32)" \
+            APP_BASE_URL=http://localhost:8787 WORKOS_CLIENT_ID=client_ci > smoke/.env
           cd smoke
           # Only postgres comes from a registry; the app images were just built.
           docker compose pull postgres
@@ -92,6 +107,12 @@ jobs:
           curl -fsS http://localhost:8787/api/auth/config | grep -q workos_client_id
           curl -fsS http://localhost:8787/ | grep -qi '<html'
           curl -fsS http://localhost:8787/some/deep/link | grep -qi '<html'
+          # /api answered through Caddy -> https://backend; postgres refuses plaintext over the network.
+          curl -fsSI http://localhost:8787/api/auth/config | grep -qi '^cache-control: no-store'
+          PGPASSWORD="$(sed -n 's/^POSTGRES_PASSWORD=//p' .env)"
+          psql() { docker compose exec -T -e PGPASSWORD="$PGPASSWORD" postgres psql "host=127.0.0.1 user=217 dbname=217 sslmode=$1" -c 'select 1'; }
+          if psql disable; then echo "postgres accepted a plaintext connection"; exit 1; fi
+          psql require
       - if: failure()
         run: cd smoke && docker compose logs
 

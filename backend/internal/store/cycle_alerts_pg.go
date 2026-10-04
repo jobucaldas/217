@@ -3,30 +3,23 @@ package store
 import (
 	"database/sql"
 	"fmt"
-	"time"
 
 	"217/backend/internal/model"
 )
 
+// ListPeriodDays filters after opening: the period flag is sealed.
 func (s *PGStore) ListPeriodDays(userID, from, to string) ([]string, error) {
-	rows, err := s.db.Query(
-		`SELECT date FROM entries
-		 WHERE user_id = $1 AND period AND date >= $2 AND date <= $3
-		 ORDER BY date ASC`, userID, from, to,
-	)
+	entries, err := s.listEntriesBetween(userID, from, to)
 	if err != nil {
 		return nil, fmt.Errorf("listing period days: %w", err)
 	}
-	defer rows.Close()
 	out := []string{}
-	for rows.Next() {
-		var d time.Time
-		if err := rows.Scan(&d); err != nil {
-			return nil, fmt.Errorf("scanning period day: %w", err)
+	for _, e := range entries {
+		if e.Period {
+			out = append(out, e.Date)
 		}
-		out = append(out, formatDate(d))
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (s *PGStore) GetPartnerAlerts(userID string) (*model.PartnerAlertPreference, error) {

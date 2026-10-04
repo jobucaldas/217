@@ -5,8 +5,22 @@
 name: "217"
 
 services:
+  # Writes the private CA and certificates that encrypt postgres <-> backend <-> web.
+  certs:
+    build:
+      context: ./backend
+      target: dev
+    user: "0:0" # hands the PostgreSQL key to the postgres user
+    volumes:
+      - ./backend:/app:Z
+      - certs:/certs
+    working_dir: /app
+    command: ["go", "run", "./cmd/server", "-init-tls", "/certs"]
+
   postgres:
     image: docker.io/postgres:16-alpine
+    command: ["postgres", "-c", "ssl=on", "-c", "ssl_cert_file=/certs/postgres/tls.crt",
+              "-c", "ssl_key_file=/certs/postgres/tls.key", "-c", "hba_file=/certs/postgres/pg_hba.conf"]
     environment:
       POSTGRES_DB: "217"
       POSTGRES_USER: "217"
@@ -15,11 +29,15 @@ services:
       - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - certs:/certs:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U 217 -d 217"]
       interval: 5s
       timeout: 5s
       retries: 10
+    depends_on:
+      certs:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   backend:
@@ -27,7 +45,11 @@ services:
       context: ./backend
       target: dev
     environment:
-      DATABASE_URL: "postgres://217:${POSTGRES_PASSWORD}@postgres:5432/217?sslmode=disable"
+      DATABASE_URL: "postgres://217:${POSTGRES_PASSWORD}@postgres:5432/217?sslmode=verify-full&sslrootcert=/certs/ca.crt"
+      DATA_ENCRYPTION_KEY: "${DATA_ENCRYPTION_KEY:?create a key and set DATA_ENCRYPTION_KEY in .env}"
+      DATA_ENCRYPTION_KEY_PREVIOUS: "${DATA_ENCRYPTION_KEY_PREVIOUS:-}"
+      TLS_CERT_FILE: /certs/backend/tls.crt
+      TLS_KEY_FILE: /certs/backend/tls.key
       WORKOS_API_KEY: "${WORKOS_API_KEY:-}"
       WORKOS_CLIENT_ID: "${WORKOS_CLIENT_ID:-}"
       APP_BASE_URL: "${APP_BASE_URL:-http://localhost:8787}"
@@ -39,6 +61,7 @@ services:
         condition: service_healthy
     volumes:
       - ./backend:/app:Z
+      - certs:/certs:ro
     working_dir: /app
     restart: unless-stopped
     command: ["go", "run", "./cmd/server", "-addr", ":3000"]
@@ -49,6 +72,11 @@ services:
     build:
       context: ./frontend
       target: local
+    environment:
+      BACKEND_UPSTREAM: https://backend:3000
+      SSL_CERT_DIR: /certs # trust the internal CA for the API hop
+    volumes:
+      - certs:/certs:ro
     ports:
       # HTTP_PORT must match the port in APP_BASE_URL and the WorkOS redirect URI.
       - "${HTTP_PORT:-8787}:8787"
@@ -103,3 +131,4 @@ services:
 
 volumes:
   pgdata:
+  certs:

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -62,5 +63,18 @@ func TestWorkOSExchangeAgainstMockAuthKit(t *testing.T) {
 	}
 	if _, err := provider.ExchangeWithRedirect(context.Background(), "auth-code", "pkce-verifier", "https://evil.example/callback"); err == nil {
 		t.Fatal("expected unregistered redirect to be rejected")
+	}
+
+	failing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"code":"email_verification_required","email":"leak@example.com","pending_authentication_token":"tok_secret"}`))
+	}))
+	defer failing.Close()
+	provider.apiBaseURL = failing.URL
+	provider.httpClient = failing.Client()
+	_, err = provider.ExchangeWithRedirect(context.Background(), "auth-code", "pkce-verifier", "com.jobucaldas.a217://auth/callback")
+	if err == nil || !strings.Contains(err.Error(), "email_verification_required") ||
+		strings.Contains(err.Error(), "leak@example.com") || strings.Contains(err.Error(), "tok_secret") {
+		t.Fatalf("exchange error must name the code without personal data: %v", err)
 	}
 }

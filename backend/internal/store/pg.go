@@ -3,20 +3,33 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
+	"217/backend/internal/fieldcrypt"
 	"217/backend/internal/model"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"golang.org/x/crypto/bcrypt"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
+// PGStore keeps personal data sealed with kr (see sealed.go): emails, names,
+// entries, partner notes, invite codes, push subscriptions and OAuth secrets
+// never reach PostgreSQL in plaintext.
 type PGStore struct {
 	db *sql.DB
+	kr *fieldcrypt.Keyring
 }
 
-func NewPGStore(databaseURL string) (*PGStore, error) {
+// NewPGStore connects to an already migrated database. It refuses a key that
+// cannot open the stored data and reseals rows left on a previous key.
+func NewPGStore(databaseURL string, kr *fieldcrypt.Keyring) (*PGStore, error) {
+	if kr == nil {
+		return nil, fmt.Errorf("a data encryption key is required")
+	}
 	db, err := sql.Open("pgx", databaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("opening database: %w", err)
@@ -26,10 +39,55 @@ func NewPGStore(databaseURL string) (*PGStore, error) {
 	db.SetConnMaxLifetime(5 * time.Minute)
 
 	if err := db.Ping(); err != nil {
+		db.Close()
 		return nil, fmt.Errorf("pinging database: %w", err)
 	}
+	return &PGStore{db: db, kr: kr}, nil
+}
 
-	return &PGStore{db: db}, nil
+// Prepare verifies the key against stored data and, while previous keys are
+// configured, reseals values under the primary key. Run it after migrations.
+func (s *PGStore) Prepare() error {
+	if err := s.checkKey(); err != nil {
+		return err
+	}
+	if s.kr.Rotating() {
+		return s.reseal()
+	}
+	return nil
+}
+
+const userColumns = `u.id, u.email_sealed, u.name_sealed, COALESCE(u.role, ''), u.created_at, u.updated_at`
+
+type rowScanner interface{ Scan(dest ...any) error }
+
+// scanUser reads userColumns (plus extra destinations) and opens the sealed fields.
+func (s *PGStore) scanUser(row rowScanner, extra ...any) (*model.User, error) {
+	user := &model.User{}
+	var email, name []byte
+	dest := append([]any{&user.ID, &email, &name, &user.Role, &user.CreatedAt, &user.UpdatedAt}, extra...)
+	if err := row.Scan(dest...); err != nil {
+		return nil, err
+	}
+	if err := s.openUser(user, email, name); err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
+// insertUser creates a user with sealed email and name. The id is chosen here
+// because the seal is bound to it.
+func (s *PGStore) insertUser(q interface {
+	QueryRow(string, ...any) *sql.Row
+}, email, name, passwordHash string) (*model.User, error) {
+	id := uuid.NewString()
+	return s.scanUser(q.QueryRow(
+		`INSERT INTO users AS u (id, email_sealed, name_sealed, email_index, api_key, password_hash)
+		 VALUES ($1, $2, $3, $4, $5, $6)
+		 RETURNING `+userColumns,
+		id, s.kr.SealString(email, userEmailCtx(id)), s.kr.SealString(name, userNameCtx(id)),
+		emailIndex(s.kr, email), generateAPIKey(), passwordHash,
+	))
 }
 
 func (s *PGStore) CreateUser(email, name, password string) (*model.User, error) {
@@ -37,136 +95,135 @@ func (s *PGStore) CreateUser(email, name, password string) (*model.User, error) 
 	if err != nil {
 		return nil, fmt.Errorf("hashing password: %w", err)
 	}
-
-	apiKey := generateAPIKey()
-	user := &model.User{}
-	err = s.db.QueryRow(
-		`INSERT INTO users (email, name, api_key, password_hash) VALUES ($1, $2, $3, $4)
-		 RETURNING id, email, name, COALESCE(role, ''), api_key, created_at, updated_at`,
-		email, name, apiKey, string(hash),
-	).Scan(&user.ID, &user.Email, &user.Name, &user.Role, &user.APIKey, &user.CreatedAt, &user.UpdatedAt)
+	user, err := s.insertUser(s.db, email, name, string(hash))
 	if err != nil {
 		return nil, fmt.Errorf("creating user: %w", err)
 	}
 	return user, nil
 }
 
-func (s *PGStore) GetUserByAPIKey(apiKey string) (*model.User, error) {
-	user := &model.User{}
-	err := s.db.QueryRow(
-		`SELECT id, email, name, api_key, created_at, updated_at FROM users WHERE api_key = $1`,
-		apiKey,
-	).Scan(&user.ID, &user.Email, &user.Name, &user.APIKey, &user.CreatedAt, &user.UpdatedAt)
-	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("invalid api key")
-	}
+// GetUserByEmail matches the normalized email; several legacy accounts may share it.
+func (s *PGStore) GetUserByEmail(email string) (*model.User, error) {
+	rows, err := s.db.Query(`SELECT `+userColumns+` FROM users u WHERE u.email_index = $1 LIMIT 2`, emailIndex(s.kr, email))
 	if err != nil {
 		return nil, fmt.Errorf("getting user: %w", err)
 	}
-	return user, nil
-}
-
-func (s *PGStore) GetUserByEmail(email string) (*model.User, error) {
-	user := &model.User{}
-	err := s.db.QueryRow(
-		`SELECT id, email, name, api_key, password_hash, created_at, updated_at FROM users WHERE email = $1`,
-		email,
-	).Scan(&user.ID, &user.Email, &user.Name, &user.APIKey, &user.PasswordHash, &user.CreatedAt, &user.UpdatedAt)
-	if err == sql.ErrNoRows {
+	defer rows.Close()
+	var found *model.User
+	for rows.Next() {
+		if found != nil {
+			return nil, fmt.Errorf("ambiguous email")
+		}
+		if found, err = s.scanUser(rows); err != nil {
+			return nil, fmt.Errorf("getting user: %w", err)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("getting user: %w", err)
+	}
+	if found == nil {
 		return nil, fmt.Errorf("user not found")
 	}
-	if err != nil {
-		return nil, fmt.Errorf("getting user: %w", err)
-	}
-	return user, nil
-}
-
-func (s *PGStore) VerifyPassword(email, password string) (*model.User, error) {
-	user, err := s.GetUserByEmail(email)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
-		return nil, fmt.Errorf("invalid password")
-	}
-
-	user.PasswordHash = ""
-	return user, nil
+	return found, nil
 }
 
 func formatDate(t time.Time) string {
 	return t.Format("2006-01-02")
 }
 
-func (s *PGStore) GetEntry(userID, date string) (*model.Entry, error) {
+// canonDate rewrites a YYYY-MM-DD date in canonical form; seals are bound to it.
+func canonDate(date string) (string, error) {
+	d, err := time.Parse("2006-01-02", date)
+	if err != nil {
+		return "", fmt.Errorf("invalid date %q", date)
+	}
+	return formatDate(d), nil
+}
+
+const entryColumns = `id, user_id, date, sealed, created_at, updated_at`
+
+func (s *PGStore) scanEntry(row rowScanner) (*model.Entry, error) {
 	e := &model.Entry{}
 	var dateVal time.Time
-	err := s.db.QueryRow(
-		`SELECT id, user_id, date, taken, notes, heart, period, created_at, updated_at
-		 FROM entries WHERE user_id = $1 AND date = $2`,
-		userID, date,
-	).Scan(&e.ID, &e.UserID, &dateVal, &e.Taken, &e.Notes, &e.Heart, &e.Period, &e.CreatedAt, &e.UpdatedAt)
+	var sealed []byte
+	if err := row.Scan(&e.ID, &e.UserID, &dateVal, &sealed, &e.CreatedAt, &e.UpdatedAt); err != nil {
+		return nil, err
+	}
+	e.Date = formatDate(dateVal)
+	if err := s.openEntry(e, sealed); err != nil {
+		return nil, err
+	}
+	return e, nil
+}
+
+func (s *PGStore) GetEntry(userID, date string) (*model.Entry, error) {
+	e, err := s.scanEntry(s.db.QueryRow(
+		`SELECT `+entryColumns+` FROM entries WHERE user_id = $1 AND date = $2`, userID, date,
+	))
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("entry not found")
 	}
 	if err != nil {
 		return nil, fmt.Errorf("getting entry: %w", err)
 	}
-	e.Date = dateVal.Format("2006-01-02")
 	return e, nil
 }
 
-func (s *PGStore) ListEntries(userID string, year, month int) ([]*model.Entry, error) {
-	firstDay := fmt.Sprintf("%04d-%02d-01", year, month)
-	lastDay := time.Date(year, time.Month(month)+1, 0, 0, 0, 0, 0, time.UTC).Format("2006-01-02")
-
+// listEntriesBetween returns the entries dated within [from, to], oldest first.
+func (s *PGStore) listEntriesBetween(userID, from, to string) ([]*model.Entry, error) {
 	rows, err := s.db.Query(
-		`SELECT id, user_id, date, taken, notes, heart, period, created_at, updated_at
-		 FROM entries WHERE user_id = $1 AND date >= $2 AND date <= $3
+		`SELECT `+entryColumns+` FROM entries
+		 WHERE user_id = $1 AND date >= $2 AND date <= $3
 		 ORDER BY date ASC`,
-		userID, firstDay, lastDay,
+		userID, from, to,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("listing entries: %w", err)
 	}
 	defer rows.Close()
 
-	var result []*model.Entry
+	result := []*model.Entry{}
 	for rows.Next() {
-		e := &model.Entry{}
-		var dateVal time.Time
-		if err := rows.Scan(&e.ID, &e.UserID, &dateVal, &e.Taken, &e.Notes, &e.Heart, &e.Period, &e.CreatedAt, &e.UpdatedAt); err != nil {
+		e, err := s.scanEntry(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scanning entry: %w", err)
 		}
-		e.Date = dateVal.Format("2006-01-02")
 		result = append(result, e)
 	}
-	if result == nil {
-		result = []*model.Entry{}
-	}
-	return result, nil
+	return result, rows.Err()
+}
+
+func monthBounds(year, month int) (string, string) {
+	first := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.UTC)
+	return formatDate(first), formatDate(first.AddDate(0, 1, -1))
+}
+
+func (s *PGStore) ListEntries(userID string, year, month int) ([]*model.Entry, error) {
+	from, to := monthBounds(year, month)
+	return s.listEntriesBetween(userID, from, to)
 }
 
 func (s *PGStore) UpsertEntry(userID, date string, req model.UpsertRequest) (*model.Entry, error) {
+	date, err := canonDate(date)
+	if err != nil {
+		return nil, err
+	}
 	e := &model.Entry{}
 	var dateVal time.Time
-	err := s.db.QueryRow(
-		`INSERT INTO entries (user_id, date, taken, notes, heart, period)
-		 VALUES ($1, $2, $3, $4, $5, $6)
+	err = s.db.QueryRow(
+		`INSERT INTO entries (user_id, date, sealed)
+		 VALUES ($1, $2, $3)
 		 ON CONFLICT (user_id, date) DO UPDATE SET
-		   taken = EXCLUDED.taken,
-		   notes = EXCLUDED.notes,
-		   heart = EXCLUDED.heart,
-		   period = EXCLUDED.period,
+		   sealed = EXCLUDED.sealed,
 		   updated_at = NOW()
-		 RETURNING id, user_id, date, taken, notes, heart, period, created_at, updated_at`,
-		userID, date, req.Taken, req.Notes, req.Heart, req.Period,
-	).Scan(&e.ID, &e.UserID, &dateVal, &e.Taken, &e.Notes, &e.Heart, &e.Period, &e.CreatedAt, &e.UpdatedAt)
+		 RETURNING id, user_id, date, created_at, updated_at`,
+		userID, date, s.sealEntry(userID, date, req),
+	).Scan(&e.ID, &e.UserID, &dateVal, &e.CreatedAt, &e.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("upserting entry: %w", err)
 	}
 	e.Date = formatDate(dateVal)
+	e.Taken, e.Notes, e.Heart, e.Period = req.Taken, req.Notes, req.Heart, req.Period
 	return e, nil
 }
 
@@ -188,79 +245,41 @@ func (s *PGStore) DeleteEntry(userID, date string) error {
 	return nil
 }
 
+// GetStats is computed here rather than in SQL: the taken flags are sealed.
 func (s *PGStore) GetStats(userID string, year, month int) (*model.Stats, error) {
-	firstDay := fmt.Sprintf("%04d-%02d-01", year, month)
-	lastDay := time.Date(year, time.Month(month)+1, 0, 0, 0, 0, 0, time.UTC).Format("2006-01-02")
-
-	var totalEntries int
-	var takenEntries int
-	if err := s.db.QueryRow(
-		`SELECT COUNT(*), COALESCE(SUM(CASE WHEN taken IS TRUE THEN 1 ELSE 0 END), 0)
-		 FROM entries WHERE user_id = $1 AND date >= $2 AND date <= $3`,
-		userID, firstDay, lastDay,
-	).Scan(&totalEntries, &takenEntries); err != nil {
+	entries, err := s.ListEntries(userID, year, month)
+	if err != nil {
 		return nil, fmt.Errorf("getting stats: %w", err)
 	}
-
-	totalDays := time.Date(year, time.Month(month)+1, 0, 0, 0, 0, 0, time.UTC).Day()
-	missedDays := totalDays - takenEntries
-
-	var streak int
-	// count consecutive days going backwards from today (within this month)
-	currentDate := time.Now().UTC()
-	for currentDate.Month() == time.Month(month) && currentDate.Year() == year {
-		var taken sql.NullBool
-		err := s.db.QueryRow(
-			`SELECT taken FROM entries WHERE user_id = $1 AND date = $2`,
-			userID, currentDate.Format("2006-01-02"),
-		).Scan(&taken)
-		if err != nil || !taken.Valid || !taken.Bool {
-			break
+	taken := map[string]bool{}
+	takenDays := 0
+	for _, e := range entries {
+		if model.TakenTrue(e.Taken) {
+			taken[e.Date] = true
+			takenDays++
 		}
+	}
+	totalDays := time.Date(year, time.Month(month)+1, 0, 0, 0, 0, 0, time.UTC).Day()
+
+	// Consecutive taken days going backwards from today (within this month).
+	streak := 0
+	for d := time.Now().UTC(); d.Month() == time.Month(month) && d.Year() == year && taken[formatDate(d)]; d = d.AddDate(0, 0, -1) {
 		streak++
-		currentDate = currentDate.AddDate(0, 0, -1)
 	}
 
 	return &model.Stats{
 		Year:       year,
 		Month:      month,
 		TotalDays:  totalDays,
-		TakenDays:  takenEntries,
-		MissedDays: missedDays,
+		TakenDays:  takenDays,
+		MissedDays: totalDays - takenDays,
 		Streak:     streak,
 	}, nil
 }
 
-func (s *PGStore) ChangePassword(userID, oldPassword, newPassword string) error {
-	var hash string
-	err := s.db.QueryRow(
-		`SELECT password_hash FROM users WHERE id = $1`, userID,
-	).Scan(&hash)
-	if err == sql.ErrNoRows {
-		return fmt.Errorf("user not found")
-	}
-	if err != nil {
-		return fmt.Errorf("getting user: %w", err)
-	}
-
-	if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(oldPassword)); err != nil {
-		return fmt.Errorf("invalid current password")
-	}
-
-	newHash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
-	if err != nil {
-		return fmt.Errorf("hashing password: %w", err)
-	}
-
-	_, err = s.db.Exec(`UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2`, string(newHash), userID)
-	if err != nil {
-		return fmt.Errorf("updating password: %w", err)
-	}
-	return nil
-}
-
 func (s *PGStore) LinkWorkOSIdentity(subject, verifiedEmail, name string, authoritative bool) (*model.User, error) {
 	normalizedEmail := normalizeEmail(verifiedEmail)
+	index := emailIndex(s.kr, normalizedEmail)
 	tx, err := s.db.BeginTx(context.Background(), &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
 		return nil, fmt.Errorf("beginning workos link transaction: %w", err)
@@ -273,28 +292,26 @@ func (s *PGStore) LinkWorkOSIdentity(subject, verifiedEmail, name string, author
 	if _, err := tx.Exec(`SELECT pg_advisory_xact_lock(hashtextextended($1, 217))`, subject); err != nil {
 		return nil, fmt.Errorf("locking workos subject: %w", err)
 	}
-	if _, err := tx.Exec(`SELECT pg_advisory_xact_lock(hashtextextended($1, 218))`, normalizedEmail); err != nil {
+	if _, err := tx.Exec(`SELECT pg_advisory_xact_lock(hashtextextended(encode($1::bytea, 'hex'), 218))`, index); err != nil {
 		return nil, fmt.Errorf("locking workos email: %w", err)
 	}
 
-	user := &model.User{}
-	err = tx.QueryRow(`SELECT u.id, u.email, u.name, COALESCE(u.role, ''), u.api_key, u.password_hash, u.created_at, u.updated_at
+	user, err := s.scanUser(tx.QueryRow(`SELECT `+userColumns+`
 		FROM workos_identities gi
 		JOIN users u ON u.id = gi.user_id
-		WHERE gi.subject = $1`, subject).
-		Scan(&user.ID, &user.Email, &user.Name, &user.Role, &user.APIKey, &user.PasswordHash, &user.CreatedAt, &user.UpdatedAt)
+		WHERE gi.subject = $1`, subject))
 	if err == nil {
 		if err := tx.Commit(); err != nil {
 			return nil, fmt.Errorf("committing workos identity lookup: %w", err)
 		}
-		return sanitizeUser(user), nil
+		return user, nil
 	}
-	if err != nil && err != sql.ErrNoRows {
+	if err != sql.ErrNoRows {
 		return nil, fmt.Errorf("getting workos identity: %w", err)
 	}
 
 	var normalizedMatches int
-	if err := tx.QueryRow(`SELECT COUNT(*) FROM users WHERE LOWER(email) = $1`, normalizedEmail).Scan(&normalizedMatches); err != nil {
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM users WHERE email_index = $1`, index).Scan(&normalizedMatches); err != nil {
 		return nil, fmt.Errorf("counting normalized email matches: %w", err)
 	}
 	if normalizedMatches > 1 {
@@ -306,7 +323,7 @@ func (s *PGStore) LinkWorkOSIdentity(subject, verifiedEmail, name string, author
 			return nil, fmt.Errorf("legacy account requires independent ownership proof")
 		}
 		var alreadyLinked bool
-		if err := tx.QueryRow(`SELECT EXISTS (SELECT 1 FROM workos_identities gi JOIN users u ON u.id = gi.user_id WHERE LOWER(u.email) = $1)`, normalizedEmail).Scan(&alreadyLinked); err != nil {
+		if err := tx.QueryRow(`SELECT EXISTS (SELECT 1 FROM workos_identities gi JOIN users u ON u.id = gi.user_id WHERE u.email_index = $1)`, index).Scan(&alreadyLinked); err != nil {
 			return nil, fmt.Errorf("checking existing workos link: %w", err)
 		}
 		if alreadyLinked {
@@ -314,32 +331,24 @@ func (s *PGStore) LinkWorkOSIdentity(subject, verifiedEmail, name string, author
 		}
 	}
 
-	err = tx.QueryRow(`SELECT id, email, name, COALESCE(role, ''), api_key, password_hash, created_at, updated_at
-		FROM users WHERE LOWER(email) = $1 FOR UPDATE`, normalizedEmail).
-		Scan(&user.ID, &user.Email, &user.Name, &user.Role, &user.APIKey, &user.PasswordHash, &user.CreatedAt, &user.UpdatedAt)
+	user, err = s.scanUser(tx.QueryRow(`SELECT `+userColumns+` FROM users u WHERE u.email_index = $1 FOR UPDATE`, index))
 	if err == sql.ErrNoRows {
 		if name == "" {
 			name = normalizedEmail
 		}
-		err = tx.QueryRow(`INSERT INTO users (email, name, api_key, password_hash)
-			VALUES ($1, $2, $3, '') RETURNING id, email, name, COALESCE(role, ''), api_key, password_hash, created_at, updated_at`,
-			normalizedEmail, name, generateAPIKey()).
-			Scan(&user.ID, &user.Email, &user.Name, &user.Role, &user.APIKey, &user.PasswordHash, &user.CreatedAt, &user.UpdatedAt)
+		user, err = s.insertUser(tx, normalizedEmail, name, "")
 	}
 	if err != nil {
 		return nil, fmt.Errorf("finding user for workos identity: %w", err)
 	}
 
-	_, err = tx.Exec(`INSERT INTO workos_identities (subject, user_id, email_normalized)
-		VALUES ($1, $2, $3)`,
-		subject, user.ID, normalizedEmail)
-	if err != nil {
+	if _, err = tx.Exec(`INSERT INTO workos_identities (subject, user_id) VALUES ($1, $2)`, subject, user.ID); err != nil {
 		return nil, fmt.Errorf("linking workos identity: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("committing workos identity link: %w", err)
 	}
-	return sanitizeUser(user), nil
+	return user, nil
 }
 
 func (s *PGStore) GetReminderPreference(userID string) (*model.ReminderPreference, error) {
@@ -381,8 +390,10 @@ func (s *PGStore) UpsertReminderPreference(userID string, preference model.Remin
 }
 
 func (s *PGStore) SavePushSubscription(userID string, request model.PushSubscriptionRequest) (*model.PushSubscription, error) {
+	index := endpointIndex(s.kr, request.Endpoint)
 	var owner string
-	err := s.db.QueryRow(`SELECT user_id FROM push_subscriptions WHERE endpoint = $1`, request.Endpoint).Scan(&owner)
+	id := uuid.NewString() // the seal is bound to the row id: reuse an existing row's
+	err := s.db.QueryRow(`SELECT id, user_id FROM push_subscriptions WHERE endpoint_index = $1`, index).Scan(&id, &owner)
 	if err != nil && err != sql.ErrNoRows {
 		return nil, fmt.Errorf("checking push subscription: %w", err)
 	}
@@ -398,26 +409,34 @@ func (s *PGStore) SavePushSubscription(userID string, request model.PushSubscrip
 			return nil, fmt.Errorf("push subscription limit reached")
 		}
 	}
+	payload := pushPayload{Endpoint: request.Endpoint, P256DH: request.Keys.P256DH, Auth: request.Keys.Auth}
 	subscription := &model.PushSubscription{}
-	err = s.db.QueryRow(`INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth)
+	err = s.db.QueryRow(`INSERT INTO push_subscriptions (id, user_id, endpoint_index, sealed)
 		VALUES ($1, $2, $3, $4)
-		ON CONFLICT (endpoint) DO UPDATE SET p256dh = EXCLUDED.p256dh, auth = EXCLUDED.auth, updated_at = NOW()
+		ON CONFLICT (endpoint_index) DO UPDATE SET sealed = EXCLUDED.sealed, updated_at = NOW()
 		WHERE push_subscriptions.user_id = EXCLUDED.user_id
-		RETURNING id, user_id, endpoint, p256dh, auth, created_at, updated_at`,
-		userID, request.Endpoint, request.Keys.P256DH, request.Keys.Auth).
-		Scan(&subscription.ID, &subscription.UserID, &subscription.Endpoint, &subscription.P256DH,
-			&subscription.Auth, &subscription.CreatedAt, &subscription.UpdatedAt)
+		RETURNING id, user_id, created_at, updated_at`,
+		id, userID, index, sealJSON(s.kr, payload, pushCtx(id, userID))).
+		Scan(&subscription.ID, &subscription.UserID, &subscription.CreatedAt, &subscription.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("subscription belongs to another user")
 	}
 	if err != nil {
 		return nil, fmt.Errorf("saving push subscription: %w", err)
 	}
+	if subscription.ID != canonID(id) {
+		// Another request created the row first: bind the seal to its id.
+		if _, err := s.db.Exec(`UPDATE push_subscriptions SET sealed = $2 WHERE id = $1`,
+			subscription.ID, sealJSON(s.kr, payload, pushCtx(subscription.ID, userID))); err != nil {
+			return nil, fmt.Errorf("saving push subscription: %w", err)
+		}
+	}
+	subscription.Endpoint, subscription.P256DH, subscription.Auth = request.Endpoint, request.Keys.P256DH, request.Keys.Auth
 	return subscription, nil
 }
 
 func (s *PGStore) DeletePushSubscription(userID, endpoint string) error {
-	_, err := s.db.Exec(`DELETE FROM push_subscriptions WHERE user_id = $1 AND endpoint = $2`, userID, endpoint)
+	_, err := s.db.Exec(`DELETE FROM push_subscriptions WHERE user_id = $1 AND endpoint_index = $2`, userID, endpointIndex(s.kr, endpoint))
 	if err != nil {
 		return fmt.Errorf("deleting push subscription: %w", err)
 	}
@@ -433,8 +452,7 @@ func (s *PGStore) CountPushSubscriptions(userID string) (int, error) {
 }
 
 func (s *PGStore) ListReminderTargets() ([]model.ReminderTarget, error) {
-	rows, err := s.db.Query(`SELECT ps.id, ps.user_id, u.name, ps.endpoint, ps.p256dh, ps.auth,
-		rp.reminder_time, rp.timezone
+	rows, err := s.db.Query(`SELECT ps.id, ps.user_id, ps.sealed, rp.reminder_time, rp.timezone
 		FROM push_subscriptions ps
 		JOIN users u ON u.id = ps.user_id
 		JOIN reminder_preferences rp ON rp.user_id = ps.user_id
@@ -446,10 +464,15 @@ func (s *PGStore) ListReminderTargets() ([]model.ReminderTarget, error) {
 	result := []model.ReminderTarget{}
 	for rows.Next() {
 		var target model.ReminderTarget
-		if err := rows.Scan(&target.SubscriptionID, &target.UserID, &target.UserName, &target.Endpoint,
-			&target.P256DH, &target.Auth, &target.Time, &target.Timezone); err != nil {
+		var sealed []byte
+		if err := rows.Scan(&target.SubscriptionID, &target.UserID, &sealed, &target.Time, &target.Timezone); err != nil {
 			return nil, fmt.Errorf("scanning reminder target: %w", err)
 		}
+		var p pushPayload
+		if err := openJSON(s.kr, sealed, pushCtx(target.SubscriptionID, target.UserID), &p); err != nil {
+			return nil, fmt.Errorf("opening push subscription %s: %w", target.SubscriptionID, err)
+		}
+		target.Endpoint, target.P256DH, target.Auth = p.Endpoint, p.P256DH, p.Auth
 		result = append(result, target)
 	}
 	return result, rows.Err()
@@ -492,8 +515,9 @@ func (s *PGStore) FinishReminderDelivery(subscriptionID string, reminderDate tim
 func (s *PGStore) CreateOAuthAttempt(state, binding, codeVerifier, nonce string, expiresAt time.Time) error {
 	hash := hashString(state)
 	_, _ = s.db.Exec(`DELETE FROM oauth_attempts WHERE expires_at <= NOW() OR consumed_at IS NOT NULL`)
-	_, err := s.db.Exec(`INSERT INTO oauth_attempts (state_hash, binding_hash, code_verifier, nonce, expires_at, consumed_at)
-		VALUES ($1, $2, $3, $4, $5, NULL)`, hash, hashString(binding), codeVerifier, nonce, expiresAt)
+	sealed := sealJSON(s.kr, oauthPayload{CodeVerifier: codeVerifier, Nonce: nonce}, oauthCtx(hash))
+	_, err := s.db.Exec(`INSERT INTO oauth_attempts (state_hash, binding_hash, sealed, expires_at, consumed_at)
+		VALUES ($1, $2, $3, $4, NULL)`, hash, hashString(binding), sealed, expiresAt)
 	if err != nil {
 		return fmt.Errorf("creating oauth attempt: %w", err)
 	}
@@ -510,12 +534,12 @@ func (s *PGStore) ConsumeOAuthAttempt(state, binding string) (OAuthAttempt, erro
 		_ = tx.Rollback()
 	}()
 
-	var codeVerifier, nonce string
+	var sealed []byte
 	var expiresAt time.Time
 	var consumedAt sql.NullTime
 	var bindingHash string
-	err = tx.QueryRow(`SELECT code_verifier, nonce, binding_hash, expires_at, consumed_at FROM oauth_attempts WHERE state_hash = $1 FOR UPDATE`, hash).
-		Scan(&codeVerifier, &nonce, &bindingHash, &expiresAt, &consumedAt)
+	err = tx.QueryRow(`SELECT sealed, binding_hash, expires_at, consumed_at FROM oauth_attempts WHERE state_hash = $1 FOR UPDATE`, hash).
+		Scan(&sealed, &bindingHash, &expiresAt, &consumedAt)
 	if err == sql.ErrNoRows {
 		return OAuthAttempt{}, fmt.Errorf("oauth state not found")
 	}
@@ -524,6 +548,7 @@ func (s *PGStore) ConsumeOAuthAttempt(state, binding string) (OAuthAttempt, erro
 	}
 	if time.Now().UTC().After(expiresAt) {
 		_, _ = tx.Exec(`DELETE FROM oauth_attempts WHERE state_hash = $1`, hash)
+		_ = tx.Commit()
 		return OAuthAttempt{}, fmt.Errorf("oauth state expired")
 	}
 	if consumedAt.Valid {
@@ -532,22 +557,26 @@ func (s *PGStore) ConsumeOAuthAttempt(state, binding string) (OAuthAttempt, erro
 	if bindingHash != hashString(binding) {
 		return OAuthAttempt{}, fmt.Errorf("oauth browser binding mismatch")
 	}
+	var p oauthPayload
+	if err := openJSON(s.kr, sealed, oauthCtx(hash), &p); err != nil {
+		return OAuthAttempt{}, fmt.Errorf("opening oauth attempt: %w", err)
+	}
 	if _, err := tx.Exec(`UPDATE oauth_attempts SET consumed_at = NOW() WHERE state_hash = $1`, hash); err != nil {
 		return OAuthAttempt{}, fmt.Errorf("consuming oauth attempt: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return OAuthAttempt{}, fmt.Errorf("committing oauth attempt: %w", err)
 	}
-	return OAuthAttempt{CodeVerifier: codeVerifier, Nonce: nonce}, nil
+	return OAuthAttempt{CodeVerifier: p.CodeVerifier, Nonce: p.Nonce}, nil
 }
 
-func (s *PGStore) CreateSession(userID, sessionID string, expiresAt time.Time, userAgent, ip string) error {
+func (s *PGStore) CreateSession(userID, sessionID string, expiresAt time.Time) error {
 	hash := hashString(sessionID)
 	_, _ = s.db.Exec(`DELETE FROM sessions WHERE expires_at <= NOW()`)
-	_, err := s.db.Exec(`INSERT INTO sessions (id, user_id, created_at, expires_at, user_agent, ip_address)
-		VALUES ($1, $2, NOW(), $3, $4, $5)
-		ON CONFLICT (id) DO UPDATE SET user_id = EXCLUDED.user_id, expires_at = EXCLUDED.expires_at, user_agent = EXCLUDED.user_agent, ip_address = EXCLUDED.ip_address, created_at = NOW()`,
-		hash, userID, expiresAt, userAgent, ip)
+	_, err := s.db.Exec(`INSERT INTO sessions (id, user_id, created_at, expires_at)
+		VALUES ($1, $2, NOW(), $3)
+		ON CONFLICT (id) DO UPDATE SET user_id = EXCLUDED.user_id, expires_at = EXCLUDED.expires_at, created_at = NOW()`,
+		hash, userID, expiresAt)
 	if err != nil {
 		return fmt.Errorf("creating session: %w", err)
 	}
@@ -556,11 +585,10 @@ func (s *PGStore) CreateSession(userID, sessionID string, expiresAt time.Time, u
 
 func (s *PGStore) GetUserBySession(sessionID string) (*model.User, error) {
 	hash := hashString(sessionID)
-	user := &model.User{}
 	var expires sql.NullTime
-	err := s.db.QueryRow(`SELECT u.id, u.email, u.name, COALESCE(u.role, ''), u.api_key, u.password_hash, u.created_at, u.updated_at, s.expires_at
+	user, err := s.scanUser(s.db.QueryRow(`SELECT `+userColumns+`, s.expires_at
 		FROM sessions s JOIN users u ON u.id = s.user_id
-		WHERE s.id = $1`, hash).Scan(&user.ID, &user.Email, &user.Name, &user.Role, &user.APIKey, &user.PasswordHash, &user.CreatedAt, &user.UpdatedAt, &expires)
+		WHERE s.id = $1`, hash), &expires)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("session not found")
 	}
@@ -571,7 +599,7 @@ func (s *PGStore) GetUserBySession(sessionID string) (*model.User, error) {
 		_, _ = s.db.Exec(`DELETE FROM sessions WHERE id = $1`, hash)
 		return nil, fmt.Errorf("session expired")
 	}
-	return sanitizeUser(user), nil
+	return user, nil
 }
 
 func (s *PGStore) DeleteSession(sessionID string) error {
@@ -593,4 +621,10 @@ func (s *PGStore) DeleteAllSessionsForUser(userID string) error {
 
 func (s *PGStore) Close() error {
 	return s.db.Close()
+}
+
+// isUniqueViolation reports a PostgreSQL unique_violation (23505) on constraint.
+func isUniqueViolation(err error, constraint string) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == constraint
 }

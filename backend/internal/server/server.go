@@ -1,6 +1,7 @@
 package server
 
 import (
+	"crypto/tls"
 	"encoding/base64"
 	"fmt"
 	"log"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"217/backend/internal/auth"
+	"217/backend/internal/fieldcrypt"
 	"217/backend/internal/handler"
 	"217/backend/internal/reminder"
 	"217/backend/internal/store"
@@ -47,18 +49,28 @@ func ValidatePushConfig(push PushConfig) (PushConfig, error) {
 	return push, nil
 }
 
-func Start(addr, databaseURL string) error {
-	return StartWithPush(addr, databaseURL, "", PushConfig{})
+// Config is everything the API needs to start.
+type Config struct {
+	Addr        string
+	DatabaseURL string
+	AppBaseURL  string
+	Push        PushConfig
+	WorkOS      WorkOSConfig
+	// Keyring seals personal data at rest; required with a database.
+	Keyring *fieldcrypt.Keyring
+	// TLSCertFile and TLSKeyFile make the API serve HTTPS (e.g. to its proxy).
+	TLSCertFile string
+	TLSKeyFile  string
 }
 
-func StartWithPush(addr, databaseURL, appBaseURL string, push PushConfig, workosConfigs ...WorkOSConfig) error {
-	canonicalBaseURL, err := auth.ValidateAppBaseURL(appBaseURL)
+// Run starts the API and blocks until it stops.
+func Run(cfg Config) error {
+	appBaseURL, err := auth.ValidateAppBaseURL(cfg.AppBaseURL)
 	if err != nil {
 		return err
 	}
-	appBaseURL = canonicalBaseURL
-	if len(workosConfigs) > 0 && workosConfigs[0].AppBaseURL != "" {
-		workosBaseURL, validateErr := auth.ValidateAppBaseURL(workosConfigs[0].AppBaseURL)
+	if cfg.WorkOS.AppBaseURL != "" {
+		workosBaseURL, validateErr := auth.ValidateAppBaseURL(cfg.WorkOS.AppBaseURL)
 		if validateErr != nil {
 			return validateErr
 		}
@@ -66,21 +78,34 @@ func StartWithPush(addr, databaseURL, appBaseURL string, push PushConfig, workos
 			return fmt.Errorf("APP_BASE_URL must be consistent across server and WorkOS OAuth configuration")
 		}
 		appBaseURL = workosBaseURL
-		workosConfigs[0].AppBaseURL = workosBaseURL
 	}
-	validatedPush, err := ValidatePushConfig(push)
+	cfg.WorkOS.AppBaseURL = appBaseURL
+	push, err := ValidatePushConfig(cfg.Push)
 	if err != nil {
 		return err
 	}
-	push = validatedPush
-	var s store.Store
+	if (cfg.TLSCertFile == "") != (cfg.TLSKeyFile == "") {
+		return fmt.Errorf("TLS_CERT_FILE and TLS_KEY_FILE must be set together")
+	}
 
-	if databaseURL != "" {
+	var s store.Store
+	if cfg.DatabaseURL != "" {
+		if cfg.Keyring == nil {
+			return fmt.Errorf("DATA_ENCRYPTION_KEY is required with a database")
+		}
+		if !databaseTLSVerified(cfg.DatabaseURL) {
+			log.Println("warning: the database connection is not verified TLS; set sslmode=verify-full (see README)")
+		}
 		log.Println("connecting to postgres")
-		s, err = store.NewPGStore(databaseURL)
+		pg, err := store.NewPGStore(cfg.DatabaseURL, cfg.Keyring)
 		if err != nil {
 			return fmt.Errorf("connect to database: %w", err)
 		}
+		if err := pg.Prepare(); err != nil {
+			pg.Close()
+			return err
+		}
+		s = pg
 		log.Println("connected to postgres")
 	} else {
 		log.Println("using in-memory store")
@@ -93,28 +118,21 @@ func StartWithPush(addr, databaseURL, appBaseURL string, push PushConfig, workos
 	if ttl := parseSessionTTL(); ttl > 0 {
 		h.SetSessionDuration(ttl)
 	}
-
-	if len(workosConfigs) > 0 {
-		cfg := workosConfigs[0]
-		if cfg.ClientID != "" && cfg.AppBaseURL != "" {
-			provider, providerErr := auth.NewWorkOSOAuth(cfg.APIKey, cfg.ClientID, cfg.AppBaseURL)
-			if providerErr != nil {
-				log.Printf("workos oauth disabled: %v", providerErr)
-			} else {
-				h.SetOAuthProvider(provider)
-				if cfg.APIKey == "" {
-					log.Println("workos oauth enabled (PKCE public exchange)")
-				} else {
-					log.Println("workos oauth enabled (PKCE public exchange; API key is not sent on code exchange)")
-				}
-			}
+	if cfg.WorkOS.ClientID != "" && cfg.WorkOS.AppBaseURL != "" {
+		provider, providerErr := auth.NewWorkOSOAuth(cfg.WorkOS.APIKey, cfg.WorkOS.ClientID, cfg.WorkOS.AppBaseURL)
+		if providerErr != nil {
+			log.Printf("workos oauth disabled: %v", providerErr)
 		} else {
-			log.Println("workos oauth disabled: missing WORKOS_CLIENT_ID or APP_BASE_URL")
+			h.SetOAuthProvider(provider)
+			if cfg.WorkOS.APIKey == "" {
+				log.Println("workos oauth enabled (PKCE public exchange)")
+			} else {
+				log.Println("workos oauth enabled (PKCE public exchange; API key is not sent on code exchange)")
+			}
 		}
 	} else {
-		log.Println("workos oauth disabled: missing configuration")
+		log.Println("workos oauth disabled: missing WORKOS_CLIENT_ID or APP_BASE_URL")
 	}
-
 	if push.PublicKey != "" && push.PrivateKey != "" {
 		stop := make(chan struct{})
 		defer close(stop)
@@ -172,10 +190,58 @@ func StartWithPush(addr, databaseURL, appBaseURL string, push PushConfig, workos
 	mux.HandleFunc("POST /api/reminders/subscriptions", h.AuthMiddleware(h.SavePushSubscription))
 	mux.HandleFunc("DELETE /api/reminders/subscriptions", h.AuthMiddleware(h.DeletePushSubscription))
 
-	handlerWithCORS := corsMiddleware(mux, appBaseURL)
+	srv := &http.Server{
+		Addr:              cfg.Addr,
+		Handler:           secureHeaders(limitBody(corsMiddleware(mux, appBaseURL))),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    64 << 10,
+	}
+	if cfg.TLSCertFile != "" {
+		srv.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+		log.Printf("server starting on %s (TLS)", cfg.Addr)
+		return srv.ListenAndServeTLS(cfg.TLSCertFile, cfg.TLSKeyFile)
+	}
+	log.Printf("server starting on %s", cfg.Addr)
+	return srv.ListenAndServe()
+}
 
-	log.Printf("server starting on %s", addr)
-	return http.ListenAndServe(addr, handlerWithCORS)
+// maxBodyBytes bounds request bodies; the largest legitimate one is a day note.
+const maxBodyBytes = 64 << 10
+
+func limitBody(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Body != nil {
+			r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// secureHeaders keeps API responses (health data) out of caches and stops
+// browsers from sniffing or framing them, whatever proxy sits in front.
+func secureHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("Cache-Control", "no-store")
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("Referrer-Policy", "no-referrer")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
+		next.ServeHTTP(w, r)
+	})
+}
+
+// databaseTLSVerified reports whether a postgres URL asks for a verified TLS connection.
+func databaseTLSVerified(databaseURL string) bool {
+	u, err := url.Parse(databaseURL)
+	if err != nil {
+		return false
+	}
+	mode := u.Query().Get("sslmode")
+	return mode == "verify-full" || mode == "verify-ca"
 }
 
 func corsMiddleware(next http.Handler, appBaseURL string) http.Handler {
