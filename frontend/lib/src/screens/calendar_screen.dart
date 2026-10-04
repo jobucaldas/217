@@ -1300,9 +1300,7 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
               ),
               _MarkButton(
                 key: const ValueKey('day-heart-toggle'),
-                tooltip: _heart
-                    ? widget.strings.heartMarked
-                    : widget.strings.heartMark,
+                tooltip: widget.strings.heartLabel,
                 selected: _heart,
                 color: heartColor,
                 ink: heartColor,
@@ -1324,8 +1322,7 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
               ),
               const SizedBox(width: 4),
               IconButton.filledTonal(
-                tooltip:
-                    hasNote ? widget.strings.notes : widget.strings.addNote,
+                tooltip: widget.strings.notes,
                 onPressed: _editNote,
                 icon: Stack(
                   clipBehavior: Clip.none,

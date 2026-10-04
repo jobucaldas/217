@@ -78,7 +78,7 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        await tester.tap(find.byTooltip('Add note'));
+        await tester.tap(find.byTooltip('Note'));
         await tester.pumpAndSettle();
 
         expect(find.byType(AlertDialog), findsOneWidget);
@@ -158,7 +158,7 @@ void main() {
     await tester.tap(find.text('open'));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('Add note'));
+    await tester.tap(find.byTooltip('Note'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), 'open day note');
     await tester.tap(find.text('Done'));
@@ -211,7 +211,7 @@ void main() {
 
     await tester.tap(find.byKey(const ValueKey('day-heart-toggle')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('Add note'));
+    await tester.tap(find.byTooltip('Note'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Done'));
     await tester.pumpAndSettle();
@@ -275,7 +275,7 @@ void main() {
 
     await tester.tap(find.byKey(const ValueKey('day-heart-toggle')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('Add note'));
+    await tester.tap(find.byTooltip('Note'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), 'keep me');
     await tester.tap(find.text('Done'));
@@ -665,7 +665,7 @@ void main() {
         await tester.tap(find.text('open'));
         await tester.pumpAndSettle();
 
-        await tester.tap(find.byTooltip(strings.addNote));
+        await tester.tap(find.byTooltip(strings.notes));
         await tester.pumpAndSettle();
         await tester.enterText(find.byType(TextField), 'stay open');
         await tester.tap(find.text(strings.done));
