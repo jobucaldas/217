@@ -79,7 +79,7 @@ Android deep-link PKCE:
 
 ## Testing expectations
 - Backend: `docker compose run --rm test-backend` (store tests also hit PostgreSQL when `TEST_DATABASE_URL` is set; CI sets it)
-- New personal-data columns are sealed (`internal/store/sealed.go`); `TestSealExistingRowsDropsPlaintext` checks a dump for plaintext
+- New personal-data columns are sealed (`internal/store/sealed.go`); `TestSealExistingRowsDropsPlaintext` checks a dump and the raw table files for plaintext
 - Frontend: `docker compose run --rm test-frontend`
 - Web tryout: `docker compose up --build` then open http://localhost:8787/
 - APK: `docker compose run --rm apk`

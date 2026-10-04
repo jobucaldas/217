@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"217/backend/internal/model"
+	"github.com/google/uuid"
 )
 
 func (s *PGStore) GetUserByID(userID string) (*model.User, error) {
@@ -74,7 +75,7 @@ func (s *PGStore) buildShareState(user *model.User) (*model.ShareState, error) {
 			return nil, fmt.Errorf("loading owner share: %w", err)
 		}
 		state.Status = share.Status
-		if state.InviteCode, err = s.kr.OpenString(invite, inviteCtx(share.OwnerID)); err != nil {
+		if state.InviteCode, err = s.kr.OpenString(invite, inviteCtx(share.ID, share.OwnerID)); err != nil {
 			return nil, fmt.Errorf("opening invite code: %w", err)
 		}
 		state.CanEditCalendar = true
@@ -149,9 +150,11 @@ func (s *PGStore) EnableShare(ownerID string) (*model.ShareState, error) {
 		if err != nil {
 			return nil, err
 		}
+		id := uuid.NewString() // chosen here: the seal is bound to it
 		_, err = s.db.Exec(
-			`INSERT INTO calendar_shares (owner_id, invite_sealed, invite_index, status)
-			 VALUES ($1, $2, $3, 'open')`, ownerID, s.kr.SealString(code, inviteCtx(ownerID)), inviteIndex(s.kr, code),
+			`INSERT INTO calendar_shares (id, owner_id, invite_sealed, invite_index, status)
+			 VALUES ($1, $2, $3, $4, 'open')`,
+			id, ownerID, s.kr.SealString(code, inviteCtx(id, ownerID)), inviteIndex(s.kr, code),
 		)
 		if err == nil {
 			break
@@ -296,7 +299,7 @@ func (s *PGStore) ListInboxNotes(ownerID string) ([]*model.PartnerNote, error) {
 			rows.Close()
 			return nil, err
 		}
-		if note.Body, err = s.kr.OpenString(body, noteCtx(note.OwnerID, note.PartnerID)); err != nil {
+		if note.Body, err = s.kr.OpenString(body, noteCtx(note.ID, note.OwnerID, note.PartnerID)); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("opening partner note %s: %w", note.ID, err)
 		}
@@ -349,11 +352,12 @@ func (s *PGStore) CreatePartnerNote(partnerID, body string) (*model.PartnerNote,
 		return nil, err
 	}
 	note := &model.PartnerNote{}
+	id := uuid.NewString() // chosen here: the seal is bound to it
 	err = s.db.QueryRow(
-		`INSERT INTO partner_notes (owner_id, partner_id, body_sealed)
-		 VALUES ($1, $2, $3)
+		`INSERT INTO partner_notes (id, owner_id, partner_id, body_sealed)
+		 VALUES ($1, $2, $3, $4)
 		 RETURNING id, owner_id, partner_id, created_at`,
-		ownerID, partnerID, s.kr.SealString(body, noteCtx(ownerID, partnerID)),
+		id, ownerID, partnerID, s.kr.SealString(body, noteCtx(id, ownerID, partnerID)),
 	).Scan(&note.ID, &note.OwnerID, &note.PartnerID, &note.CreatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("creating partner note: %w", err)

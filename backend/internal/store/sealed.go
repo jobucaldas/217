@@ -13,8 +13,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// Personal data is sealed with these contexts, so a value only opens on the
-// row (and for the user) it was written for.
+// Personal data is sealed with these contexts, which name the table, the row
+// and its owners, so a sealed value only opens on the row it was written for.
 func canonID(id string) string {
 	if u, err := uuid.Parse(id); err == nil {
 		return u.String()
@@ -24,15 +24,22 @@ func canonID(id string) string {
 
 func userEmailCtx(userID string) string { return "users.email|" + canonID(userID) }
 func userNameCtx(userID string) string  { return "users.name|" + canonID(userID) }
+
+// Entries are unique per (user, date), which therefore identifies the row.
 func entryCtx(userID, date string) string {
 	return "entries|" + canonID(userID) + "|" + date
 }
-func noteCtx(ownerID, partnerID string) string {
-	return "partner_notes|" + canonID(ownerID) + "|" + canonID(partnerID)
+func noteCtx(noteID, ownerID, partnerID string) string {
+	return "partner_notes|" + canonID(noteID) + "|" + canonID(ownerID) + "|" + canonID(partnerID)
 }
-func inviteCtx(ownerID string) string  { return "calendar_shares.invite|" + canonID(ownerID) }
-func pushCtx(userID string) string     { return "push_subscriptions|" + canonID(userID) }
+func inviteCtx(shareID, ownerID string) string {
+	return "calendar_shares.invite|" + canonID(shareID) + "|" + canonID(ownerID)
+}
+func pushCtx(subscriptionID, userID string) string {
+	return "push_subscriptions|" + canonID(subscriptionID) + "|" + canonID(userID)
+}
 func oauthCtx(stateHash string) string { return "oauth_attempts|" + stateHash }
+
 func emailIndex(kr *fieldcrypt.Keyring, email string) []byte {
 	return kr.Index("email", normalizeEmail(email))
 }
@@ -102,14 +109,64 @@ func (s *PGStore) openUser(user *model.User, email, name []byte) error {
 	return nil
 }
 
+// sealedColumns lists every sealed column, for key checks.
+var sealedColumns = []struct{ table, column string }{
+	{"users", "email_sealed"}, {"users", "name_sealed"}, {"entries", "sealed"},
+	{"partner_notes", "body_sealed"}, {"calendar_shares", "invite_sealed"},
+	{"push_subscriptions", "sealed"}, {"oauth_attempts", "sealed"},
+}
+
 // MigrationSteps returns the Go-coded migrations, bound to kr.
 func MigrationSteps(kr *fieldcrypt.Keyring) map[string]db.Step {
 	return map[string]db.Step{
-		"018_seal_existing_rows": func(tx *sql.Tx) error { return sealExistingRows(tx, kr) },
+		"018_seal_existing_rows":    {Tx: func(tx *sql.Tx) error { return sealExistingRows(tx, kr) }},
+		"019_rewrite_sealed_tables": {NoTx: rewriteSealedTables},
 	}
 }
 
-// sealExistingRows seals rows written before 017 so 019 can drop the plaintext.
+// dropPlaintext removes the plaintext columns (and their indexes) once every
+// row is sealed. It runs in the same transaction as the sealing, so plaintext
+// is never dropped unless its sealed copy committed with it.
+const dropPlaintext = `
+ALTER TABLE users
+    DROP COLUMN IF EXISTS email,
+    DROP COLUMN IF EXISTS name,
+    ALTER COLUMN email_sealed SET NOT NULL,
+    ALTER COLUMN name_sealed SET NOT NULL,
+    ALTER COLUMN email_index SET NOT NULL;
+DROP INDEX IF EXISTS idx_users_email;
+DROP INDEX IF EXISTS idx_users_email_normalized;
+CREATE INDEX IF NOT EXISTS idx_users_email_index ON users (email_index);
+
+DROP INDEX IF EXISTS idx_entries_user_period;
+ALTER TABLE entries
+    DROP COLUMN IF EXISTS taken,
+    DROP COLUMN IF EXISTS notes,
+    DROP COLUMN IF EXISTS heart,
+    DROP COLUMN IF EXISTS period,
+    ALTER COLUMN sealed SET NOT NULL;
+
+ALTER TABLE partner_notes
+    DROP COLUMN IF EXISTS body,
+    ALTER COLUMN body_sealed SET NOT NULL;
+
+DROP INDEX IF EXISTS idx_calendar_shares_invite_code;
+ALTER TABLE calendar_shares
+    DROP COLUMN IF EXISTS invite_code,
+    ALTER COLUMN invite_sealed SET NOT NULL,
+    ALTER COLUMN invite_index SET NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_calendar_shares_invite_index ON calendar_shares (invite_index);
+
+ALTER TABLE push_subscriptions
+    DROP COLUMN IF EXISTS endpoint,
+    DROP COLUMN IF EXISTS p256dh,
+    DROP COLUMN IF EXISTS auth,
+    ALTER COLUMN sealed SET NOT NULL,
+    ALTER COLUMN endpoint_index SET NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_push_subscriptions_endpoint_index ON push_subscriptions (endpoint_index);
+`
+
+// sealExistingRows seals rows written before 017, then drops the plaintext.
 func sealExistingRows(tx *sql.Tx, kr *fieldcrypt.Keyring) error {
 	type row struct {
 		id, a, b, c string
@@ -169,7 +226,7 @@ func sealExistingRows(tx *sql.Tx, kr *fieldcrypt.Keyring) error {
 		return fmt.Errorf("reading partner notes: %w", err)
 	}
 	for _, r := range notes {
-		if _, err := tx.Exec(`UPDATE partner_notes SET body_sealed = $2 WHERE id = $1`, r.id, kr.SealString(r.c, noteCtx(r.a, r.b))); err != nil {
+		if _, err := tx.Exec(`UPDATE partner_notes SET body_sealed = $2 WHERE id = $1`, r.id, kr.SealString(r.c, noteCtx(r.id, r.a, r.b))); err != nil {
 			return fmt.Errorf("sealing partner note: %w", err)
 		}
 	}
@@ -181,7 +238,7 @@ func sealExistingRows(tx *sql.Tx, kr *fieldcrypt.Keyring) error {
 	}
 	for _, r := range shares {
 		if _, err := tx.Exec(`UPDATE calendar_shares SET invite_sealed = $2, invite_index = $3 WHERE id = $1`,
-			r.id, kr.SealString(r.b, inviteCtx(r.a)), inviteIndex(kr, r.b)); err != nil {
+			r.id, kr.SealString(r.b, inviteCtx(r.id, r.a)), inviteIndex(kr, r.b)); err != nil {
 			return fmt.Errorf("sealing share: %w", err)
 		}
 	}
@@ -192,28 +249,73 @@ func sealExistingRows(tx *sql.Tx, kr *fieldcrypt.Keyring) error {
 		return fmt.Errorf("reading push subscriptions: %w", err)
 	}
 	for _, r := range subs {
-		sealed := sealJSON(kr, pushPayload{Endpoint: r.b, P256DH: r.c, Auth: r.d}, pushCtx(r.a))
+		sealed := sealJSON(kr, pushPayload{Endpoint: r.b, P256DH: r.c, Auth: r.d}, pushCtx(r.id, r.a))
 		if _, err := tx.Exec(`UPDATE push_subscriptions SET sealed = $2, endpoint_index = $3 WHERE id = $1`,
 			r.id, sealed, endpointIndex(kr, r.b)); err != nil {
 			return fmt.Errorf("sealing push subscription: %w", err)
 		}
 	}
+
+	if _, err := tx.Exec(dropPlaintext); err != nil {
+		return fmt.Errorf("dropping plaintext columns: %w", err)
+	}
 	return nil
 }
 
-// checkKey fails fast when the configured key cannot open existing data
-// (wrong DATA_ENCRYPTION_KEY, or a rotated key without the previous one).
+// rewriteSealedTables rewrites the tables that held plaintext. DROP COLUMN
+// only hides a column: its bytes stay in the table files (and in dead row
+// versions left by sealing) until a rewrite, which VACUUM FULL performs,
+// nulling dropped columns. A checkpoint then lets old WAL segments be
+// recycled. Safe to repeat if interrupted.
+func rewriteSealedTables(conn *sql.DB) error {
+	for _, table := range []string{"users", "entries", "partner_notes", "calendar_shares", "push_subscriptions", "sessions", "workos_identities", "oauth_attempts"} {
+		if _, err := conn.Exec(`VACUUM FULL ` + table); err != nil {
+			return fmt.Errorf("rewriting %s: %w", table, err)
+		}
+	}
+	if _, err := conn.Exec(`CHECKPOINT`); err != nil {
+		// Needs superuser or pg_checkpoint; the server checkpoints on its own anyway.
+		log.Printf("checkpoint after rewrite skipped: %v", err)
+	}
+	return nil
+}
+
+// checkKey fails fast when the keyring cannot open the stored data (wrong
+// DATA_ENCRYPTION_KEY, or a rotated key without the previous one): every
+// sealed value must carry a known key id, and one is opened for real.
 func (s *PGStore) checkKey() error {
-	var sealed []byte
-	err := s.db.QueryRow(`SELECT email_sealed FROM users LIMIT 1`).Scan(&sealed)
+	for _, c := range sealedColumns {
+		rows, err := s.db.Query(`SELECT DISTINCT substring(` + c.column + ` from 1 for 5) FROM ` + c.table)
+		if err != nil {
+			return fmt.Errorf("reading sealed %s.%s: %w", c.table, c.column, err)
+		}
+		for rows.Next() {
+			var header []byte
+			if err := rows.Scan(&header); err != nil {
+				rows.Close()
+				return err
+			}
+			if !s.kr.Known(header) {
+				rows.Close()
+				return fmt.Errorf("DATA_ENCRYPTION_KEY cannot open %s.%s; after a key change, keep the old key in DATA_ENCRYPTION_KEY_PREVIOUS", c.table, c.column)
+			}
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+	}
+	var id string
+	var email, name []byte
+	err := s.db.QueryRow(`SELECT id, email_sealed, name_sealed FROM users LIMIT 1`).Scan(&id, &email, &name)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("reading a sealed value: %w", err)
 	}
-	if !s.kr.Known(sealed) {
-		return fmt.Errorf("DATA_ENCRYPTION_KEY does not match the stored data; after a key change, keep the old key in DATA_ENCRYPTION_KEY_PREVIOUS")
+	if err := s.openUser(&model.User{ID: id}, email, name); err != nil {
+		return fmt.Errorf("DATA_ENCRYPTION_KEY does not open the stored data: %w", err)
 	}
 	return nil
 }
@@ -290,11 +392,12 @@ func (s *PGStore) reseal() error {
 		return fmt.Errorf("reading partner notes: %w", err)
 	}
 	for _, r := range notes {
-		plain, err := s.kr.Open(r.x, noteCtx(r.a, r.b))
+		ctx := noteCtx(r.id, r.a, r.b)
+		plain, err := s.kr.Open(r.x, ctx)
 		if err != nil {
 			return fmt.Errorf("opening partner note %s: %w", r.id, err)
 		}
-		if _, err := tx.Exec(`UPDATE partner_notes SET body_sealed = $2 WHERE id = $1`, r.id, s.kr.Seal(plain, noteCtx(r.a, r.b))); err != nil {
+		if _, err := tx.Exec(`UPDATE partner_notes SET body_sealed = $2 WHERE id = $1`, r.id, s.kr.Seal(plain, ctx)); err != nil {
 			return fmt.Errorf("resealing partner note: %w", err)
 		}
 	}
@@ -306,12 +409,13 @@ func (s *PGStore) reseal() error {
 		return fmt.Errorf("reading shares: %w", err)
 	}
 	for _, r := range shares {
-		code, err := s.kr.OpenString(r.x, inviteCtx(r.a))
+		ctx := inviteCtx(r.id, r.a)
+		code, err := s.kr.OpenString(r.x, ctx)
 		if err != nil {
 			return fmt.Errorf("opening share %s: %w", r.id, err)
 		}
 		if _, err := tx.Exec(`UPDATE calendar_shares SET invite_sealed = $2, invite_index = $3 WHERE id = $1`,
-			r.id, s.kr.SealString(code, inviteCtx(r.a)), inviteIndex(s.kr, code)); err != nil {
+			r.id, s.kr.SealString(code, ctx), inviteIndex(s.kr, code)); err != nil {
 			return fmt.Errorf("resealing share: %w", err)
 		}
 	}
@@ -324,11 +428,12 @@ func (s *PGStore) reseal() error {
 	}
 	for _, r := range subs {
 		var p pushPayload
-		if err := openJSON(s.kr, r.x, pushCtx(r.a), &p); err != nil {
+		ctx := pushCtx(r.id, r.a)
+		if err := openJSON(s.kr, r.x, ctx, &p); err != nil {
 			return fmt.Errorf("opening push subscription %s: %w", r.id, err)
 		}
 		if _, err := tx.Exec(`UPDATE push_subscriptions SET sealed = $2, endpoint_index = $3 WHERE id = $1`,
-			r.id, sealJSON(s.kr, p, pushCtx(r.a)), endpointIndex(s.kr, p.Endpoint)); err != nil {
+			r.id, sealJSON(s.kr, p, ctx), endpointIndex(s.kr, p.Endpoint)); err != nil {
 			return fmt.Errorf("resealing push subscription: %w", err)
 		}
 	}

@@ -41,6 +41,47 @@ func dumpSchema(t *testing.T, conn *sql.DB) string {
 	return out.String()
 }
 
+// tableFiles returns the raw on-disk bytes of every table (and its TOAST) in
+// the current schema, or false when the role may not read server files.
+func tableFiles(t *testing.T, conn *sql.DB) (string, bool) {
+	t.Helper()
+	if _, err := conn.Exec(`CHECKPOINT`); err != nil {
+		t.Logf("raw file check skipped: %v", err)
+		return "", false
+	}
+	rows, err := conn.Query(`SELECT pg_relation_filepath(c.oid) FROM pg_class c
+		JOIN pg_namespace n ON n.oid = c.relnamespace
+		WHERE n.nspname = current_schema() AND c.relkind = 'r'
+		UNION
+		SELECT pg_relation_filepath(c.reltoastrelid) FROM pg_class c
+		JOIN pg_namespace n ON n.oid = c.relnamespace
+		WHERE n.nspname = current_schema() AND c.relkind = 'r' AND c.reltoastrelid <> 0`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var paths []string
+	for rows.Next() {
+		var p sql.NullString
+		if err := rows.Scan(&p); err != nil {
+			t.Fatal(err)
+		}
+		if p.Valid {
+			paths = append(paths, p.String)
+		}
+	}
+	rows.Close()
+	var out strings.Builder
+	for _, p := range paths {
+		var b []byte
+		if err := conn.QueryRow(`SELECT pg_read_binary_file($1)`, p).Scan(&b); err != nil {
+			t.Logf("raw file check skipped: %v", err)
+			return "", false
+		}
+		out.Write(b)
+	}
+	return out.String(), true
+}
+
 func TestSealExistingRowsDropsPlaintext(t *testing.T) {
 	kr := testKeyring(t)
 	s := openPG(t, pgTestDSN(t), kr)
@@ -68,6 +109,15 @@ func TestSealExistingRowsDropsPlaintext(t *testing.T) {
 	mustExec(`INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth) VALUES ($1, 'https://push.example/secret-endpoint', 'p256-key', 'auth-key')`, owner)
 	mustExec(`INSERT INTO sessions (id, user_id, expires_at, user_agent, ip_address) VALUES ('h', $1, NOW() + INTERVAL '1 hour', 'Firefox', '203.0.113.9')`, owner)
 
+	secrets := []string{"Owner@Example.com", "owner@example.com", "Ana Secret", "Bo Secret", "cramps note", "INVITEXY", "love note body", "secret-endpoint", "p256-key", "auth-key", "Firefox", "203.0.113.9"}
+	// Sealed and dropped, but the table files still hold the old bytes...
+	if err := db.MigrateBefore(s.db, MigrationSteps(kr), "019"); err != nil {
+		t.Fatal(err)
+	}
+	if files, ok := tableFiles(t, s.db); ok && !strings.Contains(files, "cramps note") {
+		t.Fatal("expected the dropped plaintext to linger in the table files before the rewrite")
+	}
+	// ...until 019 rewrites the tables.
 	if err := db.Migrate(s.db, MigrationSteps(kr)); err != nil {
 		t.Fatal(err)
 	}
@@ -76,9 +126,13 @@ func TestSealExistingRowsDropsPlaintext(t *testing.T) {
 	}
 
 	dump := dumpSchema(t, s.db)
-	for _, secret := range []string{"Owner@Example.com", "owner@example.com", "Ana Secret", "Bo Secret", "cramps note", "INVITEXY", "love note body", "secret-endpoint", "p256-key", "auth-key", "Firefox", "203.0.113.9"} {
+	files, filesOK := tableFiles(t, s.db)
+	for _, secret := range secrets {
 		if strings.Contains(dump, secret) {
 			t.Errorf("plaintext %q still stored", secret)
+		}
+		if filesOK && strings.Contains(files, secret) {
+			t.Errorf("plaintext %q still in the table files", secret)
 		}
 	}
 
@@ -130,6 +184,28 @@ func TestSealedValuesStayOnTheirRow(t *testing.T) {
 	}
 	if _, err := s.GetEntry(b.ID, "2026-09-01"); err == nil {
 		t.Fatal("a sealed value moved to another user's row still opened")
+	}
+}
+
+func TestSwappedNoteSealsDoNotOpen(t *testing.T) {
+	s := pgTestStore(t)
+	owner, _ := s.LinkWorkOSIdentity("o", "o@example.com", "O", true)
+	partner, _ := s.LinkWorkOSIdentity("p", "p@example.com", "P", true)
+	if _, err := s.SetRole(owner.ID, model.RoleOwner); err != nil {
+		t.Fatal(err)
+	}
+	share, _ := s.EnableShare(owner.ID)
+	if _, err := s.AcceptShare(partner.ID, share.InviteCode); err != nil {
+		t.Fatal(err)
+	}
+	first, _ := s.CreatePartnerNote(partner.ID, "first")
+	second, _ := s.CreatePartnerNote(partner.ID, "second")
+	// Same owner and partner: only the note id tells the seals apart.
+	if _, err := s.db.Exec(`UPDATE partner_notes SET body_sealed = (SELECT body_sealed FROM partner_notes WHERE id = $1) WHERE id = $2`, first.ID, second.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ListInboxNotes(owner.ID); err == nil {
+		t.Fatal("a note body moved to another note still opened")
 	}
 }
 

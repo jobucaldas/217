@@ -392,7 +392,8 @@ func (s *PGStore) UpsertReminderPreference(userID string, preference model.Remin
 func (s *PGStore) SavePushSubscription(userID string, request model.PushSubscriptionRequest) (*model.PushSubscription, error) {
 	index := endpointIndex(s.kr, request.Endpoint)
 	var owner string
-	err := s.db.QueryRow(`SELECT user_id FROM push_subscriptions WHERE endpoint_index = $1`, index).Scan(&owner)
+	id := uuid.NewString() // the seal is bound to the row id: reuse an existing row's
+	err := s.db.QueryRow(`SELECT id, user_id FROM push_subscriptions WHERE endpoint_index = $1`, index).Scan(&id, &owner)
 	if err != nil && err != sql.ErrNoRows {
 		return nil, fmt.Errorf("checking push subscription: %w", err)
 	}
@@ -408,20 +409,27 @@ func (s *PGStore) SavePushSubscription(userID string, request model.PushSubscrip
 			return nil, fmt.Errorf("push subscription limit reached")
 		}
 	}
-	sealed := sealJSON(s.kr, pushPayload{Endpoint: request.Endpoint, P256DH: request.Keys.P256DH, Auth: request.Keys.Auth}, pushCtx(userID))
+	payload := pushPayload{Endpoint: request.Endpoint, P256DH: request.Keys.P256DH, Auth: request.Keys.Auth}
 	subscription := &model.PushSubscription{}
-	err = s.db.QueryRow(`INSERT INTO push_subscriptions (user_id, endpoint_index, sealed)
-		VALUES ($1, $2, $3)
+	err = s.db.QueryRow(`INSERT INTO push_subscriptions (id, user_id, endpoint_index, sealed)
+		VALUES ($1, $2, $3, $4)
 		ON CONFLICT (endpoint_index) DO UPDATE SET sealed = EXCLUDED.sealed, updated_at = NOW()
 		WHERE push_subscriptions.user_id = EXCLUDED.user_id
 		RETURNING id, user_id, created_at, updated_at`,
-		userID, index, sealed).
+		id, userID, index, sealJSON(s.kr, payload, pushCtx(id, userID))).
 		Scan(&subscription.ID, &subscription.UserID, &subscription.CreatedAt, &subscription.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("subscription belongs to another user")
 	}
 	if err != nil {
 		return nil, fmt.Errorf("saving push subscription: %w", err)
+	}
+	if subscription.ID != canonID(id) {
+		// Another request created the row first: bind the seal to its id.
+		if _, err := s.db.Exec(`UPDATE push_subscriptions SET sealed = $2 WHERE id = $1`,
+			subscription.ID, sealJSON(s.kr, payload, pushCtx(subscription.ID, userID))); err != nil {
+			return nil, fmt.Errorf("saving push subscription: %w", err)
+		}
 	}
 	subscription.Endpoint, subscription.P256DH, subscription.Auth = request.Endpoint, request.Keys.P256DH, request.Keys.Auth
 	return subscription, nil
@@ -461,7 +469,7 @@ func (s *PGStore) ListReminderTargets() ([]model.ReminderTarget, error) {
 			return nil, fmt.Errorf("scanning reminder target: %w", err)
 		}
 		var p pushPayload
-		if err := openJSON(s.kr, sealed, pushCtx(target.UserID), &p); err != nil {
+		if err := openJSON(s.kr, sealed, pushCtx(target.SubscriptionID, target.UserID), &p); err != nil {
 			return nil, fmt.Errorf("opening push subscription %s: %w", target.SubscriptionID, err)
 		}
 		target.Endpoint, target.P256DH, target.Auth = p.Endpoint, p.P256DH, p.Auth

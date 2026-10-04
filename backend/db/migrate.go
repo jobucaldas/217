@@ -13,12 +13,17 @@ import (
 var migrationsFS embed.FS
 
 // Step is a migration written in Go, for changes SQL cannot make on its own
-// (sealing existing rows needs the application's encryption key).
-type Step func(tx *sql.Tx) error
+// (sealing existing rows needs the application's encryption key). Tx runs in
+// the migration's transaction; NoTx runs outside one, for statements such as
+// VACUUM, and must be safe to repeat if interrupted.
+type Step struct {
+	Tx   func(tx *sql.Tx) error
+	NoTx func(db *sql.DB) error
+}
 
 // goSteps are the Go-coded migrations, ordered with the SQL files by name.
 // Callers supply their implementations to Migrate.
-var goSteps = []string{"018_seal_existing_rows"}
+var goSteps = []string{"018_seal_existing_rows", "019_rewrite_sealed_tables"}
 
 // Migrate applies every pending migration in name order.
 func Migrate(db *sql.DB, steps map[string]Step) error {
@@ -61,26 +66,34 @@ func MigrateBefore(db *sql.DB, steps map[string]Step, stop string) error {
 			continue
 		}
 
-		var apply Step
+		var step Step
 		if strings.HasSuffix(name, ".sql") {
 			content, err := migrationsFS.ReadFile("migrations/" + name)
 			if err != nil {
 				return fmt.Errorf("reading %s: %w", name, err)
 			}
-			apply = func(tx *sql.Tx) error {
+			step.Tx = func(tx *sql.Tx) error {
 				_, err := tx.Exec(string(content))
 				return err
 			}
-		} else if apply = steps[name]; apply == nil {
+		} else if step = steps[name]; step.Tx == nil && step.NoTx == nil {
 			return fmt.Errorf("migration %s needs the data encryption key", name)
 		}
 
 		log.Printf("applying migration: %s", name)
+		if step.NoTx != nil {
+			if err := step.NoTx(db); err != nil {
+				return fmt.Errorf("applying %s: %w", name, err)
+			}
+		}
+		if step.Tx == nil {
+			step.Tx = func(*sql.Tx) error { return nil }
+		}
 		tx, err := db.Begin()
 		if err != nil {
 			return fmt.Errorf("beginning %s: %w", name, err)
 		}
-		if err = apply(tx); err != nil {
+		if err = step.Tx(tx); err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("applying %s: %w", name, err)
 		}

@@ -337,10 +337,6 @@ func (h *Handler) linkWorkOSUser(w http.ResponseWriter, userInfo *auth.OAuthUser
 
 func (h *Handler) WorkOSOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, h.clearOAuthBindingCookie())
-	if !h.authLimiter.allow("workos-callback:" + clientIP(r)) {
-		http.Error(w, `{"error":"rate limited"}`, http.StatusTooManyRequests)
-		return
-	}
 	if h.oauthProvider == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "oauth not configured"})
 		return

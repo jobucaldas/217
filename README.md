@@ -118,7 +118,16 @@ curl http://localhost:8787/api/auth/config   # {"authkit":true,...}
 
 Open `APP_BASE_URL`. Update with `docker compose pull && docker compose up -d`; pin `:nightly` to a `YYYYMMDDHHMMSS_<shortsha>` tag to stay on a fixed version. Data is in the `pgdata` volume.
 
-Coming from a version without encryption at rest (no `certs` service in your `compose.yaml`)? Replace `compose.yaml` with the one above, add `DATA_ENCRYPTION_KEY` to `.env`, then pull and start: the first start encrypts the existing data and drops the plaintext. Back up the `pgdata` volume first.
+Coming from a version without encryption at rest (no `certs` service in your `compose.yaml`)? Back up the `pgdata` volume, replace `compose.yaml` with the one above, add `DATA_ENCRYPTION_KEY` to `.env`, then pull and start: the first start encrypts the existing data, drops the plaintext and rewrites the tables. Older backups, and PostgreSQL's write-ahead log until it is recycled, can still hold plaintext; for a clean volume, move the (now encrypted) data to a fresh one and delete the old backups:
+
+```sh
+docker compose stop backend web
+docker compose exec -T postgres pg_dump -U 217 -Fc 217 > 217.dump
+docker compose down && docker volume rm 217_pgdata
+docker compose up -d postgres && sleep 10
+docker compose exec -T postgres pg_restore -U 217 -d 217 --no-owner < 217.dump
+docker compose up -d && rm 217.dump
+```
 
 Optional server variables for the `backend` service: `SESSION_TTL` (e.g. `720h`), `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` (web push).
 
@@ -152,7 +161,7 @@ The `certs` service writes a private CA and the `postgres` / `backend` certifica
 
 **At rest.** The API seals personal data with AES-256-GCM before it reaches PostgreSQL: emails, names, every day entry (taken, notes, intimacy, period), partner notes, invite codes, push subscriptions and sign-in secrets. Each value is bound to its row, so it cannot be moved to another user. Lookups use keyed HMAC digests, never the plaintext. What stays readable in the database: ids, dates of logged days, roles, share status, reminder times and timestamps. Session tokens are stored as SHA-256 digests; client IP addresses and user agents are not stored.
 
-**Rotating the key.** Put the current key in `DATA_ENCRYPTION_KEY_PREVIOUS` (comma-separate several), a new one in `DATA_ENCRYPTION_KEY`, restart: the API reseals everything on start. Then remove the old key. The API refuses to start with a key that does not match the stored data.
+**Rotating the key.** Put the current key in `DATA_ENCRYPTION_KEY_PREVIOUS` (comma-separate several), a new one in `DATA_ENCRYPTION_KEY`, restart: the API reseals everything on start. Running several API instances? Restart all of them with the new key, then restart once more (so rows an old instance wrote meanwhile are resealed) before removing the old key. The API checks every stored value's key at start and refuses to run with a key that cannot open them.
 
 - Never commit `WORKOS_API_KEY`, `DATA_ENCRYPTION_KEY` or other secrets; the apps only get the public client ID
 - The API answers with `Cache-Control: no-store`, and both API and web send `nosniff`, `no-referrer` and anti-framing headers
