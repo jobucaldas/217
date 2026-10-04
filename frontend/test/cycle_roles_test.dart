@@ -309,7 +309,7 @@ void main() {
 
       final chip = find.byKey(const ValueKey('day-period-toggle'));
       // Sits in the header beside the notes button, not on its own row.
-      final notes = find.byTooltip('Add note');
+      final notes = find.byTooltip('Note');
       expect(
         (tester.getCenter(chip).dy - tester.getCenter(notes).dy).abs(),
         lessThan(1),

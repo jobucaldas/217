@@ -73,10 +73,7 @@ class Strings {
   String get unrecorded => _t('Open', 'Em aberto', 'Pendiente');
   String get notes => _t('Note', 'Nota', 'Nota');
   String get addNote => _t('Add note', 'Adicionar nota', 'Añadir nota');
-  String get heartMark =>
-      _t('Mark intimacy', 'Marcar intimidade', 'Marcar intimidad');
-  String get heartMarked =>
-      _t('Intimacy marked', 'Intimidade marcada', 'Intimidad marcada');
+  String get heartLabel => _t('Intimacy', 'Intimidade', 'Intimidad');
   String get save => _t('Save', 'Salvar', 'Guardar');
   String get cancel => _t('Cancel', 'Cancelar', 'Cancelar');
   String get loading => _t('Loading…', 'Carregando…', 'Cargando…');
