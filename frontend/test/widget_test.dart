@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:a217/src/config.dart';
 import 'package:a217/src/i18n.dart';
+import 'package:a217/src/screens/auth_screen.dart';
 import 'package:a217/src/theme/app_theme.dart';
 
 void main() {
