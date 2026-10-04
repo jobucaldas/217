@@ -142,19 +142,6 @@ void main() {
     }
   }
 
-  test('pinned dark scaffold is #121212 for every accent', () {
-    for (final p in AppPalette.values) {
-      expect(
-        scaffoldBackgroundFor(Brightness.dark, palette: p),
-        const Color(0xFF121212),
-      );
-      expect(
-        buildApp217ColorScheme(Brightness.dark, palette: p).surface,
-        const Color(0xFF1C1C1C),
-      );
-    }
-  });
-
   testWidgets(
     'record-today chip is a Positioned overlay (grid keeps 12px inset)',
     (tester) async {

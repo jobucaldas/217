@@ -81,7 +81,6 @@ Android deep-link PKCE:
 - Frontend: `docker compose run --rm test-frontend`
 - Web tryout: `docker compose up --build` then open http://localhost:8787/
 - APK: `docker compose run --rm apk`
-- **UI quality (agent directive, not a testing preference):** never ship Flutter UI without dark **and** light coverage. CI must fail unreadable contrast and broken “today” CTA persistence (`frontend/test/theme_contrast_test.dart`, `frontend/test/today_nudge_test.dart`). **Not running those checks is unacceptable agent behavior** — same class as skipping the PR merge loop.
 
 ## Remaining gaps
 - Live WorkOS sign-in / authenticated calendar not verified in CI

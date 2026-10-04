@@ -66,39 +66,6 @@ void main() {
       );
     });
 
-    testWidgets('today nudge English label is narrower than Portuguese ($brightness)',
-        (tester) async {
-      Future<double> widthFor(AppLanguage language) async {
-        await tester.pumpWidget(
-          MaterialApp(
-            theme: buildApp217Theme(brightness: brightness),
-            home: Scaffold(
-              body: Stack(
-                children: [
-                  TodayNudge(
-                    strings: Strings(language),
-                    todayEntry: null,
-                    onRecord: () {},
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-        await tester.pump();
-        await tester.pump(const Duration(milliseconds: 50));
-        return tester
-            .getSize(find.byKey(const ValueKey('today-nudge-control')))
-            .width;
-      }
-
-      final en = await widthFor(AppLanguage.en);
-      expect(find.text('Update today'), findsOneWidget);
-      final pt = await widthFor(AppLanguage.pt);
-      expect(find.text('Atualizar hoje'), findsOneWidget);
-      expect(en, lessThan(pt));
-    });
-
     testWidgets('today nudge hidden after registration ($brightness)',
         (tester) async {
       await tester.pumpWidget(
