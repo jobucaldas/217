@@ -71,7 +71,7 @@ func newTestHandler(t *testing.T) (*handler.Handler, *store.MemoryStore) {
 func sessionCookie(t *testing.T, s *store.MemoryStore, userID string) *http.Cookie {
 	t.Helper()
 	token := "session-token-" + userID
-	if err := s.CreateSession(userID, token, time.Now().Add(time.Hour), "test-agent", "127.0.0.1"); err != nil {
+	if err := s.CreateSession(userID, token, time.Now().Add(time.Hour)); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
 	return &http.Cookie{Name: "217_session", Value: token}
@@ -311,7 +311,7 @@ func TestSessionCookieAuthExpiryAndLogout(t *testing.T) {
 	}
 
 	expiredToken := "expired-session"
-	if err := s.CreateSession(user.ID, expiredToken, time.Now().Add(-time.Minute), "test-agent", "127.0.0.1"); err != nil {
+	if err := s.CreateSession(user.ID, expiredToken, time.Now().Add(-time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	expiredReq := authedRequest(http.MethodGet, "/api/auth/session", &http.Cookie{Name: "217_session", Value: expiredToken}, nil)

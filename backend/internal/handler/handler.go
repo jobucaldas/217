@@ -314,7 +314,7 @@ func (h *Handler) createSessionForUser(w http.ResponseWriter, r *http.Request, u
 		return "", err
 	}
 	expires := time.Now().UTC().Add(h.sessionDuration)
-	if err := h.store.CreateSession(user.ID, sessionToken, expires, r.UserAgent(), r.RemoteAddr); err != nil {
+	if err := h.store.CreateSession(user.ID, sessionToken, expires); err != nil {
 		return "", err
 	}
 	http.SetCookie(w, h.sessionCookieValue(sessionToken, expires))
@@ -337,6 +337,10 @@ func (h *Handler) linkWorkOSUser(w http.ResponseWriter, userInfo *auth.OAuthUser
 
 func (h *Handler) WorkOSOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, h.clearOAuthBindingCookie())
+	if !h.authLimiter.allow("workos-callback:" + clientIP(r)) {
+		http.Error(w, `{"error":"rate limited"}`, http.StatusTooManyRequests)
+		return
+	}
 	if h.oauthProvider == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "oauth not configured"})
 		return
@@ -383,6 +387,10 @@ func (h *Handler) WorkOSOAuthCallback(w http.ResponseWriter, r *http.Request) {
 // ExchangeWorkOS handles native (Flutter) AuthKit PKCE completion.
 // Native apps open AuthKit with a custom-scheme (Android) or loopback (desktop) redirect, then posts code+verifier here.
 func (h *Handler) ExchangeWorkOS(w http.ResponseWriter, r *http.Request) {
+	if !h.authLimiter.allow("workos-exchange:" + clientIP(r)) {
+		http.Error(w, `{"error":"rate limited"}`, http.StatusTooManyRequests)
+		return
+	}
 	if h.oauthProvider == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "oauth not configured"})
 		return

@@ -93,7 +93,7 @@ func TestDeleteUserRemovesData(t *testing.T) {
 	if _, err := s.UpsertEntry(user.ID, "2026-10-01", model.UpsertRequest{Taken: model.BoolPtr(true), Notes: "x"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.CreateSession(user.ID, "tok", time.Now().Add(time.Hour), "ua", "ip"); err != nil {
+	if err := s.CreateSession(user.ID, "tok", time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.DeleteUser(user.ID); err != nil {

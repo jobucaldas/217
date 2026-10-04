@@ -8,7 +8,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
-func RunMigrations(databaseURL string) error {
+func RunMigrations(databaseURL string, steps map[string]Step) error {
 	if databaseURL == "" {
 		return fmt.Errorf("no database URL provided")
 	}
@@ -24,7 +24,7 @@ func RunMigrations(databaseURL string) error {
 	}
 
 	log.Println("running database migrations...")
-	if err := Migrate(db); err != nil {
+	if err := Migrate(db, steps); err != nil {
 		return fmt.Errorf("migration failed: %w", err)
 	}
 	log.Println("migrations complete")

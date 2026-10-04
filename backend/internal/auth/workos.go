@@ -132,7 +132,18 @@ func (w *WorkOSOAuth) ExchangeWithRedirect(ctx context.Context, code, codeVerifi
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("workos exchange: status %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
+		// Only the error code: some error bodies carry the user's email and a
+		// pending authentication token, which must not end up in logs.
+		var failure struct {
+			Code  string `json:"code"`
+			Error string `json:"error"`
+		}
+		_ = json.Unmarshal(raw, &failure)
+		code := failure.Code
+		if code == "" {
+			code = failure.Error
+		}
+		return nil, fmt.Errorf("workos exchange: status %d: %s", resp.StatusCode, code)
 	}
 	var parsed workos.AuthenticateResponse
 	if err := json.Unmarshal(raw, &parsed); err != nil {
