@@ -1269,7 +1269,6 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
   Widget build(BuildContext context) {
     final locale = widget.strings.dateLocale;
     final human = DateFormat.yMMMMd(locale).format(DateTime.parse(widget.date));
-    final scheme = Theme.of(context).colorScheme;
     final hasNote = _notes.trim().isNotEmpty;
     final periodColor = App217Colors.period(Theme.of(context).brightness);
     final heartColor = App217Colors.intimacy(Theme.of(context).brightness);
@@ -1324,25 +1323,10 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
               IconButton.filledTonal(
                 tooltip: widget.strings.notes,
                 onPressed: _editNote,
-                icon: Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    Icon(
-                      hasNote
-                          ? Icons.sticky_note_2
-                          : Icons.sticky_note_2_outlined,
-                    ),
-                    if (!hasNote)
-                      Positioned(
-                        right: -4,
-                        top: -4,
-                        child: Icon(
-                          Icons.add,
-                          size: 18,
-                          color: scheme.primary,
-                        ),
-                      ),
-                  ],
+                icon: Icon(
+                  hasNote
+                      ? Icons.sticky_note_2
+                      : Icons.sticky_note_2_outlined,
                 ),
               ),
             ],
