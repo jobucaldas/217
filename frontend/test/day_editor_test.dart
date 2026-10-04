@@ -593,12 +593,8 @@ void main() {
   });
 
   for (final brightness in Brightness.values) {
-    testWidgets('add-note plus is a bare accent plus ($brightness)',
+    testWidgets('empty note button has no plus badge ($brightness)',
         (tester) async {
-      final scheme = buildApp217ColorScheme(
-        brightness,
-        palette: AppPalette.blue,
-      );
       await tester.pumpWidget(
         MaterialApp(
           theme: buildApp217Theme(
@@ -621,8 +617,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byIcon(Icons.add_circle), findsNothing);
-      final plus = tester.widget<Icon>(find.byIcon(Icons.add));
-      expect(plus.color, scheme.primary);
+      expect(find.byIcon(Icons.add), findsNothing);
     });
   }
 
