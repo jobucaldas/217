@@ -439,6 +439,7 @@ void main() {
       final api = _CycleApi(cycle: _cycleAround(today));
       final stageChanges = ValueNotifier<int>(0);
       addTearDown(stageChanges.dispose);
+      var generation = 0;
       await tester.pumpWidget(_app(
           brightness,
           CalendarScreen(
@@ -448,6 +449,8 @@ void main() {
             strings: _en,
             onOpenSettings: () {},
             cycleRefreshSignal: stageChanges,
+            sessionGeneration: () => generation,
+            isSessionCurrent: (g, _) => g == generation,
           )));
       await tester.pumpAndSettle();
       expect(api.cycleCalls, 1);
@@ -465,6 +468,8 @@ void main() {
           ),
         ],
       );
+      // The app bumps its session generation right before signalling.
+      generation++;
       stageChanges.value++;
       await tester.pumpAndSettle();
       expect(api.cycleCalls, 2);

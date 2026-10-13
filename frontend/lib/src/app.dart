@@ -703,7 +703,7 @@ class _App217State extends State<App217> {
       cycleRefreshSignal: _stageChanges,
       onShareChanged: (share) => setState(() => _share = share),
       partnerAlertSyncQueue: _partnerAlertSyncQueue,
-      sessionGeneration: _sessionGeneration,
+      sessionGeneration: () => _sessionGeneration,
       isSessionCurrent: (generation, userId) =>
           mounted &&
           generation == _sessionGeneration &&

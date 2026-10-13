@@ -175,7 +175,7 @@ void main() {
         onOpenSettings: () {},
         share: const ShareState(status: 'active'),
         partnerAlertSyncQueue: queue,
-        sessionGeneration: sessionGeneration,
+        sessionGeneration: () => sessionGeneration,
         isSessionCurrent: (generation, _) => generation == sessionGeneration,
       ),
     ));

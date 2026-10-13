@@ -28,7 +28,7 @@ class CalendarScreen extends StatefulWidget {
     this.onShareChanged,
     this.partnerAlertScheduler,
     this.partnerAlertSyncQueue,
-    this.sessionGeneration = 0,
+    this.sessionGeneration,
     this.isSessionCurrent,
     this.palette = AppPalette.blue,
     this.showReminderHint = false,
@@ -45,7 +45,8 @@ class CalendarScreen extends StatefulWidget {
   final Future<LocalReminderSyncStatus> Function(List<PlannedAlert>)?
       partnerAlertScheduler;
   final PartnerAlertSyncQueue? partnerAlertSyncQueue;
-  final int sessionGeneration;
+  /// Read live: a refresh signal can fire before this widget is rebuilt.
+  final int Function()? sessionGeneration;
   final bool Function(int generation, String userId)? isSessionCurrent;
   final AppPalette palette;
 
@@ -253,7 +254,7 @@ class _CalendarScreenState extends State<CalendarScreen>
   /// servers) leave the grid as is.
   Future<void> _loadCycle() async {
     final generation = ++_cycleLoadGeneration;
-    final sessionGeneration = widget.sessionGeneration;
+    final sessionGeneration = widget.sessionGeneration?.call() ?? 0;
     final queueRevision = widget.partnerAlertSyncQueue?.revision;
     CycleInfo cycle;
     try {
