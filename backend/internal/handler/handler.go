@@ -243,7 +243,8 @@ func (h *Handler) CurrentSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
-	if !h.sameOriginAllowed(r) {
+	_, cookieErr := r.Cookie(h.sessionCookie)
+	if cookieErr == nil && !h.sameOriginAllowed(r) {
 		http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
 		return
 	}

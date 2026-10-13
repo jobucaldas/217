@@ -29,6 +29,9 @@ class _Servers {
     'self.example.com': '{"authkit":true,"password":false}',
     'other.example.com': '{"authkit":true,"password":false}',
     'nosignin.example.com': '{"authkit":false,"password":false}',
+    '127.0.0.1': '{"authkit":true,"password":false}',
+    '::1': '{"authkit":true,"password":false}',
+    '10.0.2.2': '{"authkit":true,"password":false}',
   };
 
   MockClient get client => MockClient((request) async {
@@ -267,7 +270,19 @@ void main() {
     expect(servers.requests, isEmpty);
     expect(connected, 0);
 
+    var expectedConnections = 0;
+    for (final localBase in [
+      'http://127.0.0.1:8787',
+      'http://[::1]:8787',
+      'http://10.0.2.2:8787',
+    ]) {
+      await _connect(tester, localBase);
+      expectedConnections++;
+      expect(connected, expectedConnections,
+          reason: '$localBase should be allowed');
+    }
+
     await _connect(tester, 'self.example.com');
-    expect(connected, 1);
+    expect(connected, 4);
   });
 }

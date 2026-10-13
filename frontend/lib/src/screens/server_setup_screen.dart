@@ -70,7 +70,7 @@ class _ServerSetupScreenState extends State<ServerSetupScreen> {
     final localHttp = uri.scheme == 'http' &&
         (uri.host == 'localhost' ||
             uri.host == '127.0.0.1' ||
-            uri.host == '[::1]' ||
+            uri.host == '::1' ||
             uri.host == '10.0.2.2');
     if (widget.requireHttps && uri.scheme != 'https' && !localHttp) {
       setState(() => _error = strings.serverNeedsHttps);
