@@ -54,6 +54,7 @@ class _CalendarScreenState extends State<CalendarScreen>
 
   /// Inputs of the last partner-alert sync; month swipes don't replan.
   String? _alertSyncKey;
+  int _cycleLoadGeneration = 0;
   Map<String, Entry> _entries = {};
   Map<String, Entry> _prevEntries = {};
   Map<String, Entry> _nextEntries = {};
@@ -188,13 +189,14 @@ class _CalendarScreenState extends State<CalendarScreen>
   /// Predictions are a bonus on top of the calendar: failures (older
   /// servers) leave the grid as is.
   Future<void> _loadCycle() async {
+    final generation = ++_cycleLoadGeneration;
     CycleInfo cycle;
     try {
       cycle = await widget.api.getCycle(_todayKey);
     } catch (_) {
       return;
     }
-    if (!mounted) return;
+    if (!mounted || generation != _cycleLoadGeneration) return;
     setState(() => _cycle = cycle);
     if (widget.user.isPartner) await _syncPartnerAlerts(cycle);
   }

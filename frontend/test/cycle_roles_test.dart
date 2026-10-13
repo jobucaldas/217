@@ -45,6 +45,7 @@ class _CycleApi extends ApiClient {
   CycleInfo cycle;
   int cycleCalls = 0;
   Completer<CycleInfo>? cycleCompleter;
+  final List<Completer<CycleInfo>> cycleRequests = [];
   String? role;
   PartnerAlertPreference alerts = const PartnerAlertPreference();
   final saves = <PartnerAlertPreference>[];
@@ -55,6 +56,9 @@ class _CycleApi extends ApiClient {
   @override
   Future<CycleInfo> getCycle(String today) {
     cycleCalls++;
+    if (cycleRequests.length >= cycleCalls) {
+      return cycleRequests[cycleCalls - 1].future;
+    }
     return cycleCompleter?.future ?? Future.value(cycle);
   }
 
@@ -418,6 +422,52 @@ void main() {
       await tester.pumpAndSettle();
       expect(api.cycleCalls, 2);
       expect(find.byKey(const ValueKey('cycle-stage-note')), findsOneWidget);
+      expect(find.byKey(ValueKey('pms-${today.month}-${today.day}')), findsNothing);
+    });
+
+    testWidgets('stale cycle response cannot replace latest data ($brightness)', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(390, 844));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      final api = _CycleApi()
+        ..cycleRequests.addAll([Completer<CycleInfo>(), Completer<CycleInfo>()]);
+      final stageChanges = ValueNotifier<int>(0);
+      addTearDown(stageChanges.dispose);
+      await tester.pumpWidget(_app(brightness, CalendarScreen(
+        api: api,
+        user: const User(id: 'o', email: 'o@example.com', name: 'Owner'),
+        share: const ShareState(status: 'none'),
+        strings: _en,
+        onOpenSettings: () {},
+        cycleRefreshSignal: stageChanges,
+      )));
+      await tester.pump();
+      expect(api.cycleCalls, 1);
+
+      api.cycleRequests[1].complete(CycleInfo(
+        note: 'pms_suppressed_menopause',
+        predictions: [CycleWindow(
+          periodStart: _d(today, 3),
+          periodEnd: _d(today, 7),
+          pmsStart: DateTime(1),
+          pmsEnd: DateTime(1),
+        )],
+      ));
+      stageChanges.value++;
+      await tester.pump();
+      expect(api.cycleCalls, 2);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('217 counts no PMS'), findsOneWidget);
+      expect(find.byKey(ValueKey('pms-${today.month}-${today.day}')), findsNothing);
+
+      api.cycleRequests[0].complete(CycleInfo(
+        note: 'pms_counted_perimenopause',
+        predictions: [_cycleAround(today).predictions.single],
+      ));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('217 counts no PMS'), findsOneWidget);
+      expect(find.textContaining('perimenopause. Cycles can still happen'), findsNothing);
       expect(find.byKey(ValueKey('pms-${today.month}-${today.day}')), findsNothing);
     });
 
