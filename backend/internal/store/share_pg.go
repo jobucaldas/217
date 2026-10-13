@@ -463,7 +463,7 @@ func (s *PGStore) SetRole(userID, role string) (*model.User, error) {
 }
 
 func (s *PGStore) ListAccountShares(userID string) ([]*model.CalendarShare, error) {
-	rows, err := s.db.Query(`SELECT id,owner_id,COALESCE(partner_id,''),status,created_at,updated_at FROM calendar_shares WHERE owner_id=$1 OR partner_id=$1 ORDER BY created_at`, userID)
+	rows, err := s.db.Query(`SELECT id,owner_id,COALESCE(partner_id::text,''),status,created_at,updated_at FROM calendar_shares WHERE owner_id=$1 OR partner_id=$1 ORDER BY created_at`, userID)
 	if err != nil {
 		return nil, err
 	}

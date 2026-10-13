@@ -84,6 +84,57 @@ func TestShareInviteAcceptRevokeAndInbox(t *testing.T) {
 	}
 }
 
+func TestListAccountSharesIncludesAllStatuses(t *testing.T) {
+	forEachStore(t, func(t *testing.T, name string, s Store) {
+		owner, err := s.LinkWorkOSIdentity("share-list-owner-"+name, "share-list-owner-"+name+"@example.com", "Owner", true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		partner, err := s.LinkWorkOSIdentity("share-list-partner-"+name, "share-list-partner-"+name+"@example.com", "Partner", true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.SetRole(owner.ID, model.RoleOwner); err != nil {
+			t.Fatal(err)
+		}
+
+		open, err := s.EnableShare(owner.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		shares, err := s.ListAccountShares(owner.ID)
+		if err != nil || len(shares) != 1 || shares[0].Status != model.ShareOpen || shares[0].PartnerID != "" {
+			t.Fatalf("open share: %+v, %v", shares, err)
+		}
+
+		if _, err := s.AcceptShare(partner.ID, open.InviteCode); err != nil {
+			t.Fatal(err)
+		}
+		shares, err = s.ListAccountShares(owner.ID)
+		if err != nil || len(shares) != 1 || shares[0].Status != model.ShareActive || shares[0].PartnerID != partner.ID {
+			t.Fatalf("active share: %+v, %v", shares, err)
+		}
+
+		if _, err := s.RevokeShare(owner.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.EnableShare(owner.ID); err != nil {
+			t.Fatal(err)
+		}
+		shares, err = s.ListAccountShares(owner.ID)
+		if err != nil || len(shares) != 2 {
+			t.Fatalf("revoked + open shares: %+v, %v", shares, err)
+		}
+		statuses := map[string]bool{}
+		for _, share := range shares {
+			statuses[share.Status] = true
+		}
+		if !statuses[model.ShareRevoked] || !statuses[model.ShareOpen] {
+			t.Fatalf("expected revoked and open shares, got %+v", shares)
+		}
+	})
+}
+
 func TestDeleteUserRemovesData(t *testing.T) {
 	s := NewMemoryStore()
 	user, err := s.CreateUser("gone@example.com", "Gone", "password123")

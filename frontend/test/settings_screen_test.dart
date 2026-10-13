@@ -81,7 +81,8 @@ void main() {
     );
   }
 
-  testWidgets('signed in: share, no server setting, delete near logout', (tester) async {
+  testWidgets('signed in: share, no server setting, delete near logout',
+      (tester) async {
     final api = ApiClient(AppConfig.fromEnvironment());
     await tester.pumpWidget(
       MaterialApp(
@@ -114,33 +115,31 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    int textIndex(String label) {
-      final texts = find.byType(Text).evaluate().toList();
-      return texts.indexWhere(
-        (e) => (e.widget as Text).data == label,
+    Future<double> absoluteTop(Finder finder) async {
+      await tester.scrollUntilVisible(
+        finder,
+        200,
+        scrollable: find.byType(Scrollable).first,
       );
+      await tester.pumpAndSettle();
+      final scrollPosition = tester
+          .state<ScrollableState>(find.byType(Scrollable).first)
+          .position
+          .pixels;
+      return scrollPosition + tester.getTopLeft(finder).dy;
     }
 
-    await tester.scrollUntilVisible(
-      find.text('Log out'),
-      200,
-      scrollable: find.byType(Scrollable).first,
-    );
-    await tester.pumpAndSettle();
-
-    final shareIdx = textIndex('SHARE CALENDAR WITH PARTNER');
-    final deleteIdx = textIndex('Delete account');
-    final logoutIdx = textIndex('Log out');
-    expect(shareIdx, greaterThanOrEqualTo(0));
+    final shareTop =
+        await absoluteTop(find.text('SHARE CALENDAR WITH PARTNER'));
+    final deleteTop = await absoluteTop(find.text('Delete account'));
+    final logoutTop = await absoluteTop(find.text('Log out'));
     // The server is chosen before sign-in, so it is not offered here.
     expect(find.text('Advanced options'), findsNothing);
     expect(find.text('Self-hosted server URL'), findsNothing);
-    expect(deleteIdx, greaterThan(shareIdx));
-    expect(logoutIdx, greaterThan(deleteIdx));
+    expect(deleteTop, greaterThan(shareTop));
+    expect(logoutTop, greaterThan(deleteTop));
 
-    final deleteY = tester.getTopLeft(find.text('Delete account')).dy;
-    final logoutY = tester.getTopLeft(find.text('Log out')).dy;
-    expect(logoutY - deleteY, lessThan(80));
+    expect(logoutTop - deleteTop, lessThan(80));
 
     final deleteLabel = tester.widget<Text>(find.text('Delete account'));
     final logoutLabel = tester.widget<Text>(find.text('Log out'));

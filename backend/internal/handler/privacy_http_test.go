@@ -66,8 +66,22 @@ func TestPartnerCalendarRequiresOwnerConsent(t *testing.T) {
 	_, _ = s.SetRole(owner.ID, model.RoleOwner)
 	share, _ := s.EnableShare(owner.ID)
 	_, _ = s.AcceptShare(partner.ID, share.InviteCode)
+	if _, err := s.UpsertEntry(owner.ID, "2026-10-04", model.UpsertRequest{Taken: boolPtr(true), Notes: "sensitive note", Heart: true, Period: true}); err != nil {
+		t.Fatal(err)
+	}
 	_, _ = s.RecordConsent(partner.ID, model.ConsentVersion)
 	cookie := sessionCookie(t, s, partner.ID)
+
+	getEntry := func() *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		req := authedRequest(http.MethodGet, "/api/entries/2026-10-04", cookie, nil)
+		req.SetPathValue("date", "2026-10-04")
+		h.ConsentMiddleware(h.GetEntry)(w, req)
+		return w
+	}
+	if w := getEntry(); w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "consent required") {
+		t.Fatalf("direct entry before owner consent: status=%d body=%s", w.Code, w.Body.String())
+	}
 	for _, route := range []struct {
 		name string
 		call func(*httptest.ResponseRecorder)
@@ -90,7 +104,15 @@ func TestPartnerCalendarRequiresOwnerConsent(t *testing.T) {
 			}
 		})
 	}
+	if _, err := s.RecordConsent(owner.ID, model.ConsentVersion); err != nil {
+		t.Fatal(err)
+	}
+	if w := getEntry(); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "sensitive note") {
+		t.Fatalf("direct entry after owner consent: status=%d body=%s", w.Code, w.Body.String())
+	}
 }
+
+func boolPtr(value bool) *bool { return &value }
 
 func TestExportHasEverythingAboutTheCaller(t *testing.T) {
 	h, s := newTestHandler(t)

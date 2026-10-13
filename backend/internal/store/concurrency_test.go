@@ -85,6 +85,9 @@ func TestConcurrentPushSavesOfOneEndpointSerialize(t *testing.T) {
 	if _, err := s.UpsertReminderPreference(u.ID, model.ReminderPreference{Enabled: true, Time: "08:00", Timezone: "UTC"}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s.RecordConsent(u.ID, model.ConsentVersion); err != nil {
+		t.Fatal(err)
+	}
 	for _, err := range startPushSaves(t, s, u.ID, "https://push.example/same", "https://push.example/same") {
 		if err != nil {
 			t.Fatalf("concurrent save of one endpoint failed: %v", err)

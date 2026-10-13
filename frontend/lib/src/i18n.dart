@@ -280,15 +280,17 @@ class Strings {
   // Account
   String get deleteAccount =>
       _t('Delete account', 'Excluir conta', 'Eliminar cuenta');
-  String deleteAccountWarn(bool deletesLogin) => deletesLogin ? _t(
-        'This permanently deletes your data and WorkOS sign-in identity, and withdraws your consent. This cannot be undone.',
-        'Isso apaga permanentemente seus dados e sua identidade de login da WorkOS, e revoga seu consentimento. Não dá para desfazer.',
-        'Esto elimina permanentemente tus datos y tu identidad de inicio de sesión de WorkOS, y retira tu consentimiento. No se puede deshacer.',
-      ) : _t(
-        'This permanently deletes your data on this server and withdraws your consent. Your WorkOS login identity remains. This cannot be undone.',
-        'Isso apaga permanentemente seus dados neste servidor e revoga seu consentimento. Sua identidade de login da WorkOS permanece. Não dá para desfazer.',
-        'Esto elimina permanentemente tus datos en este servidor y retira tu consentimiento. Tu identidad de inicio de sesión de WorkOS permanece. No se puede deshacer.',
-      );
+  String deleteAccountWarn(bool deletesLogin) => deletesLogin
+      ? _t(
+          'This permanently deletes your data and WorkOS sign-in identity, and withdraws your consent. This cannot be undone.',
+          'Isso apaga permanentemente seus dados e sua identidade de login da WorkOS, e revoga seu consentimento. Não dá para desfazer.',
+          'Esto elimina permanentemente tus datos y tu identidad de inicio de sesión de WorkOS, y retira tu consentimiento. No se puede deshacer.',
+        )
+      : _t(
+          'This permanently deletes your data on this server and withdraws your consent. Your WorkOS login identity remains. This cannot be undone.',
+          'Isso apaga permanentemente seus dados neste servidor e revoga seu consentimento. Sua identidade de login da WorkOS permanece. Não dá para desfazer.',
+          'Esto elimina permanentemente tus datos en este servidor y retira tu consentimiento. Tu identidad de inicio de sesión de WorkOS permanece. No se puede deshacer.',
+        );
   String get deleteAccountConfirm => _t(
         'Delete permanently',
         'Excluir definitivamente',
@@ -488,16 +490,30 @@ class Strings {
         'Marca los días de regla para ver la previsión de SPM',
       );
   String cycleStageNote(String code) => switch (code) {
-        'pms_suppressed_menopause' => _t('217 counts no PMS because you told 217 you are in menopause.', 'O 217 não conta TPM porque você informou ao 217 que está na menopausa.', '217 no cuenta el SPM porque le dijiste a 217 que estás en la menopausia.'),
-        'pms_counted_perimenopause' => _t('You told 217 you are in perimenopause. Cycles can still happen, so PMS is still counted.', 'Você informou ao 217 que está na perimenopausa. Ciclos ainda podem ocorrer, então a TPM continua sendo contada.', 'Le dijiste a 217 que estás en la perimenopausia. Aún puede haber ciclos, así que se sigue contando el SPM.'),
+        'pms_suppressed_menopause' => _t(
+            '217 counts no PMS because you told 217 you are in menopause.',
+            'O 217 não conta TPM porque você informou ao 217 que está na menopausa.',
+            '217 no cuenta el SPM porque le dijiste a 217 que estás en la menopausia.'),
+        'pms_counted_perimenopause' => _t(
+            'You told 217 you are in perimenopause. Cycles can still happen, so PMS is still counted.',
+            'Você informou ao 217 que está na perimenopausa. Ciclos ainda podem ocorrer, então a TPM continua sendo contada.',
+            'Le dijiste a 217 que estás en la perimenopausia. Aún puede haber ciclos, así que se sigue contando el SPM.'),
         _ => '',
       };
-  String get reproductiveStage => _t('Reproductive stage', 'Fase reprodutiva', 'Etapa reproductiva');
+  String get reproductiveStage =>
+      _t('Reproductive stage', 'Fase reprodutiva', 'Etapa reproductiva');
   String get stageCycling => _t('Cycling', 'Com ciclos', 'Con ciclos');
-  String get stagePerimenopause => _t('Perimenopause', 'Perimenopausa', 'Perimenopausia');
+  String get stagePerimenopause =>
+      _t('Perimenopause', 'Perimenopausa', 'Perimenopausia');
   String get stageMenopause => _t('Menopause', 'Menopausa', 'Menopausia');
-  String get stageSelfReport => _t('This is what you told 217; it is not a diagnosis.', 'Isto é o que você informou ao 217; não é um diagnóstico.', 'Esto es lo que le dijiste a 217; no es un diagnóstico.');
-  String get pmsNotCounted => _t('PMS is not counted while menopause is selected.', 'A TPM não é contada enquanto menopausa estiver selecionada.', 'El SPM no se cuenta mientras esté seleccionada la menopausia.');
+  String get stageSelfReport => _t(
+      'This is what you told 217; it is not a diagnosis.',
+      'Isto é o que você informou ao 217; não é um diagnóstico.',
+      'Esto es lo que le dijiste a 217; no es un diagnóstico.');
+  String get pmsNotCounted => _t(
+      'PMS is not counted while menopause is selected.',
+      'A TPM não é contada enquanto menopausa estiver selecionada.',
+      'El SPM no se cuenta mientras esté seleccionada la menopausia.');
 
   // Partner alerts
   String get partnerAlerts => _t('Alerts', 'Avisos', 'Avisos');
@@ -618,8 +634,18 @@ class Strings {
       );
   String get consentAccept =>
       _t('Agree and continue', 'Concordar e continuar', 'Aceptar y continuar');
+  String get consentUpdateRequired => _t(
+        'This privacy notice has changed. Update 217 to review the current notice before agreeing.',
+        'Este aviso de privacidade mudou. Atualize o 217 para ler o aviso atual antes de concordar.',
+        'Este aviso de privacidad cambió. Actualiza 217 para leer el aviso actual antes de aceptar.',
+      );
   String get consentDecline =>
       _t('Not now (sign out)', 'Agora não (sair)', 'Ahora no (cerrar sesión)');
+  String get sharedCalendarOwnerConsentRequired => _t(
+        'The calendar owner must agree to the current privacy notice before you can view their calendar.',
+        'A pessoa responsável pelo calendário precisa concordar com o aviso de privacidade atual antes que você possa vê-lo.',
+        'La persona responsable del calendario debe aceptar el aviso de privacidad actual antes de que puedas verlo.',
+      );
   String get downloadData =>
       _t('Download my data', 'Baixar meus dados', 'Descargar mis datos');
   String get downloadDataBlurb => _t(

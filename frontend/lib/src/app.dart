@@ -9,6 +9,7 @@ import 'auth/sign_in.dart';
 import 'config.dart';
 import 'i18n.dart';
 import 'models.dart';
+import 'notifications/local_reminders.dart';
 import 'platform/open_url.dart';
 import 'prefs.dart';
 import 'screens/auth_screen.dart';
@@ -114,6 +115,7 @@ class _App217State extends State<App217> {
       if (!_api.config.needsServerSetup) {
         await _api.loadAuthConfig();
         session = await _api.currentSession();
+        _clearRemindersIfConsentRequired(session);
         user = session.user;
         share = session.share ?? share;
       }
@@ -154,17 +156,37 @@ class _App217State extends State<App217> {
   }
 
   Future<void> _recoverConsent() async {
-    try { await _refreshSession(); } catch (_) {}
+    try {
+      await _refreshSession();
+    } catch (_) {}
   }
 
   Future<void> _refreshSession() async {
+    await _api.loadAuthConfig();
     final session = await _api.currentSession();
+    _clearRemindersIfConsentRequired(session);
     if (!mounted) return;
     setState(() {
       _user = session.user;
       _share = session.share ?? const ShareState(status: 'none');
       _setConsent(session);
     });
+  }
+
+  void _clearRemindersIfConsentRequired(SessionSnapshot session) {
+    if (session.consentRequired) {
+      unawaited(Future.wait<void>([
+        syncLocalDailyReminder(
+          enabled: false,
+          timeHhMm: '09:00',
+          title: '217',
+          body: _strings.recordToday,
+        ).then<void>((_) {}),
+        syncPartnerAlerts(const []).then<void>((_) {}),
+      ]).then<void>((_) {}, onError: (Object _) {}));
+      // Do not delay showing the consent screen on local notification APIs.
+      // Their failed channel calls are best effort; the next launch retries.
+    }
   }
 
   /// Call inside setState with each session the server returns.
@@ -307,7 +329,13 @@ class _App217State extends State<App217> {
     String? inviteCode,
   }) async {
     if (inviteCode != null) await _prefs.savePendingInvite(inviteCode);
-    if (changed && mounted) _onApiBaseChanged();
+    await _api.loadAuthConfig();
+    if (!mounted) return;
+    if (changed) {
+      _onApiBaseChanged();
+    } else {
+      setState(() {});
+    }
   }
 
   Future<void> _openSelfHostGuide() async {
@@ -341,10 +369,12 @@ class _App217State extends State<App217> {
   Future<void> _signIn() async {
     setState(() => _loading = true);
     try {
+      await _api.loadAuthConfig();
       final user = await beginWorkOSSignIn(_api);
       if (!mounted) return;
       if (user != null) {
         final session = await _api.currentSession();
+        _clearRemindersIfConsentRequired(session);
         if (!mounted) return;
         setState(() {
           _user = session.user ?? user;
@@ -475,8 +505,15 @@ class _App217State extends State<App217> {
         version: _consentVersion,
         onAccepted: _onConsented,
         onNoticeChanged: (version) async {
-          try { await _refreshSession(); } catch (_) {}
-          if (mounted) setState(() { _consentRequired = true; _consentVersion = version; });
+          try {
+            await _refreshSession();
+          } catch (_) {}
+          if (mounted) {
+            setState(() {
+              _consentRequired = true;
+              _consentVersion = version;
+            });
+          }
         },
         onDecline: _logout,
         onOpenSettings: _openSettings,

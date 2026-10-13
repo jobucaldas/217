@@ -22,13 +22,21 @@ class ApiClient {
   bool workosUserDeletion = false;
 
   Future<void> loadAuthConfig() async {
+    // A failed or unavailable config response must never retain another
+    // server's WorkOS deletion capability.
+    workosUserDeletion = false;
     try {
-      final response = await _send('GET', _uri('/api/auth/config'), auth: false);
+      final response =
+          await _send('GET', _uri('/api/auth/config'), auth: false);
       if (response.statusCode == 200) {
         final decoded = jsonDecode(response.body);
-        if (decoded is Map) workosUserDeletion = decoded['workos_user_deletion'] == true;
+        if (decoded is Map) {
+          workosUserDeletion = decoded['workos_user_deletion'] == true;
+        }
       }
-    } catch (_) {}
+    } catch (_) {
+      workosUserDeletion = false;
+    }
   }
 
   static const _sessionKey = 'session_token';
@@ -393,9 +401,11 @@ class ApiClient {
   }
 
   Future<SessionSnapshot> setStage(String stage) async {
-    final response = await _send('PUT', _uri('/api/account/stage'), body: {'stage': stage});
+    final response =
+        await _send('PUT', _uri('/api/account/stage'), body: {'stage': stage});
     if (response.statusCode != 200) throw ApiException('set stage', response);
-    return SessionSnapshot.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+    return SessionSnapshot.fromJson(
+        jsonDecode(response.body) as Map<String, dynamic>);
   }
 
   /// Period history and predictions for the visible calendar. [today] is the
@@ -542,7 +552,12 @@ class ApiException implements Exception {
   final int? consentVersion;
 
   static int? _consentVersionField(String body) {
-    try { final decoded=jsonDecode(body); if(decoded is Map && decoded['consent_version'] is num) return (decoded['consent_version'] as num).toInt(); } catch (_) {}
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map && decoded['consent_version'] is num) {
+        return (decoded['consent_version'] as num).toInt();
+      }
+    } catch (_) {}
     return null;
   }
 

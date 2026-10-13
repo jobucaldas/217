@@ -102,6 +102,10 @@ class PrivacyNoticeBody extends StatelessWidget {
 /// After sign-in, until the user agrees to the current privacy notice: the
 /// server refuses to process their data before that.
 class ConsentScreen extends StatefulWidget {
+  // Bump this only when the privacy notice shown below is updated. A server
+  // may require a newer notice before this build has its wording.
+  static const supportedNoticeVersion = 1;
+
   const ConsentScreen({
     super.key,
     required this.api,
@@ -117,7 +121,7 @@ class ConsentScreen extends StatefulWidget {
   final Strings strings;
   final int version;
   final ValueChanged<SessionSnapshot> onAccepted;
-  final ValueChanged<int>? onNoticeChanged;
+  final Future<void> Function(int version)? onNoticeChanged;
   final VoidCallback onDecline;
   final VoidCallback onOpenSettings;
 
@@ -130,6 +134,17 @@ class _ConsentScreenState extends State<ConsentScreen> {
   bool _busy = false;
   String? _contact;
 
+  bool get _supportsNotice =>
+      widget.version == ConsentScreen.supportedNoticeVersion;
+
+  @override
+  void didUpdateWidget(covariant ConsentScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.version != widget.version) {
+      _agreed = false;
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -139,13 +154,17 @@ class _ConsentScreenState extends State<ConsentScreen> {
   }
 
   Future<void> _accept() async {
+    if (!_supportsNotice || _busy) return;
     setState(() => _busy = true);
     try {
       widget.onAccepted(await widget.api.acceptConsent(widget.version));
     } catch (err) {
       if (!mounted) return;
-      if (err is ApiException && err.statusCode == 409 && err.consentVersion != null) {
-        widget.onNoticeChanged?.call(err.consentVersion!);
+      if (err is ApiException &&
+          err.statusCode == 409 &&
+          err.consentVersion != null) {
+        setState(() => _agreed = false);
+        await widget.onNoticeChanged?.call(err.consentVersion!);
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
@@ -186,11 +205,20 @@ class _ConsentScreenState extends State<ConsentScreen> {
             contact: _contact,
           ),
           const SizedBox(height: 20),
+          if (!_supportsNotice) ...[
+            Text(
+              strings.consentUpdateRequired,
+              key: const ValueKey('consent-update-required'),
+              style: text.bodyMedium?.copyWith(color: scheme.error),
+            ),
+            const SizedBox(height: 12),
+          ],
           CheckboxListTile(
             key: const ValueKey('consent-checkbox'),
             value: _agreed,
-            onChanged:
-                _busy ? null : (v) => setState(() => _agreed = v ?? false),
+            onChanged: _busy || !_supportsNotice
+                ? null
+                : (v) => setState(() => _agreed = v ?? false),
             controlAffinity: ListTileControlAffinity.leading,
             contentPadding: EdgeInsets.zero,
             title: Text(
@@ -203,7 +231,7 @@ class _ConsentScreenState extends State<ConsentScreen> {
             key: const ValueKey('consent-accept'),
             style:
                 FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
-            onPressed: _agreed && !_busy ? _accept : null,
+            onPressed: _supportsNotice && _agreed && !_busy ? _accept : null,
             child: Text(strings.consentAccept),
           ),
           const SizedBox(height: 8),

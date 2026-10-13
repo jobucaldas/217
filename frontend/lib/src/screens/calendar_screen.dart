@@ -8,6 +8,7 @@ import '../api/client.dart';
 import '../errors.dart';
 import '../i18n.dart';
 import '../models.dart';
+import '../notifications/local_reminders.dart';
 import '../notifications/partner_alert_sync.dart';
 import '../theme/app_theme.dart';
 import 'dialog_actions.dart';
@@ -26,6 +27,8 @@ class CalendarScreen extends StatefulWidget {
     this.share = const ShareState(status: 'none'),
     this.onShareChanged,
     this.onConsentRequired,
+    this.partnerAlertScheduler,
+    this.cancelDailyReminder,
     this.palette = AppPalette.blue,
     this.showReminderHint = false,
     this.onDismissReminderHint,
@@ -39,6 +42,9 @@ class CalendarScreen extends StatefulWidget {
   final Listenable? cycleRefreshSignal;
   final ValueChanged<ShareState>? onShareChanged;
   final VoidCallback? onConsentRequired;
+  final Future<LocalReminderSyncStatus> Function(List<PlannedAlert>)?
+      partnerAlertScheduler;
+  final Future<LocalReminderSyncResult> Function()? cancelDailyReminder;
   final AppPalette palette;
 
   /// Bubble pointing at the reminder setting; closes itself after a while.
@@ -57,6 +63,9 @@ class _CalendarScreenState extends State<CalendarScreen>
   /// Inputs of the last partner-alert sync; month swipes don't replan.
   String? _alertSyncKey;
   int _cycleLoadGeneration = 0;
+  int _loadGeneration = 0;
+  int _alertSyncGeneration = 0;
+  Future<void> _alertSyncTail = Future<void>.value();
   Map<String, Entry> _entries = {};
   Map<String, Entry> _prevEntries = {};
   Map<String, Entry> _nextEntries = {};
@@ -135,6 +144,7 @@ class _CalendarScreenState extends State<CalendarScreen>
   }
 
   Future<void> _load() async {
+    final generation = ++_loadGeneration;
     // Silent reload: never insert a progress bar into the Column — that
     // reflows/shrinks the month carousel during swipe/chevron month changes.
     setState(() => _error = null);
@@ -152,7 +162,7 @@ class _CalendarScreenState extends State<CalendarScreen>
           month == 12 ? 1 : month + 1,
         ),
       ]);
-      if (!mounted) return;
+      if (!mounted || generation != _loadGeneration) return;
       final map = {for (final e in results[0]) e.date: e};
       final prevMap = {for (final e in results[1]) e.date: e};
       final nextMap = {for (final e in results[2]) e.date: e};
@@ -163,17 +173,20 @@ class _CalendarScreenState extends State<CalendarScreen>
       } else {
         try {
           final list = await widget.api.listEntries(today.year, today.month);
+          if (!mounted || generation != _loadGeneration) return;
           for (final e in list) {
             if (e.date == _todayKey) {
               todayEntry = e;
               break;
             }
           }
-        } catch (_) {
+        } catch (err) {
+          if (!mounted || generation != _loadGeneration) return;
+          if (_handleConsentFailure(err)) return;
           todayEntry = _todayEntry;
         }
       }
-      if (!mounted) return;
+      if (!mounted || generation != _loadGeneration) return;
       setState(() {
         _entries = map;
         _prevEntries = prevMap;
@@ -181,12 +194,73 @@ class _CalendarScreenState extends State<CalendarScreen>
         _todayEntry = todayEntry;
       });
     } catch (err) {
-      if (!mounted) return;
-      if (err is ApiException && err.statusCode == 403 && err.message == 'consent required') { widget.onConsentRequired?.call(); return; }
+      if (!mounted || generation != _loadGeneration) return;
+      if (_handleConsentFailure(err)) return;
       setState(() => _error = friendlyError(widget.strings, err));
       return;
     }
+    if (!mounted || generation != _loadGeneration) return;
     await _loadCycle();
+  }
+
+  bool _handleConsentFailure(Object err, {bool closeDayEditor = false}) {
+    if (err is! ApiException || err.statusCode != 403) return false;
+    if (err.message == 'calendar owner consent required') {
+      _clearCalendarData(
+        error: widget.strings.sharedCalendarOwnerConsentRequired,
+      );
+      if (closeDayEditor && mounted) Navigator.of(context).maybePop();
+      return true;
+    }
+    if (err.message == 'consent required') {
+      _clearCalendarData();
+      widget.onConsentRequired?.call();
+      if (widget.user.isOwner) _cancelDailyReminder();
+      if (closeDayEditor && mounted) Navigator.of(context).maybePop();
+      return true;
+    }
+    return false;
+  }
+
+  void _clearCalendarData({String? error}) {
+    _loadGeneration++;
+    _cycleLoadGeneration++;
+    final alertGeneration = ++_alertSyncGeneration;
+    _alertSyncKey = null;
+    if (widget.user.isPartner) {
+      unawaited(_enqueueAlertOperation(() async {
+        if (alertGeneration != _alertSyncGeneration) return;
+        await _cancelPartnerAlerts();
+      }));
+    }
+    setState(() {
+      _entries = {};
+      _prevEntries = {};
+      _nextEntries = {};
+      _todayEntry = null;
+      _cycle = CycleInfo.empty;
+      _error = error;
+    });
+  }
+
+  Future<void> _enqueueAlertOperation(Future<void> Function() operation) {
+    final next = _alertSyncTail.then((_) => operation());
+    _alertSyncTail = next.catchError((Object _) {});
+    return next;
+  }
+
+  Future<LocalReminderSyncStatus> _cancelPartnerAlerts() =>
+      (widget.partnerAlertScheduler ?? syncPartnerAlerts)(const []);
+
+  void _cancelDailyReminder() {
+    final cancel = widget.cancelDailyReminder ??
+        () => syncLocalDailyReminder(
+              enabled: false,
+              timeHhMm: '09:00',
+              title: '217',
+              body: widget.strings.recordToday,
+            );
+    unawaited(cancel().then<void>((_) {}, onError: (Object _) {}));
   }
 
   /// Predictions are a bonus on top of the calendar: failures (older
@@ -196,7 +270,9 @@ class _CalendarScreenState extends State<CalendarScreen>
     CycleInfo cycle;
     try {
       cycle = await widget.api.getCycle(_todayKey);
-    } catch (_) {
+    } catch (err) {
+      if (!mounted || generation != _cycleLoadGeneration) return;
+      _handleConsentFailure(err);
       return;
     }
     if (!mounted || generation != _cycleLoadGeneration) return;
@@ -205,6 +281,7 @@ class _CalendarScreenState extends State<CalendarScreen>
   }
 
   Future<void> _syncPartnerAlerts(CycleInfo cycle) async {
+    final generation = ++_alertSyncGeneration;
     final todayLogged = _todayEntry?.taken == true;
     final key = [
       _todayKey,
@@ -215,18 +292,28 @@ class _CalendarScreenState extends State<CalendarScreen>
     if (key == _alertSyncKey) return;
     try {
       final pref = await widget.api.getPartnerAlerts();
+      if (!mounted || generation != _alertSyncGeneration) return;
       // Only touch the OS scheduler once the partner opted in.
-      if (!pref.pmsEnabled && !pref.pillEnabled) return;
-      await syncPartnerAlertsFrom(
-        strings: widget.strings,
-        pref: pref,
-        cycle: cycle,
-        linked: widget.share.isActive,
-        todayLogged: todayLogged,
-        ownerName: widget.share.ownerName,
-      );
-      _alertSyncKey = key;
-    } catch (_) {
+      await _enqueueAlertOperation(() async {
+        if (!mounted || generation != _alertSyncGeneration) return;
+        if (!pref.pmsEnabled && !pref.pillEnabled) {
+          await _cancelPartnerAlerts();
+        } else {
+          await syncPartnerAlertsFrom(
+            strings: widget.strings,
+            pref: pref,
+            cycle: cycle,
+            linked: widget.share.isActive,
+            todayLogged: todayLogged,
+            ownerName: widget.share.ownerName,
+            scheduler: widget.partnerAlertScheduler,
+          );
+        }
+      });
+      if (mounted && generation == _alertSyncGeneration) _alertSyncKey = key;
+    } catch (err) {
+      if (!mounted || generation != _alertSyncGeneration) return;
+      if (_handleConsentFailure(err)) return;
       // Alerts are best-effort; the calendar still works.
     }
   }
@@ -388,7 +475,7 @@ class _CalendarScreenState extends State<CalendarScreen>
         hadEntry: existing != null,
         onCommit: (result) {
           _persistDay(key, result).catchError((Object err) {
-            if (mounted) {
+            if (mounted && !_handleConsentFailure(err, closeDayEditor: true)) {
               setState(() => _error = friendlyError(widget.strings, err));
             }
           });
@@ -406,9 +493,7 @@ class _CalendarScreenState extends State<CalendarScreen>
     final brightness = Theme.of(context).brightness;
     final todayStatus = _todayEntry == null || _todayEntry!.taken == null
         ? widget.strings.unrecorded
-        : (_todayEntry!.taken!
-            ? widget.strings.taken
-            : widget.strings.missed);
+        : (_todayEntry!.taken! ? widget.strings.taken : widget.strings.missed);
     final todayColor = _todayEntry == null || _todayEntry!.taken == null
         ? scheme.onSurfaceVariant
         : (_todayEntry!.taken!
@@ -435,7 +520,8 @@ class _CalendarScreenState extends State<CalendarScreen>
     } else if (todayKind == CycleDayKind.predictedPeriod) {
       cycleLine = widget.strings.cyclePeriodNow;
     } else if (next.pmsStart.year < 2) {
-      cycleLine = widget.strings.cycleNextNoPms(shortDay.format(next.periodStart));
+      cycleLine =
+          widget.strings.cycleNextNoPms(shortDay.format(next.periodStart));
     } else {
       cycleLine = widget.strings.cycleNext(
         shortDay.format(next.periodStart),
@@ -544,7 +630,9 @@ class _CalendarScreenState extends State<CalendarScreen>
                         child: Text(
                           cycleLine,
                           style: text.bodyMedium?.copyWith(
-                            color: inPms ? scheme.onSurface : scheme.onSurfaceVariant,
+                            color: inPms
+                                ? scheme.onSurface
+                                : scheme.onSurfaceVariant,
                             fontWeight: inPms ? FontWeight.w600 : null,
                           ),
                         ),
@@ -558,12 +646,14 @@ class _CalendarScreenState extends State<CalendarScreen>
                   child: Row(
                     key: const ValueKey('cycle-stage-note'),
                     children: [
-                      Icon(Icons.info_outline, size: 16, color: scheme.onSurfaceVariant),
+                      Icon(Icons.info_outline,
+                          size: 16, color: scheme.onSurfaceVariant),
                       const SizedBox(width: 6),
                       Expanded(
                         child: Text(
                           widget.strings.cycleStageNote(_cycle.note),
-                          style: text.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
+                          style: text.bodyMedium
+                              ?.copyWith(color: scheme.onSurfaceVariant),
                         ),
                       ),
                     ],
@@ -576,7 +666,8 @@ class _CalendarScreenState extends State<CalendarScreen>
                   runSpacing: 4,
                   children: [
                     _LegendDot(
-                      color: App217Colors.statusTaken(brightness, widget.palette),
+                      color:
+                          App217Colors.statusTaken(brightness, widget.palette),
                       label: widget.strings.legendTaken,
                     ),
                     _LegendDot(
@@ -661,7 +752,8 @@ class _CalendarScreenState extends State<CalendarScreen>
                                     cycle: _cycle,
                                     onDayTap: _openDay,
                                     todayLabel: widget.strings.today,
-                                    weekdayLabels: widget.strings.weekdayInitials,
+                                    weekdayLabels:
+                                        widget.strings.weekdayInitials,
                                     palette: widget.palette,
                                     bottomInset: 12,
                                   ),
@@ -678,7 +770,8 @@ class _CalendarScreenState extends State<CalendarScreen>
                                     cycle: _cycle,
                                     onDayTap: _openDay,
                                     todayLabel: widget.strings.today,
-                                    weekdayLabels: widget.strings.weekdayInitials,
+                                    weekdayLabels:
+                                        widget.strings.weekdayInitials,
                                     palette: widget.palette,
                                     bottomInset: 12,
                                   ),
@@ -695,7 +788,8 @@ class _CalendarScreenState extends State<CalendarScreen>
                                     cycle: _cycle,
                                     onDayTap: _openDay,
                                     todayLabel: widget.strings.today,
-                                    weekdayLabels: widget.strings.weekdayInitials,
+                                    weekdayLabels:
+                                        widget.strings.weekdayInitials,
                                     palette: widget.palette,
                                     bottomInset: 12,
                                   ),
@@ -887,11 +981,12 @@ class _MonthGrid extends StatelessWidget {
                     child: Center(
                       child: Text(
                         label,
-                        style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .onSurfaceVariant,
-                            ),
+                        style:
+                            Theme.of(context).textTheme.labelMedium?.copyWith(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant,
+                                ),
                       ),
                     ),
                   ),
@@ -968,9 +1063,8 @@ class _DayCell extends StatelessWidget {
     final predictedPeriod =
         !loggedPeriod && cycleKind == CycleDayKind.predictedPeriod;
     final isPms = cycleKind == CycleDayKind.pms;
-    final periodColor = bg == null
-        ? App217Colors.period(brightness, palette)
-        : onCell;
+    final periodColor =
+        bg == null ? App217Colors.period(brightness, palette) : onCell;
 
     return InkWell(
       onTap: isFuture ? null : () => onTap(day),
@@ -987,77 +1081,78 @@ class _DayCell extends StatelessWidget {
               )
             : null,
         child: Container(
-        margin: const EdgeInsets.all(3),
-        decoration: BoxDecoration(
-          color: bg ?? emptyBg,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color:
-                isToday ? scheme.primary : scheme.outline.withValues(alpha: 0.55),
-            width: isToday ? 2.2 : 1,
+          margin: const EdgeInsets.all(3),
+          decoration: BoxDecoration(
+            color: bg ?? emptyBg,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: isToday
+                  ? scheme.primary
+                  : scheme.outline.withValues(alpha: 0.55),
+              width: isToday ? 2.2 : 1,
+            ),
           ),
-        ),
-        child: FittedBox(
-          fit: BoxFit.scaleDown,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  '${day.day}',
-                  style: TextStyle(
-                    color: onCell,
-                    fontWeight: isToday ? FontWeight.w800 : FontWeight.w600,
-                    fontSize: 15,
-                  ),
-                ),
-                if (isToday)
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
+                children: [
                   Text(
-                    todayLabel,
+                    '${day.day}',
                     style: TextStyle(
-                      fontSize: 9,
-                      fontWeight: FontWeight.w800,
-                      color: bg == null ? scheme.primary : onCell,
+                      color: onCell,
+                      fontWeight: isToday ? FontWeight.w800 : FontWeight.w600,
+                      fontSize: 15,
                     ),
                   ),
-                if (hasNote || hasHeart || loggedPeriod || predictedPeriod)
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (loggedPeriod)
-                        Icon(
-                          Icons.water_drop,
-                          key: ValueKey('period-${day.month}-${day.day}'),
-                          size: 11,
-                          color: periodColor,
-                        ),
-                      if (predictedPeriod)
-                        Icon(
-                          Icons.water_drop_outlined,
-                          key: ValueKey(
-                            'predicted-period-${day.month}-${day.day}',
+                  if (isToday)
+                    Text(
+                      todayLabel,
+                      style: TextStyle(
+                        fontSize: 9,
+                        fontWeight: FontWeight.w800,
+                        color: bg == null ? scheme.primary : onCell,
+                      ),
+                    ),
+                  if (hasNote || hasHeart || loggedPeriod || predictedPeriod)
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (loggedPeriod)
+                          Icon(
+                            Icons.water_drop,
+                            key: ValueKey('period-${day.month}-${day.day}'),
+                            size: 11,
+                            color: periodColor,
                           ),
-                          size: 11,
-                          color: periodColor,
-                        ),
-                      if ((loggedPeriod || predictedPeriod) &&
-                          (hasHeart || hasNote))
-                        const SizedBox(width: 2),
-                      if (hasHeart)
-                        Icon(Icons.favorite, size: 11, color: onCell),
-                      if (hasHeart && hasNote) const SizedBox(width: 2),
-                      if (hasNote)
-                        Icon(Icons.sticky_note_2_outlined,
-                            size: 11, color: onCell),
-                    ],
-                  ),
-              ],
+                        if (predictedPeriod)
+                          Icon(
+                            Icons.water_drop_outlined,
+                            key: ValueKey(
+                              'predicted-period-${day.month}-${day.day}',
+                            ),
+                            size: 11,
+                            color: periodColor,
+                          ),
+                        if ((loggedPeriod || predictedPeriod) &&
+                            (hasHeart || hasNote))
+                          const SizedBox(width: 2),
+                        if (hasHeart)
+                          Icon(Icons.favorite, size: 11, color: onCell),
+                        if (hasHeart && hasNote) const SizedBox(width: 2),
+                        if (hasNote)
+                          Icon(Icons.sticky_note_2_outlined,
+                              size: 11, color: onCell),
+                      ],
+                    ),
+                ],
+              ),
             ),
           ),
         ),
-      ),
       ),
     );
   }
@@ -1317,10 +1412,10 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
     final hasNote = _notes.trim().isNotEmpty;
     final periodColor = App217Colors.period(Theme.of(context).brightness);
     final heartColor = App217Colors.intimacy(Theme.of(context).brightness);
-    final periodInk = ThemeData.estimateBrightnessForColor(periodColor) ==
-            Brightness.dark
-        ? Colors.white
-        : const Color(0xFF0B1220);
+    final periodInk =
+        ThemeData.estimateBrightnessForColor(periodColor) == Brightness.dark
+            ? Colors.white
+            : const Color(0xFF0B1220);
     // Outside tap dismisses; no Cancel / Save — Done or Taken/Missed commit.
     return Padding(
       padding: EdgeInsets.only(
@@ -1369,9 +1464,7 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
                 tooltip: widget.strings.notes,
                 onPressed: _editNote,
                 icon: Icon(
-                  hasNote
-                      ? Icons.sticky_note_2
-                      : Icons.sticky_note_2_outlined,
+                  hasNote ? Icons.sticky_note_2 : Icons.sticky_note_2_outlined,
                 ),
               ),
             ],
@@ -1540,8 +1633,7 @@ class _MarkButton extends StatelessWidget {
               : color.withValues(alpha: 0.16),
         ),
         foregroundColor: WidgetStateProperty.resolveWith(
-          (states) =>
-              states.contains(WidgetState.selected) ? ink : color,
+          (states) => states.contains(WidgetState.selected) ? ink : color,
         ),
       ),
       icon: Icon(icon),

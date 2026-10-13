@@ -13,6 +13,7 @@ Future<LocalReminderSyncStatus> syncPartnerAlertsFrom({
   required bool linked,
   required bool todayLogged,
   required String ownerName,
+  Future<LocalReminderSyncStatus> Function(List<PlannedAlert>)? scheduler,
   DateTime? now,
 }) {
   final day = DateFormat.MMMd(strings.dateLocale);
@@ -29,5 +30,5 @@ Future<LocalReminderSyncStatus> syncPartnerAlertsFrom({
           pillBody: strings.pillNotifBody(ownerName),
         )
       : const <PlannedAlert>[];
-  return syncPartnerAlerts(alerts);
+  return (scheduler ?? syncPartnerAlerts)(alerts);
 }

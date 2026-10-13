@@ -513,6 +513,9 @@ func (h *Handler) GetEntry(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"invalid date format, use YYYY-MM-DD"}`, http.StatusBadRequest)
 		return
 	}
+	if err := h.requireSubjectConsent(w, userID, subjectID); err != nil {
+		return
+	}
 
 	entry, err := h.store.GetEntry(subjectID, date)
 	if err != nil {
@@ -618,8 +621,8 @@ func (h *Handler) requireSubjectConsent(w http.ResponseWriter, callerID, subject
 		return err
 	}
 	if !subject.HasConsent() {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "consent required"})
-		return fmt.Errorf("consent required")
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "calendar owner consent required"})
+		return fmt.Errorf("calendar owner consent required")
 	}
 	return nil
 }
