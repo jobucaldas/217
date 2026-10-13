@@ -36,6 +36,7 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
   bool _loading = true;
   bool _saving = false;
   String? _error;
+  bool _pmsSuppressed = false;
   PartnerAlertPreference _pref = const PartnerAlertPreference();
 
   @override
@@ -48,6 +49,7 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
     setState(() {
       _loading = true;
       _error = null;
+      _pmsSuppressed = false;
     });
     try {
       final pref = await widget.api.getPartnerAlerts();
@@ -62,6 +64,15 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
         _loading = false;
         _error = friendlyError(widget.strings, err);
       });
+      return;
+    }
+    try {
+      final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+      final cycle = await widget.api.getCycle(today);
+      if (!mounted) return;
+      setState(() => _pmsSuppressed = cycle.note == 'pms_suppressed_menopause');
+    } catch (_) {
+      // Keep the controls usable and the menopause explanation hidden.
     }
   }
 
@@ -210,6 +221,11 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
                     ),
                   ),
                 ),
+                if (_pmsSuppressed)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Text(strings.pmsNotCounted, style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
+                  ),
                 const SizedBox(height: 16),
                 _alertCard(
                   key: const ValueKey('alert-pms'),

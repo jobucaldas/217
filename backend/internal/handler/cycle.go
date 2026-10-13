@@ -55,6 +55,11 @@ func (h *Handler) GetCycle(w http.ResponseWriter, r *http.Request) {
 		writeCalendarSubjectError(w, err)
 		return
 	}
+	owner, err := h.store.GetUserByID(subjectID)
+	if err != nil {
+		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+		return
+	}
 	today := time.Now().UTC()
 	if raw := r.URL.Query().Get("today"); raw != "" {
 		parsed, err := time.Parse("2006-01-02", raw)
@@ -76,7 +81,45 @@ func (h *Handler) GetCycle(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, cycle.Predict(days, today))
+	info := cycle.Predict(days, today)
+	note := ""
+	switch owner.Stage {
+	case "menopause":
+		note = "pms_suppressed_menopause"
+		for i := range info.Predictions {
+			info.Predictions[i].PMSStart = ""
+			info.Predictions[i].PMSEnd = ""
+		}
+	case "perimenopause":
+		note = "pms_counted_perimenopause"
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"stage": owner.Stage, "period_starts": info.PeriodStarts, "cycle_length": info.CycleLength, "period_length": info.PeriodLength, "estimated": info.Estimated, "predictions": info.Predictions, "note": note})
+}
+
+func (h *Handler) SetStage(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Stage string `json:"stage"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
+		return
+	}
+	if body.Stage != "cycling" && body.Stage != "perimenopause" && body.Stage != "menopause" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid stage"})
+		return
+	}
+	user, err := h.store.GetUserByID(getUserID(r))
+	if err != nil || user.EffectiveRole() != model.RoleOwner {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "only owners may set stage"})
+		return
+	}
+	updated, err := h.store.SetStage(getUserID(r), body.Stage)
+	if err != nil {
+		log.Printf("set stage: %v", err)
+		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, h.sessionPayload(updated))
 }
 
 func (h *Handler) isPartner(userID string) bool {

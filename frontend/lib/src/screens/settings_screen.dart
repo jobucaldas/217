@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../api/client.dart';
+import '../errors.dart';
 import '../i18n.dart';
 import '../models.dart';
 import '../platform/open_url.dart';
@@ -31,6 +32,7 @@ class SettingsPage extends StatefulWidget {
     this.onAccountDeleted,
     this.onLogout,
     this.onRoleChanged,
+    this.onStageChanged,
     this.onRemindersToggled,
     this.expandServer = false,
   });
@@ -52,6 +54,7 @@ class SettingsPage extends StatefulWidget {
 
   /// Called after an owner with nothing shared switched to partner.
   final ValueChanged<SessionSnapshot>? onRoleChanged;
+  final ValueChanged<SessionSnapshot>? onStageChanged;
 
   /// Called after the reminder switch was saved, with its new value.
   final ValueChanged<bool>? onRemindersToggled;
@@ -73,6 +76,7 @@ class _SettingsPageState extends State<SettingsPage> {
       widget.expandServer || widget.api.config.usesCustomApiBase;
   bool _testing = false;
   String? _serverError;
+  bool _savingStage = false;
 
   @override
   void dispose() {
@@ -84,6 +88,21 @@ class _SettingsPageState extends State<SettingsPage> {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _saveStage(String stage) async {
+    setState(() => _savingStage = true);
+    try {
+      final session = await widget.api.setStage(stage);
+      if (!mounted) return;
+      setState(() => _savingStage = false);
+      widget.onStageChanged?.call(session);
+    } catch (error) {
+      if (mounted) {
+        setState(() => _savingStage = false);
+        _showSnack(friendlyError(widget.strings, error));
+      }
+    }
   }
 
   Future<void> _saveServer() async {
@@ -345,6 +364,35 @@ class _SettingsPageState extends State<SettingsPage> {
                 ],
               ),
             ],
+          ],
+          if (widget.user?.isOwner ?? false) ...[
+            const SizedBox(height: 20),
+            _SectionLabel(widget.strings.reproductiveStage),
+            _SettingsSection(children: [
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  children: [
+                    for (final option in <(String, String)>[
+                      ('cycling', widget.strings.stageCycling),
+                      ('perimenopause', widget.strings.stagePerimenopause),
+                      ('menopause', widget.strings.stageMenopause),
+                    ])
+                      ChoiceChip(
+                        key: ValueKey('stage-${option.$1}'),
+                        label: Text(option.$2),
+                        selected: widget.user!.stage == option.$1,
+                        onSelected: _savingStage || widget.user!.stage == option.$1
+                            ? null
+                            : (_) => _saveStage(option.$1),
+                      ),
+                  ],
+                ),
+              ),
+              Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 12), child: Text(widget.strings.stageSelfReport, style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant))),
+            ]),
           ],
           // Signed out only: the server is picked before signing in, since
           // an account lives on one server. Never on web, which is served by

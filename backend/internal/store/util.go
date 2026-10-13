@@ -36,6 +36,9 @@ func sanitizeUser(user *model.User) *model.User {
 		return nil
 	}
 	copy := *user
+	if copy.Stage == "" {
+		copy.Stage = model.StageCycling
+	}
 	copy.APIKey = ""
 	copy.PasswordHash = ""
 	return &copy

@@ -62,6 +62,67 @@ func TestNewUserMustChooseRoleBeforeCalendar(t *testing.T) {
 	}
 }
 
+func TestOwnerStageControlsCyclePMSAndPartnersCannotSetIt(t *testing.T) {
+	h, s := newTestHandler(t)
+	owner := newUser(t, s, "stage-owner@example.com", "owner")
+	if owner.Stage != model.StageCycling {
+		t.Fatalf("default stage = %q", owner.Stage)
+	}
+	partner := newUser(t, s, "stage-partner@example.com", "partner")
+	ownerCookie := sessionCookie(t, s, owner.ID)
+	partnerCookie := sessionCookie(t, s, partner.ID)
+	if w := call(t, h, h.SetStage, http.MethodPut, "/api/account/stage", ownerCookie, `{"stage":"invalid"}`); w.Code != http.StatusBadRequest {
+		t.Fatalf("invalid stage: %d", w.Code)
+	}
+	if w := call(t, h, h.SetStage, http.MethodPut, "/api/account/stage", partnerCookie, `{"stage":"menopause"}`); w.Code != http.StatusForbidden {
+		t.Fatalf("partner stage: %d", w.Code)
+	}
+	if w := call(t, h, h.SetStage, http.MethodPut, "/api/account/stage", ownerCookie, `{"stage":"menopause"}`); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"stage":"menopause"`) {
+		t.Fatalf("set menopause: %d %s", w.Code, w.Body.String())
+	}
+	today := time.Now().UTC().Format("2006-01-02")
+	base := time.Now().UTC().AddDate(0, 0, -84)
+	for i := 0; i < 4; i++ {
+		d := base.AddDate(0, 0, i*28).Format("2006-01-02")
+		if _, err := s.UpsertEntry(owner.ID, d, model.UpsertRequest{Period: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w := call(t, h, h.GetCycle, http.MethodGet, "/api/cycle?today="+today, ownerCookie, "")
+	var info struct {
+		Stage       string              `json:"stage"`
+		Note        string              `json:"note"`
+		Predictions []model.CycleWindow `json:"predictions"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &info); err != nil {
+		t.Fatal(err)
+	}
+	if info.Stage != "menopause" || info.Note != "pms_suppressed_menopause" || len(info.Predictions) == 0 || info.Predictions[0].PMSStart != "" {
+		t.Fatalf("menopause cycle: %d %+v", w.Code, info)
+	}
+	if _, err := s.SetStage(owner.ID, "perimenopause"); err != nil {
+		t.Fatal(err)
+	}
+	w = call(t, h, h.GetCycle, http.MethodGet, "/api/cycle?today="+today, ownerCookie, "")
+	if err := json.Unmarshal(w.Body.Bytes(), &info); err != nil {
+		t.Fatal(err)
+	}
+	if info.Note != "pms_counted_perimenopause" || len(info.Predictions) == 0 || info.Predictions[0].PMSStart == "" {
+		t.Fatalf("perimenopause with periods: %d %+v", w.Code, info)
+	}
+	noHistory := newUser(t, s, "stage-empty@example.com", "owner")
+	if _, err := s.SetStage(noHistory.ID, "perimenopause"); err != nil {
+		t.Fatal(err)
+	}
+	w = call(t, h, h.GetCycle, http.MethodGet, "/api/cycle?today="+today, sessionCookie(t, s, noHistory.ID), "")
+	if err := json.Unmarshal(w.Body.Bytes(), &info); err != nil {
+		t.Fatal(err)
+	}
+	if info.Note != "pms_counted_perimenopause" || len(info.Predictions) != 0 {
+		t.Fatalf("perimenopause without periods: %d %+v", w.Code, info)
+	}
+}
+
 func TestOwnersCannotJoinAndPartnersCannotShare(t *testing.T) {
 	h, s := newTestHandler(t)
 	owner := newUser(t, s, "girl@example.com", "owner")

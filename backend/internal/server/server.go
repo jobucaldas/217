@@ -173,6 +173,7 @@ func Run(cfg Config) error {
 
 	mux.HandleFunc("DELETE /api/account", h.AuthMiddleware(h.DeleteAccount))
 	mux.HandleFunc("PUT /api/account/role", h.AuthMiddleware(h.SetRole))
+	mux.HandleFunc("PUT /api/account/stage", h.AuthMiddleware(h.SetStage))
 	mux.HandleFunc("GET /api/cycle", h.AuthMiddleware(h.GetCycle))
 	mux.HandleFunc("GET /api/partner-alerts", h.AuthMiddleware(h.GetPartnerAlerts))
 	mux.HandleFunc("PUT /api/partner-alerts", h.AuthMiddleware(h.UpsertPartnerAlerts))
