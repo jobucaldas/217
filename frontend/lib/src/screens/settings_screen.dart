@@ -6,6 +6,7 @@ import '../api/client.dart';
 import '../errors.dart';
 import '../i18n.dart';
 import '../models.dart';
+import '../notifications/daily_reminder_sync_queue.dart';
 import '../platform/open_url.dart';
 import '../theme/app_theme.dart';
 import 'partner_alerts_screen.dart';
@@ -36,6 +37,7 @@ class SettingsPage extends StatefulWidget {
     this.onRoleChanged,
     this.onStageChanged,
     this.onRemindersToggled,
+    this.dailyReminderSyncQueue,
     this.consentPending = false,
     this.expandServer = false,
   });
@@ -62,6 +64,7 @@ class SettingsPage extends StatefulWidget {
 
   /// Called after the reminder switch was saved, with its new value.
   final ValueChanged<bool>? onRemindersToggled;
+  final DailyReminderSyncQueue? dailyReminderSyncQueue;
 
   /// Signed in but the privacy notice is not agreed yet: the server refuses
   /// the data behind reminders, alerts, sharing, role and stage until then.
@@ -223,7 +226,10 @@ class _SettingsPageState extends State<SettingsPage> {
                           builder: (_) => ReminderSettingsScreen(
                             api: widget.api,
                             strings: widget.strings,
+                            dailyReminderSyncQueue:
+                                widget.dailyReminderSyncQueue,
                             onToggled: widget.onRemindersToggled,
+                            onConsentRequired: widget.onConsentRequired,
                           ),
                         ),
                       );
