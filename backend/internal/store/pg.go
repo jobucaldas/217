@@ -398,6 +398,10 @@ func (s *PGStore) SavePushSubscription(userID string, request model.PushSubscrip
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// One save per user at a time: the limit check below counts their rows.
+	if _, err := tx.Exec(`SELECT id FROM users WHERE id = $1 FOR UPDATE`, userID); err != nil {
+		return nil, fmt.Errorf("locking user for push subscription: %w", err)
+	}
 	index := endpointIndex(s.kr, request.Endpoint)
 	var owner string
 	id := uuid.NewString() // the seal is bound to the row id: reuse an existing row's

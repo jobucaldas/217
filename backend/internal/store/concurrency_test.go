@@ -2,6 +2,8 @@ package store
 
 import (
 	"database/sql"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -27,7 +29,54 @@ func waitForDBLocks(t *testing.T, db *sql.DB, query string, want int) {
 	t.Fatal("timed out waiting for database locks")
 }
 
-func TestConcurrentPushSaveCorrectionFailureIsAtomic(t *testing.T) {
+// holdUser locks the user's row, as a push save does, until release is called.
+func holdUser(t *testing.T, db *sql.DB, userID string) (release func()) {
+	t.Helper()
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Never left open on failure: it would block the schema cleanup.
+	t.Cleanup(func() { _ = tx.Rollback() })
+	if _, err := tx.Exec(`SELECT id FROM users WHERE id = $1 FOR UPDATE`, userID); err != nil {
+		t.Fatal(err)
+	}
+	return func() {
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// startPushSaves runs one save per endpoint at once, all queued behind the
+// user's row lock, and returns their errors once released.
+func startPushSaves(t *testing.T, s *PGStore, userID string, endpoints ...string) []error {
+	t.Helper()
+	release := holdUser(t, s.db, userID)
+	results := make(chan error, len(endpoints))
+	for _, endpoint := range endpoints {
+		go func() {
+			_, err := s.SavePushSubscription(userID, model.PushSubscriptionRequest{Endpoint: endpoint})
+			results <- err
+		}()
+	}
+	waitForDBLocks(t, s.db, `SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query LIKE 'SELECT id FROM users%'`, len(endpoints))
+	release()
+	var errs []error
+	for range endpoints {
+		select {
+		case err := <-results:
+			errs = append(errs, err)
+		case <-time.After(10 * time.Second):
+			t.Fatal("push save did not finish")
+		}
+	}
+	return errs
+}
+
+// Saves of one user run one at a time, so a concurrent first save of the
+// same endpoint finds the row and its seal stays bound to that row's id.
+func TestConcurrentPushSavesOfOneEndpointSerialize(t *testing.T) {
 	s := pgTestStore(t)
 	u, err := s.LinkWorkOSIdentity("owner", "owner@example.com", "Owner", true)
 	if err != nil {
@@ -36,59 +85,40 @@ func TestConcurrentPushSaveCorrectionFailureIsAtomic(t *testing.T) {
 	if _, err := s.UpsertReminderPreference(u.ID, model.ReminderPreference{Enabled: true, Time: "08:00", Timezone: "UTC"}); err != nil {
 		t.Fatal(err)
 	}
-	// Block both first inserts until both requests have selected their own IDs.
-	// Fail the corrective UPDATE, but allow the ON CONFLICT update. The winner's
-	// ciphertext must remain readable even when the losing save cannot finish.
-	if _, err := s.db.Exec(`CREATE FUNCTION gate_push_insert() RETURNS trigger LANGUAGE plpgsql AS $$
- BEGIN
-  PERFORM pg_advisory_xact_lock(64001);
-  RETURN NEW;
- END $$;
- CREATE TRIGGER gate_push BEFORE INSERT ON push_subscriptions FOR EACH ROW EXECUTE FUNCTION gate_push_insert();
- CREATE FUNCTION fail_push_correction() RETURNS trigger LANGUAGE plpgsql AS $$
- BEGIN
-  IF NEW.updated_at = OLD.updated_at THEN RAISE EXCEPTION 'correction failed'; END IF;
-  RETURN NEW;
- END $$;
- CREATE TRIGGER fail_correction BEFORE UPDATE ON push_subscriptions FOR EACH ROW EXECUTE FUNCTION fail_push_correction();`); err != nil {
-		t.Fatal(err)
+	for _, err := range startPushSaves(t, s, u.ID, "https://push.example/same", "https://push.example/same") {
+		if err != nil {
+			t.Fatalf("concurrent save of one endpoint failed: %v", err)
+		}
 	}
-	gate, err := s.db.Begin()
+	targets, err := s.ListReminderTargets()
+	if err != nil || len(targets) != 1 || targets[0].Endpoint != "https://push.example/same" {
+		t.Fatalf("subscription after concurrent saves: %+v, %v", targets, err)
+	}
+}
+
+// Concurrent saves of new endpoints cannot push a user past the limit.
+func TestConcurrentPushSavesRespectTheLimit(t *testing.T) {
+	s := pgTestStore(t)
+	u, err := s.LinkWorkOSIdentity("owner", "owner@example.com", "Owner", true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer gate.Rollback()
-	if _, err := gate.Exec(`SELECT pg_advisory_xact_lock(64001)`); err != nil {
-		t.Fatal(err)
-	}
-	results := make(chan error, 2)
-	for i := 0; i < 2; i++ {
-		go func() {
-			_, err := s.SavePushSubscription(u.ID, model.PushSubscriptionRequest{Endpoint: "https://push.example/concurrent"})
-			results <- err
-		}()
-	}
-	waitForDBLocks(t, s.db, `SELECT count(*) FROM pg_stat_activity WHERE wait_event = 'advisory' AND query LIKE 'INSERT INTO push_subscriptions%'`, 2)
-	if err := gate.Commit(); err != nil {
-		t.Fatal(err)
-	}
-	failures := 0
-	for i := 0; i < 2; i++ {
-		select {
-		case err := <-results:
-			if err != nil {
-				failures++
-			}
-		case <-time.After(10 * time.Second):
-			t.Fatal("push save did not finish")
+	for i := 1; i < model.MaxPushSubscriptions; i++ {
+		if _, err := s.SavePushSubscription(u.ID, model.PushSubscriptionRequest{Endpoint: fmt.Sprintf("https://push.example/%d", i)}); err != nil {
+			t.Fatal(err)
 		}
 	}
-	if failures != 1 {
-		t.Fatalf("want one failed correction, got %d failures", failures)
+	saved := 0
+	for _, err := range startPushSaves(t, s, u.ID, "https://push.example/a", "https://push.example/b", "https://push.example/c") {
+		if err == nil {
+			saved++
+		} else if !strings.Contains(err.Error(), "limit reached") {
+			t.Fatalf("unexpected error: %v", err)
+		}
 	}
-	targets, err := s.ListReminderTargets()
-	if err != nil || len(targets) != 1 || targets[0].Endpoint != "https://push.example/concurrent" {
-		t.Fatalf("winner's subscription was corrupted: %+v, %v", targets, err)
+	count, err := s.CountPushSubscriptions(u.ID)
+	if err != nil || saved != 1 || count != model.MaxPushSubscriptions {
+		t.Fatalf("saved %d, stored %d (%v), want 1 and %d", saved, count, err, model.MaxPushSubscriptions)
 	}
 }
 

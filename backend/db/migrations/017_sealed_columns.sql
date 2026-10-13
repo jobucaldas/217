@@ -1,5 +1,7 @@
 -- Personal data is sealed by the API (AES-256-GCM, key outside the database)
--- before it is stored. 018 (Go) seals existing rows; 019 drops the plaintext.
+-- before it is stored. 018 (Go) seals existing rows and drops the plaintext
+-- columns in one transaction; 019 (Go) rewrites the tables so the dropped
+-- bytes leave the table files.
 
 ALTER TABLE users
     ADD COLUMN IF NOT EXISTS email_sealed BYTEA,
