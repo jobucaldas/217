@@ -21,6 +21,10 @@ class ApiClient {
   final FlutterSecureStorage _storage;
   bool workosUserDeletion = false;
 
+  /// Called whenever the server answers `403 consent required` (the privacy
+  /// notice changed while the app was open), so any screen can recover.
+  void Function()? onConsentRequired;
+
   Future<void> loadAuthConfig() async {
     // A failed or unavailable config response must never retain another
     // server's WorkOS deletion capability.
@@ -137,7 +141,12 @@ class ApiClient {
     }
     final streamed =
         await _http.send(request).timeout(const Duration(seconds: 20));
-    return http.Response.fromStream(streamed);
+    final response = await http.Response.fromStream(streamed);
+    if (response.statusCode == 403 &&
+        ApiException._errorField(response.body) == 'consent required') {
+      onConsentRequired?.call();
+    }
+    return response;
   }
 
   /// Whether [baseUrl] (default: the current server) is a 217 API that

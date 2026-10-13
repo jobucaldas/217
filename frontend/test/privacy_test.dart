@@ -17,6 +17,7 @@ import 'package:a217/src/notifications/local_reminders.dart';
 import 'package:a217/src/platform/save_data.dart';
 import 'package:a217/src/platform/share_sheet.dart';
 import 'package:a217/src/screens/privacy_screens.dart';
+import 'package:a217/src/screens/settings_screen.dart';
 import 'package:a217/src/theme/app_theme.dart';
 
 /// A signed-in account that has not agreed to the privacy notice yet.
@@ -296,6 +297,76 @@ void main() {
     expect(download, findsOneWidget);
   });
 
+  testWidgets('a notice change while Settings is open returns to consent',
+      (tester) async {
+    final server = _ConsentServer()
+      ..consented = true
+      ..role = 'owner';
+    final api = server.client();
+    await tester.pumpWidget(App217(
+      config: api.config,
+      api: api,
+      dailyReminderScheduler: _noScheduler,
+      partnerAlertCanceller: () async {},
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Settings').first);
+    await tester.pumpAndSettle();
+
+    // The operator publishes a new notice; the next save is refused.
+    server.consented = false;
+    final stage = find.byKey(const ValueKey('stage-menopause'));
+    await tester.scrollUntilVisible(stage, 200, scrollable: _settingsList);
+    await tester.tap(stage);
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('stage-menopause')), findsNothing);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.byType(ConsentScreen), findsOneWidget);
+  });
+
+  testWidgets('logging out cancels partner alerts on the device',
+      (tester) async {
+    var cancelled = 0;
+    final server = _ConsentServer()
+      ..consented = true
+      ..role = 'partner';
+    final api = server.client();
+    await tester.pumpWidget(App217(
+      config: api.config,
+      api: api,
+      dailyReminderScheduler: _noScheduler,
+      partnerAlertCanceller: () async => cancelled++,
+    ));
+    await tester.pumpAndSettle();
+    expect(cancelled, 0);
+
+    await tester.tap(find.byTooltip('Settings').first);
+    await tester.pumpAndSettle();
+    final logout = find.text('Log out');
+    await tester.scrollUntilVisible(logout, 200, scrollable: _settingsList);
+    await tester.tap(logout);
+    await tester.pumpAndSettle();
+    expect(server.loggedOut, isTrue);
+    expect(cancelled, 1);
+  });
+
+  test('the client reports refused consent to its listener', () async {
+    var calls = 0;
+    final api = ApiClient(
+      AppConfig.fromEnvironment(),
+      httpClient: MockClient((request) async =>
+          request.url.path == '/api/reminders/preferences'
+              ? http.Response('{"error":"consent required"}', 403)
+              : http.Response('{"error":"forbidden"}', 403)),
+    )..onConsentRequired = () => calls++;
+    await api.getReminderPreference().catchError((Object _) => null);
+    expect(calls, 1);
+    await api.exportData().catchError((Object _) => '');
+    expect(calls, 1);
+  });
+
   testWidgets('declining consent signs out', (tester) async {
     final server = _ConsentServer();
     final api = server.client();
@@ -365,3 +436,17 @@ void main() {
     expect(find.text('Download started'), findsOneWidget);
   });
 }
+
+/// The Settings page's own list, not a horizontal row inside it.
+final _settingsList = find
+    .descendant(
+        of: find.byType(SettingsPage), matching: find.byType(Scrollable))
+    .first;
+
+Future<LocalReminderSyncResult> _noScheduler({
+  required bool enabled,
+  required String timeHhMm,
+  required String title,
+  required String body,
+}) async =>
+    const LocalReminderSyncResult(LocalReminderSyncStatus.scheduled);

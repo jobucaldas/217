@@ -86,6 +86,7 @@ class _App217State extends State<App217> {
   @override
   void initState() {
     super.initState();
+    _api.onConsentRequired = () => unawaited(_recoverConsent());
     _bootstrap();
   }
 
@@ -171,11 +172,12 @@ class _App217State extends State<App217> {
     });
   }
 
-  Future<void> _recoverConsent() async {
-    try {
-      await _refreshSession();
-    } catch (_) {}
-  }
+  Future<void>? _consentRecovery;
+
+  /// One session refresh at a time, however many requests were refused.
+  Future<void> _recoverConsent() => _consentRecovery ??= _refreshSession()
+      .catchError((Object _) {})
+      .whenComplete(() => _consentRecovery = null);
 
   Future<void> _refreshSession() async {
     await _api.loadAuthConfig();
@@ -497,8 +499,16 @@ class _App217State extends State<App217> {
     }
   }
 
-  Future<void> _logout() async {
+  /// Signed out or erased: nothing about this account may keep notifying.
+  void _cancelLocalNotifications() {
     unawaited(_cancelDailyReminder());
+    final clear = _notificationSyncTail.then((_) => _cancelPartnerAlerts());
+    _notificationSyncTail = clear.then<void>((_) {}, onError: (Object _) {});
+    unawaited(_notificationSyncTail);
+  }
+
+  Future<void> _logout() async {
+    _cancelLocalNotifications();
     await _api.logout();
     if (!mounted) return;
     _sessionGeneration++;
@@ -511,7 +521,7 @@ class _App217State extends State<App217> {
   }
 
   void _onAccountDeleted() {
-    unawaited(_cancelDailyReminder());
+    _cancelLocalNotifications();
     _sessionGeneration++;
     setState(() {
       _user = null;
