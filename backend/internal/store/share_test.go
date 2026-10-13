@@ -21,6 +21,9 @@ func TestShareInviteAcceptRevokeAndInbox(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	if _, err := s.RecordConsent(owner.ID, model.ConsentVersion); err != nil {
+		t.Fatal(err)
+	}
 	enabled, err := s.EnableShare(owner.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -97,6 +100,9 @@ func TestListAccountSharesIncludesAllStatuses(t *testing.T) {
 		if _, err := s.SetRole(owner.ID, model.RoleOwner); err != nil {
 			t.Fatal(err)
 		}
+		if _, err := s.RecordConsent(owner.ID, model.ConsentVersion); err != nil {
+			t.Fatal(err)
+		}
 
 		open, err := s.EnableShare(owner.ID)
 		if err != nil {
@@ -165,6 +171,9 @@ func TestDeletingPartnerRevokesTheShare(t *testing.T) {
 			owner, _ := s.LinkWorkOSIdentity("o-"+name, "o-"+name+"@example.com", "O", true)
 			partner, _ := s.LinkWorkOSIdentity("p-"+name, "p-"+name+"@example.com", "P", true)
 			if _, err := s.SetRole(owner.ID, model.RoleOwner); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.RecordConsent(owner.ID, model.ConsentVersion); err != nil {
 				t.Fatal(err)
 			}
 			share, _ := s.EnableShare(owner.ID)
@@ -303,6 +312,9 @@ func TestSentNotesListedForTheirAuthor(t *testing.T) {
 		if _, err := s.SetRole(owner.ID, model.RoleOwner); err != nil {
 			t.Fatal(err)
 		}
+		if _, err := s.RecordConsent(owner.ID, model.ConsentVersion); err != nil {
+			t.Fatal(err)
+		}
 		share, _ := s.EnableShare(owner.ID)
 		if _, err := s.AcceptShare(partner.ID, share.InviteCode); err != nil {
 			t.Fatal(err)
@@ -316,6 +328,43 @@ func TestSentNotesListedForTheirAuthor(t *testing.T) {
 		}
 		if mine, _ := s.ListSentPartnerNotes(owner.ID); len(mine) != 0 {
 			t.Fatalf("owner wrote no notes, got %+v", mine)
+		}
+	})
+}
+
+func TestSharingRequiresOwnerConsent(t *testing.T) {
+	forEachStore(t, func(t *testing.T, name string, s Store) {
+		owner, _ := s.LinkWorkOSIdentity("owner-"+name, "owner-"+name+"@example.com", "Owner", true)
+		partner, _ := s.LinkWorkOSIdentity("partner-"+name, "partner-"+name+"@example.com", "Partner", true)
+		if _, err := s.SetRole(owner.ID, model.RoleOwner); err != nil {
+			t.Fatal(err)
+		}
+		// An invite created before the current notice existed.
+		if _, err := s.RecordConsent(owner.ID, model.ConsentVersion); err != nil {
+			t.Fatal(err)
+		}
+		invite, err := s.EnableShare(owner.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.RecordConsent(owner.ID, model.ConsentVersion-1); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.AcceptShare(partner.ID, invite.InviteCode); err == nil || err.Error() != "calendar owner consent required" {
+			t.Fatalf("accept without owner consent: err=%v", err)
+		}
+
+		if _, err := s.RecordConsent(owner.ID, model.ConsentVersion); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.AcceptShare(partner.ID, invite.InviteCode); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.RecordConsent(owner.ID, model.ConsentVersion-1); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.CreatePartnerNote(partner.ID, "hi"); err == nil || err.Error() != "calendar owner consent required" {
+			t.Fatalf("note without owner consent: err=%v", err)
 		}
 	})
 }

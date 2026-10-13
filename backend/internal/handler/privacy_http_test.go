@@ -64,8 +64,14 @@ func TestPartnerCalendarRequiresOwnerConsent(t *testing.T) {
 	owner, _ := s.LinkWorkOSIdentity("privacy-owner", "owner-privacy@example.com", "Owner", true)
 	partner, _ := s.LinkWorkOSIdentity("privacy-partner", "partner-privacy@example.com", "Partner", true)
 	_, _ = s.SetRole(owner.ID, model.RoleOwner)
+	_, _ = s.RecordConsent(owner.ID, model.ConsentVersion)
 	share, _ := s.EnableShare(owner.ID)
-	_, _ = s.AcceptShare(partner.ID, share.InviteCode)
+	if _, err := s.AcceptShare(partner.ID, share.InviteCode); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RecordConsent(owner.ID, model.ConsentVersion-1); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.UpsertEntry(owner.ID, "2026-10-04", model.UpsertRequest{Taken: boolPtr(true), Notes: "sensitive note", Heart: true, Period: true}); err != nil {
 		t.Fatal(err)
 	}
@@ -125,6 +131,9 @@ func TestExportHasEverythingAboutTheCaller(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := s.UpsertEntry(owner.ID, "2025-01-15", model.UpsertRequest{Period: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RecordConsent(owner.ID, model.ConsentVersion); err != nil {
 		t.Fatal(err)
 	}
 	share, _ := s.EnableShare(owner.ID)

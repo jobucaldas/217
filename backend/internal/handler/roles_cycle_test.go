@@ -145,6 +145,9 @@ func TestOwnersCannotJoinAndPartnersCannotShare(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s.RecordConsent(owner.ID, model.ConsentVersion); err != nil {
+		t.Fatal(err)
+	}
 	body := `{"code":"` + enabled.InviteCode + `"}`
 	if w := call(t, h, h.AcceptShare, http.MethodPost, "/api/share/accept", otherCookie, body); w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "calendar owners") {
 		t.Fatalf("owner accept: %d %s", w.Code, w.Body.String())
@@ -181,6 +184,9 @@ func TestInviteLinkMakesUnsetUserAPartner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s.RecordConsent(owner.ID, model.ConsentVersion); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.AcceptShare(fresh.ID, enabled.InviteCode); err != nil {
 		t.Fatal(err)
 	}
@@ -210,10 +216,10 @@ func TestCycleEndpointSharedWithPartner(t *testing.T) {
 		t.Fatalf("unlinked partner cycle: %d", w.Code)
 	}
 	enabled, _ := s.EnableShare(owner.ID)
-	if _, err := s.AcceptShare(partner.ID, enabled.InviteCode); err != nil {
+	if _, err := s.RecordConsent(owner.ID, model.ConsentVersion); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.RecordConsent(owner.ID, model.ConsentVersion); err != nil {
+	if _, err := s.AcceptShare(partner.ID, enabled.InviteCode); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.RecordConsent(partner.ID, model.ConsentVersion); err != nil {

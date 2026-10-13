@@ -225,6 +225,8 @@ func (h *Handler) AcceptShare(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		msg := err.Error()
 		switch {
+		case msg == "calendar owner consent required":
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": msg})
 		case strings.Contains(msg, "invite code"),
 			strings.Contains(msg, "already linked"),
 			strings.Contains(msg, "cannot accept"),
@@ -265,10 +267,11 @@ func (h *Handler) CreatePartnerNote(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		msg := err.Error()
 		switch {
+		case msg == "calendar owner consent required",
+			strings.Contains(msg, "only partners"), strings.Contains(msg, "share inactive"):
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": msg})
 		case strings.Contains(msg, "required"), strings.Contains(msg, "too long"):
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": msg})
-		case strings.Contains(msg, "only partners"), strings.Contains(msg, "share inactive"):
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": msg})
 		default:
 			log.Printf("create partner note: %v", err)
 			http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)

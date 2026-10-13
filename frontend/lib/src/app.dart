@@ -69,6 +69,10 @@ class _App217State extends State<App217> {
   bool? _remindersOn;
   int _sessionGeneration = 0;
 
+  /// Changes only when the signed-in account does (logout, deletion, server
+  /// switch, sign-in), so a late session refresh cannot restore the old one.
+  int _accountEpoch = 0;
+
   /// Routes pushed on top of home (Settings) are built once, so they listen
   /// here to pick up theme, language and session changes made from them.
   final _changes = _ChangeTicker();
@@ -196,9 +200,10 @@ class _App217State extends State<App217> {
   }
 
   Future<void> _refreshSession() async {
+    final epoch = _accountEpoch;
     await _api.loadAuthConfig();
     final session = await _api.currentSession();
-    if (!mounted) return;
+    if (!mounted || epoch != _accountEpoch) return;
     _cancelOwnerReminderIfSessionLeavesOwner(session);
     _cancelPartnerAlertsIfSessionLeavesPartner(session);
     _sessionGeneration++;
@@ -441,6 +446,7 @@ class _App217State extends State<App217> {
   /// dropped the old token, so show the signed-out state.
   void _onApiBaseChanged() {
     unawaited(_cancelAllNotifications());
+    _accountEpoch++;
     _sessionGeneration++;
     setState(() {
       _user = null;
@@ -502,6 +508,7 @@ class _App217State extends State<App217> {
         final session = await _api.currentSession();
         _clearRemindersIfConsentRequired(session);
         if (!mounted) return;
+        _accountEpoch++;
         _sessionGeneration++;
         setState(() {
           _user = session.user ?? user;
@@ -529,6 +536,7 @@ class _App217State extends State<App217> {
   }
 
   Future<void> _logout() async {
+    _accountEpoch++;
     _sessionGeneration++;
     unawaited(_cancelAllNotifications());
     await _api.logout();
@@ -542,6 +550,7 @@ class _App217State extends State<App217> {
   }
 
   void _onAccountDeleted() {
+    _accountEpoch++;
     _sessionGeneration++;
     unawaited(_cancelAllNotifications());
     setState(() {

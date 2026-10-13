@@ -350,6 +350,9 @@ func (s *MemoryStore) AcceptShare(partnerID, inviteCode string) (*model.ShareSta
 	if target.OwnerID == partnerID {
 		return nil, fmt.Errorf("cannot accept your own invite")
 	}
+	if !s.findUserLocked(target.OwnerID).HasConsent() {
+		return nil, fmt.Errorf("calendar owner consent required")
+	}
 	partner.Role = model.RolePartner
 	partner.UpdatedAt = time.Now().UTC()
 	target.PartnerID = partnerID
@@ -428,6 +431,9 @@ func (s *MemoryStore) CreatePartnerNote(partnerID, body string) (*model.PartnerN
 	live := s.liveShareForPartnerLocked(partnerID)
 	if live == nil || live.Status != model.ShareActive {
 		return nil, fmt.Errorf("share inactive")
+	}
+	if !s.findUserLocked(live.OwnerID).HasConsent() {
+		return nil, fmt.Errorf("calendar owner consent required")
 	}
 	now := time.Now().UTC()
 	note := &model.PartnerNote{

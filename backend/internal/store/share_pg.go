@@ -249,6 +249,17 @@ func (s *PGStore) AcceptShare(partnerID, inviteCode string) (*model.ShareState, 
 	if ownerID == partnerID {
 		return nil, fmt.Errorf("cannot accept your own invite")
 	}
+	// Invites outlive notice changes: both sides must have agreed to the
+	// current one before the calendar is linked.
+	var ownerConsent int
+	if err := tx.QueryRow(
+		`SELECT consent_version FROM users WHERE id = $1 FOR SHARE`, ownerID,
+	).Scan(&ownerConsent); err != nil {
+		return nil, err
+	}
+	if ownerConsent < model.ConsentVersion {
+		return nil, fmt.Errorf("calendar owner consent required")
+	}
 	if _, err := tx.Exec(`UPDATE users SET role = 'partner', updated_at = NOW() WHERE id = $1`, partnerID); err != nil {
 		return nil, err
 	}
@@ -352,15 +363,20 @@ func (s *PGStore) CreatePartnerNote(partnerID, body string) (*model.PartnerNote,
 		return nil, fmt.Errorf("only partners can leave inbox notes")
 	}
 	var ownerID string
+	var ownerConsent int
 	err = s.db.QueryRow(
-		`SELECT owner_id FROM calendar_shares
-		 WHERE partner_id = $1 AND status = 'active' LIMIT 1`, partnerID,
-	).Scan(&ownerID)
+		`SELECT s.owner_id, u.consent_version FROM calendar_shares s
+		 JOIN users u ON u.id = s.owner_id
+		 WHERE s.partner_id = $1 AND s.status = 'active' LIMIT 1`, partnerID,
+	).Scan(&ownerID, &ownerConsent)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("share inactive")
 	}
 	if err != nil {
 		return nil, err
+	}
+	if ownerConsent < model.ConsentVersion {
+		return nil, fmt.Errorf("calendar owner consent required")
 	}
 	note := &model.PartnerNote{}
 	id := uuid.NewString() // chosen here: the seal is bound to it

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"217/backend/internal/auth"
+	"217/backend/internal/model"
 )
 
 func TestAccountDeleteAndShareHTTP(t *testing.T) {
@@ -43,6 +44,9 @@ func TestAccountDeleteAndShareHTTP(t *testing.T) {
 		t.Fatalf("missing invite code: %v", share)
 	}
 
+	if _, err := s.RecordConsent(owner.ID, model.ConsentVersion); err != nil {
+		t.Fatal(err)
+	}
 	acceptBody := []byte(`{"code":"` + code + `"}`)
 	acceptReq := authedRequest(http.MethodPost, "/api/share/accept", partnerCookie, acceptBody)
 	acceptW := httptest.NewRecorder()
