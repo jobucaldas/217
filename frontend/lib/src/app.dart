@@ -530,6 +530,7 @@ class _App217State extends State<App217> {
             onRoleChanged: _user == null ? null : _onRoleChosen,
             onStageChanged: _user == null ? null : _onStageChanged,
             onRemindersToggled: _user == null ? null : _onRemindersToggled,
+            consentPending: _consentRequired,
             expandServer: expandServer,
           ),
         ),

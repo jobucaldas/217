@@ -36,6 +36,7 @@ class SettingsPage extends StatefulWidget {
     this.onRoleChanged,
     this.onStageChanged,
     this.onRemindersToggled,
+    this.consentPending = false,
     this.expandServer = false,
   });
 
@@ -61,6 +62,10 @@ class SettingsPage extends StatefulWidget {
 
   /// Called after the reminder switch was saved, with its new value.
   final ValueChanged<bool>? onRemindersToggled;
+
+  /// Signed in but the privacy notice is not agreed yet: the server refuses
+  /// the data behind reminders, alerts, sharing, role and stage until then.
+  final bool consentPending;
 
   /// Open with the self-hosted server field already expanded.
   final bool expandServer;
@@ -179,7 +184,7 @@ class _SettingsPageState extends State<SettingsPage> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
         children: [
-          if (widget.onLogout != null) ...[
+          if (widget.onLogout != null && !widget.consentPending) ...[
             _SettingsSection(
               children: [
                 if (widget.user?.isPartner ?? false)
@@ -329,6 +334,7 @@ class _SettingsPageState extends State<SettingsPage> {
             ],
           ),
           if (widget.user != null &&
+              !widget.consentPending &&
               widget.user!.isOwner &&
               widget.share != null &&
               widget.onShareChanged != null) ...[
@@ -368,7 +374,7 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
             ],
           ],
-          if (widget.user?.isOwner ?? false) ...[
+          if ((widget.user?.isOwner ?? false) && !widget.consentPending) ...[
             const SizedBox(height: 20),
             _SectionLabel(widget.strings.reproductiveStage),
             _SettingsSection(children: [
@@ -387,14 +393,19 @@ class _SettingsPageState extends State<SettingsPage> {
                         key: ValueKey('stage-${option.$1}'),
                         label: Text(option.$2),
                         selected: widget.user!.stage == option.$1,
-                        onSelected: _savingStage || widget.user!.stage == option.$1
-                            ? null
-                            : (_) => _saveStage(option.$1),
+                        onSelected:
+                            _savingStage || widget.user!.stage == option.$1
+                                ? null
+                                : (_) => _saveStage(option.$1),
                       ),
                   ],
                 ),
               ),
-              Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 12), child: Text(widget.strings.stageSelfReport, style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant))),
+              Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                  child: Text(widget.strings.stageSelfReport,
+                      style: text.bodySmall
+                          ?.copyWith(color: scheme.onSurfaceVariant))),
             ]),
           ],
           // Signed out only: the server is picked before signing in, since
@@ -514,7 +525,8 @@ class _SettingsPageState extends State<SettingsPage> {
               children: [
                 ListTile(
                   key: const ValueKey('privacy-notice'),
-                  leading: Icon(Icons.privacy_tip_outlined, color: scheme.primary),
+                  leading:
+                      Icon(Icons.privacy_tip_outlined, color: scheme.primary),
                   title: Text(widget.strings.privacyNotice),
                   trailing:
                       Icon(Icons.chevron_right, color: scheme.onSurfaceVariant),

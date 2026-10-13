@@ -274,6 +274,28 @@ void main() {
     expect(server.reminderPreferenceCalls, 1);
   });
 
+  testWidgets('settings hide consent-gated controls until agreed',
+      (tester) async {
+    final server = _ConsentServer()..role = 'owner';
+    final api = server.client();
+    await tester.pumpWidget(App217(config: api.config, api: api));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    // Reminders, sharing, role and stage need data the server refuses yet.
+    expect(find.text(const Strings(AppLanguage.en).reminders), findsNothing);
+    expect(find.byKey(const ValueKey('stage-cycling')), findsNothing);
+    expect(find.byKey(const ValueKey('settings-switch-partner')), findsNothing);
+    final download = find.text('Download my data');
+    await tester.scrollUntilVisible(
+      download,
+      200,
+      scrollable: find.byType(Scrollable).last,
+    );
+    expect(download, findsOneWidget);
+  });
+
   testWidgets('declining consent signs out', (tester) async {
     final server = _ConsentServer();
     final api = server.client();
