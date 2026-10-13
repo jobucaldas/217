@@ -53,17 +53,9 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
     });
     try {
       final pref = await widget.api.getPartnerAlerts();
-      CycleInfo? cycle;
-      try {
-        final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
-        cycle = await widget.api.getCycle(today);
-      } catch (_) {
-        // Alert preferences remain usable if the calendar cycle is unavailable.
-      }
       if (!mounted) return;
       setState(() {
         _pref = pref;
-        _pmsSuppressed = cycle?.note == 'pms_suppressed_menopause';
         _loading = false;
       });
     } catch (err) {
@@ -72,6 +64,15 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
         _loading = false;
         _error = friendlyError(widget.strings, err);
       });
+      return;
+    }
+    try {
+      final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+      final cycle = await widget.api.getCycle(today);
+      if (!mounted) return;
+      setState(() => _pmsSuppressed = cycle.note == 'pms_suppressed_menopause');
+    } catch (_) {
+      // Keep the controls usable and the menopause explanation hidden.
     }
   }
 

@@ -22,6 +22,7 @@ class CalendarScreen extends StatefulWidget {
     required this.user,
     required this.strings,
     required this.onOpenSettings,
+    this.cycleRefreshSignal,
     this.share = const ShareState(status: 'none'),
     this.onShareChanged,
     this.palette = AppPalette.blue,
@@ -34,6 +35,7 @@ class CalendarScreen extends StatefulWidget {
   final ShareState share;
   final Strings strings;
   final VoidCallback onOpenSettings;
+  final Listenable? cycleRefreshSignal;
   final ValueChanged<ShareState>? onShareChanged;
   final AppPalette palette;
 
@@ -96,7 +98,21 @@ class _CalendarScreenState extends State<CalendarScreen>
         }
       });
     WidgetsBinding.instance.addObserver(this);
+    widget.cycleRefreshSignal?.addListener(_onCycleRefresh);
     _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant CalendarScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.cycleRefreshSignal != widget.cycleRefreshSignal) {
+      oldWidget.cycleRefreshSignal?.removeListener(_onCycleRefresh);
+      widget.cycleRefreshSignal?.addListener(_onCycleRefresh);
+    }
+  }
+
+  void _onCycleRefresh() {
+    if (mounted) _loadCycle();
   }
 
   /// Back in the foreground: her calendar may have changed (and partner
@@ -109,6 +125,7 @@ class _CalendarScreenState extends State<CalendarScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    widget.cycleRefreshSignal?.removeListener(_onCycleRefresh);
     _wheelIdle?.cancel();
     _monthSnap.dispose();
     super.dispose();
@@ -403,7 +420,11 @@ class _CalendarScreenState extends State<CalendarScreen>
     final shortDay = DateFormat.MMMd(locale);
     final String? cycleLine;
     if (next == null) {
-      cycleLine = widget.share.canEditCalendar ? widget.strings.cycleHintOwner : null;
+      cycleLine = _cycle.note == 'pms_suppressed_menopause'
+          ? null
+          : widget.share.canEditCalendar
+              ? widget.strings.cycleHintOwner
+              : null;
     } else if (inPms) {
       cycleLine = widget.strings.cyclePmsNow(shortDay.format(next.periodStart));
     } else if (todayKind == CycleDayKind.predictedPeriod) {

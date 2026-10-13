@@ -45,7 +45,7 @@ List<PlannedAlert> planPartnerAlerts({
     final t = parseReminderTime(pref.pmsTime);
     var i = 0;
     for (final w in cycle.predictions) {
-      if (w.pmsStart.year < 1) continue;
+      if (w.pmsStart.year <= 1) continue;
       if (i >= partnerAlertIdCount) break;
       final when = DateTime(
         w.pmsStart.year,

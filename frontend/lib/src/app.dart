@@ -52,6 +52,7 @@ class _App217State extends State<App217> {
   /// Routes pushed on top of home (Settings) are built once, so they listen
   /// here to pick up theme, language and session changes made from them.
   final _changes = _ChangeTicker();
+  final ValueNotifier<int> _stageChanges = ValueNotifier(0);
 
   Strings get _strings => Strings(_language);
 
@@ -76,6 +77,7 @@ class _App217State extends State<App217> {
   @override
   void dispose() {
     _changes.dispose();
+    _stageChanges.dispose();
     super.dispose();
   }
 
@@ -232,6 +234,11 @@ class _App217State extends State<App217> {
     });
   }
 
+  void _onStageChanged(SessionSnapshot session) {
+    _applySession(session);
+    _stageChanges.value++;
+  }
+
   /// Role picked (first sign-in) or switched.
   Future<void> _onRoleChosen(SessionSnapshot session) async {
     _applySession(session);
@@ -371,7 +378,7 @@ class _App217State extends State<App217> {
             onLogout: _user == null ? null : _logout,
             onApiBaseChanged: _onApiBaseChanged,
             onRoleChanged: _user == null ? null : _onRoleChosen,
-            onStageChanged: _user == null ? null : _applySession,
+            onStageChanged: _user == null ? null : _onStageChanged,
             onRemindersToggled: _user == null ? null : _onRemindersToggled,
             expandServer: expandServer,
           ),
@@ -452,6 +459,7 @@ class _App217State extends State<App217> {
       strings: _strings,
       palette: _palette,
       onOpenSettings: _openSettings,
+      cycleRefreshSignal: _stageChanges,
       onShareChanged: (share) => setState(() => _share = share),
       // Partners get alerts instead of a daily reminder, so no bubble for them.
       showReminderHint: _user!.isOwner &&
