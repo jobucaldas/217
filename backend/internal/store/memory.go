@@ -174,6 +174,7 @@ func (s *MemoryStore) UpsertEntry(userID, date string, req model.UpsertRequest) 
 		existing.Notes = req.Notes
 		existing.Heart = req.Heart
 		existing.Period = req.Period
+		existing.Symptoms = append([]string(nil), req.Symptoms...)
 		existing.UpdatedAt = now
 		return existing, nil
 	}
@@ -186,6 +187,7 @@ func (s *MemoryStore) UpsertEntry(userID, date string, req model.UpsertRequest) 
 		Notes:     req.Notes,
 		Heart:     req.Heart,
 		Period:    req.Period,
+		Symptoms:  append([]string(nil), req.Symptoms...),
 		CreatedAt: now,
 		UpdatedAt: now,
 	}

@@ -10,15 +10,17 @@ type Entry struct {
 	Notes     string    `json:"notes"`
 	Heart     bool      `json:"heart"`
 	Period    bool      `json:"period"`
+	Symptoms  []string  `json:"symptoms"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type UpsertRequest struct {
-	Taken  *bool  `json:"taken"`
-	Notes  string `json:"notes"`
-	Heart  bool   `json:"heart"`
-	Period bool   `json:"period"`
+	Taken    *bool    `json:"taken"`
+	Notes    string   `json:"notes"`
+	Heart    bool     `json:"heart"`
+	Period   bool     `json:"period"`
+	Symptoms []string `json:"symptoms"`
 }
 
 // BoolPtr returns a pointer to v for nullable taken fields.

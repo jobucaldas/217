@@ -76,7 +76,26 @@ func (h *Handler) GetCycle(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, cycle.Predict(days, today))
+	info := cycle.Predict(days, today)
+	info.Symptoms = []model.SymptomForecast{}
+	entries, err := h.store.ListEntriesBetween(subjectID, from, today.Format("2006-01-02"))
+	if err != nil {
+		log.Printf("list symptom history: %v", err)
+		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+		return
+	}
+	upcoming := make([]string, 0, 180)
+	for _, w := range info.Predictions {
+		start, _ := time.Parse("2006-01-02", w.PeriodStart)
+		for d := -cycle.PMSDays; d < info.CycleLength; d++ {
+			upcoming = append(upcoming, start.AddDate(0, 0, d).Format("2006-01-02"))
+		}
+	}
+	forecasts := cycle.ForecastSymptoms(entries, info.PeriodStarts, upcoming, info.CycleLength)
+	for _, f := range forecasts {
+		info.Symptoms = append(info.Symptoms, model.SymptomForecast{Symptom: f.Symptom, Date: f.Date, Hits: f.Hits, Cycles: f.Cycles})
+	}
+	writeJSON(w, http.StatusOK, info)
 }
 
 func (h *Handler) isPartner(userID string) bool {
@@ -115,7 +134,10 @@ func (h *Handler) UpsertPartnerAlerts(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
 		return
 	}
-	if !validClock(pref.PMSTime) || !validClock(pref.PillTime) {
+	if pref.SymptomTime == "" {
+		pref.SymptomTime = model.DefaultSymptomTime
+	}
+	if !validClock(pref.PMSTime) || !validClock(pref.PillTime) || !validClock(pref.SymptomTime) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "times must use HH:MM in 24-hour format"})
 		return
 	}

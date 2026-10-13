@@ -511,6 +511,15 @@ func (h *Handler) UpsertEntry(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
 		return
 	}
+	allowed := map[string]bool{"cramps": true, "headache": true, "bloating": true, "breast_tenderness": true, "mood_change": true, "fatigue": true}
+	seen := map[string]bool{}
+	for _, symptom := range req.Symptoms {
+		if !allowed[symptom] || seen[symptom] {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid symptom"})
+			return
+		}
+		seen[symptom] = true
+	}
 
 	entry, err := h.store.UpsertEntry(userID, date, req)
 	if err != nil {

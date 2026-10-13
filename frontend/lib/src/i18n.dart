@@ -451,6 +451,27 @@ class Strings {
 
   // Cycle / PMS
   String get periodLabel => _t('Period', 'Menstruação', 'Regla');
+  String get symptomsTitle => _t('Symptoms', 'Sintomas', 'Síntomas');
+  String symptomName(String id) => switch (id) {
+    'cramps' => _t('Cramps', 'Cólicas', 'Cólicos'),
+    'headache' => _t('Headache', 'Dor de cabeça', 'Dolor de cabeza'),
+    'bloating' => _t('Bloating', 'Inchaço', 'Hinchazón'),
+    'breast_tenderness' => _t('Breast tenderness', 'Sensibilidade nas mamas', 'Sensibilidad mamaria'),
+    'mood_change' => _t('Mood change', 'Mudança de humor', 'Cambio de humor'),
+    'fatigue' => _t('Fatigue', 'Cansaço', 'Cansancio'),
+    _ => id,
+  };
+  String symptomPattern(int hits, int cycles) => _t(
+        'Pattern from your log: recorded in $hits of your last $cycles cycles around this day.',
+        'Padrão do seu registro: anotado em $hits dos seus últimos $cycles ciclos perto deste dia.',
+        'Patrón de tu registro: anotado en $hits de tus últimos $cycles ciclos cerca de este día.',
+      );
+  String get symptomLikelyMark => _t('A logged pattern may happen again', 'Um padrão registrado pode se repetir', 'Un patrón registrado puede repetirse');
+  String get symptomReminderTitle => _t('Symptom pattern may happen tomorrow', 'Um padrão de sintomas pode se repetir amanhã', 'Un patrón de síntomas puede repetirse mañana');
+  String get symptomAlertBody => _t('A local reminder for a symptom pattern in the upcoming days', 'Um aviso local para um padrão de sintomas nos próximos dias', 'Un aviso local para un patrón de síntomas en los próximos días');
+  String get symptomsLegend => _t('Logged', 'Registrado', 'Anotado');
+  String get symptomLikelyLegend => _t('Pattern', 'Padrão', 'Patrón');
+  String symptomReminderBody(String symptom) => _t('Your log shows ${symptom.toLowerCase()} around this cycle day.', 'Seu registro mostra ${symptom.toLowerCase()} perto deste dia do ciclo.', 'Tu registro muestra ${symptom.toLowerCase()} cerca de este día del ciclo.');
   String get legendPeriod => periodLabel;
   String get legendPms => _t('PMS', 'TPM', 'SPM');
   String cycleNext(String period, String pms) => _t(

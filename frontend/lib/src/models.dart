@@ -139,6 +139,7 @@ class Entry {
     required this.notes,
     this.heart = false,
     this.period = false,
+    this.symptoms = const [],
   });
 
   final String date;
@@ -149,6 +150,7 @@ class Entry {
 
   /// Logged as a period day (drives cycle and PMS predictions).
   final bool period;
+  final List<String> symptoms;
 
   factory Entry.fromJson(Map<String, dynamic> json) {
     return Entry(
@@ -157,6 +159,7 @@ class Entry {
       notes: (json['notes'] as String?) ?? '',
       heart: json['heart'] as bool? ?? false,
       period: json['period'] as bool? ?? false,
+      symptoms: (json['symptoms'] as List<dynamic>? ?? const []).cast<String>(),
     );
   }
 }
@@ -199,6 +202,7 @@ class CycleInfo {
     this.estimated = true,
     this.periodStarts = const [],
     this.predictions = const [],
+    this.symptoms = const [],
   });
 
   static const empty = CycleInfo();
@@ -210,6 +214,7 @@ class CycleInfo {
   final bool estimated;
   final List<DateTime> periodStarts;
   final List<CycleWindow> predictions;
+  final List<SymptomForecast> symptoms;
 
   bool get hasPredictions => predictions.isNotEmpty;
 
@@ -247,7 +252,24 @@ class CycleInfo {
         predictions: (json['predictions'] as List<dynamic>? ?? const [])
             .map((e) => CycleWindow.fromJson(e as Map<String, dynamic>))
             .toList(),
+        symptoms: (json['symptoms'] as List<dynamic>? ?? const [])
+            .map((e) => SymptomForecast.fromJson(e as Map<String, dynamic>))
+            .toList(),
       );
+}
+
+class SymptomForecast {
+  const SymptomForecast({required this.symptom, required this.date, required this.hits, required this.cycles});
+  final String symptom;
+  final DateTime date;
+  final int hits;
+  final int cycles;
+  factory SymptomForecast.fromJson(Map<String, dynamic> json) => SymptomForecast(
+    symptom: json['symptom'] as String,
+    date: DateTime.parse(json['date'] as String),
+    hits: json['hits'] as int,
+    cycles: json['cycles_considered'] as int,
+  );
 }
 
 /// Partner notification choices; each alert has its own time (HH:MM).
@@ -257,24 +279,32 @@ class PartnerAlertPreference {
     this.pmsTime = '09:00',
     this.pillEnabled = false,
     this.pillTime = '21:00',
+    this.symptomEnabled = false,
+    this.symptomTime = '09:00',
   });
 
   final bool pmsEnabled;
   final String pmsTime;
   final bool pillEnabled;
   final String pillTime;
+  final bool symptomEnabled;
+  final String symptomTime;
 
   PartnerAlertPreference copyWith({
     bool? pmsEnabled,
     String? pmsTime,
     bool? pillEnabled,
     String? pillTime,
+    bool? symptomEnabled,
+    String? symptomTime,
   }) =>
       PartnerAlertPreference(
         pmsEnabled: pmsEnabled ?? this.pmsEnabled,
         pmsTime: pmsTime ?? this.pmsTime,
         pillEnabled: pillEnabled ?? this.pillEnabled,
         pillTime: pillTime ?? this.pillTime,
+        symptomEnabled: symptomEnabled ?? this.symptomEnabled,
+        symptomTime: symptomTime ?? this.symptomTime,
       );
 
   Map<String, dynamic> toJson() => {
@@ -282,6 +312,8 @@ class PartnerAlertPreference {
         'pms_time': pmsTime,
         'pill_enabled': pillEnabled,
         'pill_time': pillTime,
+        'symptom_enabled': symptomEnabled,
+        'symptom_time': symptomTime,
       };
 
   factory PartnerAlertPreference.fromJson(Map<String, dynamic> json) =>
@@ -290,6 +322,8 @@ class PartnerAlertPreference {
         pmsTime: (json['pms_time'] as String?) ?? '09:00',
         pillEnabled: json['pill_enabled'] as bool? ?? false,
         pillTime: (json['pill_time'] as String?) ?? '21:00',
+        symptomEnabled: json['symptom_enabled'] as bool? ?? false,
+        symptomTime: (json['symptom_time'] as String?) ?? '09:00',
       );
 }
 

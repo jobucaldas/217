@@ -171,7 +171,7 @@ Future<LocalReminderSyncStatus> syncPartnerAlerts(
     if (!await _ensureReady(requestPermission: alerts.isNotEmpty)) {
       return LocalReminderSyncStatus.permissionDenied;
     }
-    for (final base in [partnerPmsIdBase, partnerPillIdBase]) {
+    for (final base in [partnerPmsIdBase, partnerPillIdBase, partnerSymptomIdBase]) {
       for (var i = 0; i < partnerAlertIdCount; i++) {
         await _plugin.cancel(base + i);
       }
@@ -182,7 +182,7 @@ Future<LocalReminderSyncStatus> syncPartnerAlerts(
       android: AndroidNotificationDetails(
         _partnerChannelId,
         'Partner alerts',
-        channelDescription: 'PMS heads-up and pill not logged',
+        channelDescription: 'Cycle and intake alerts',
         importance: Importance.high,
         priority: Priority.high,
       ),

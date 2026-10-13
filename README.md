@@ -6,6 +6,11 @@ Anticonceptional (birth control) intake tracker with a shared calendar, in Engli
 - **Server:** Go API + PostgreSQL, behind Caddy
 - **Sign-in:** WorkOS AuthKit
 
+Owners can log cycle-related symptoms on each calendar day. The calendar shows
+patterns only when the owner's own logs support them; partners see those logs
+and patterns read-only. Optional symptom pattern reminders are scheduled
+locally on Android from the latest sync; the web app does not deliver them.
+
 Your calendar lives on a server you run. You only need Docker; no clone of this repo.
 
 ## Self-hosting

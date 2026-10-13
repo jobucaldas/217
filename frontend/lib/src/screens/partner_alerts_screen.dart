@@ -9,8 +9,7 @@ import '../models.dart';
 import '../notifications/local_reminders.dart';
 import '../notifications/partner_alert_sync.dart';
 
-/// Partner notifications: PMS heads-up and pill-not-logged, each with its own
-/// toggle and time.
+/// Partner notifications: PMS heads-up, symptom patterns, and pill reminders.
 class PartnerAlertsScreen extends StatefulWidget {
   const PartnerAlertsScreen({
     super.key,
@@ -211,6 +210,19 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
                   ),
                 ),
                 const SizedBox(height: 16),
+                _alertCard(
+                  key: const ValueKey('alert-symptom'),
+                  title: strings.symptomReminderTitle,
+                  subtitle: strings.symptomAlertBody,
+                  enabled: _pref.symptomEnabled,
+                  time: _pref.symptomTime,
+                  onToggle: (v) => _save(_pref.copyWith(symptomEnabled: v)),
+                  onPickTime: () async {
+                    final time = await _pickTime(_pref.symptomTime);
+                    if (time != null) _save(_pref.copyWith(symptomTime: time));
+                  },
+                ),
+                const SizedBox(height: 12),
                 _alertCard(
                   key: const ValueKey('alert-pms'),
                   title: strings.pmsAlertTitle,

@@ -27,6 +27,8 @@ Future<LocalReminderSyncStatus> syncPartnerAlertsFrom({
               strings.pmsNotifBody(ownerName, day.format(w.periodStart)),
           pillTitle: strings.pillNotifTitle,
           pillBody: strings.pillNotifBody(ownerName),
+          symptomTitle: (_) => strings.symptomReminderTitle,
+          symptomBody: (f) => '${strings.symptomName(f.symptom)} · ${strings.symptomPattern(f.hits, f.cycles)}',
         )
       : const <PlannedAlert>[];
   return syncPartnerAlerts(alerts);

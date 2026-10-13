@@ -21,6 +21,7 @@ class _FakeApi extends ApiClient {
     String notes = '',
     bool heart = false,
     bool period = false,
+    List<String> symptoms = const [],
   }) async {
     final e = Entry(
       date: date,
@@ -28,6 +29,7 @@ class _FakeApi extends ApiClient {
       notes: notes,
       heart: heart,
       period: period,
+      symptoms: symptoms,
     );
     store[date] = e;
     return e;
@@ -120,6 +122,23 @@ void main() {
         expect(find.text('Save'), findsNothing);
       },
     );
+  }
+
+  for (final brightness in Brightness.values) {
+    testWidgets('symptom chips are readable and toggle in $brightness', (tester) async {
+      await tester.pumpWidget(MaterialApp(
+        theme: buildApp217Theme(brightness: brightness, palette: AppPalette.blue),
+        home: Scaffold(body: DayEditorSheet(
+          strings: const Strings(AppLanguage.en), date: '2026-10-01', initialTaken: null,
+          initialNotes: '', hadEntry: false,
+        )),
+      ));
+      await tester.pumpAndSettle();
+      expect(find.text('Symptoms'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('symptom-headache')));
+      await tester.pumpAndSettle();
+      expect(tester.widget<FilterChip>(find.byKey(const ValueKey('symptom-headache'))).selected, isTrue);
+    });
   }
 
   testWidgets('Em aberto: note Done alone persists without Taken/Missed',
@@ -757,6 +776,7 @@ class _HeartCalendarApi extends ApiClient {
     String notes = '',
     bool heart = false,
     bool period = false,
+    List<String> symptoms = const [],
   }) async =>
       Entry(
         date: date,
@@ -764,6 +784,7 @@ class _HeartCalendarApi extends ApiClient {
         notes: notes,
         heart: heart,
         period: period,
+        symptoms: symptoms,
       );
 
   @override
