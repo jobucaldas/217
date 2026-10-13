@@ -46,3 +46,7 @@ type ReminderTarget struct {
 	Time           string
 	Timezone       string
 }
+
+type ExportPushSubscription struct {
+	Endpoint string `json:"endpoint"`
+}

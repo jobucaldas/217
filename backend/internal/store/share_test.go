@@ -147,14 +147,61 @@ func TestPurgeExpiredKeepsLiveData(t *testing.T) {
 			if err := s.CreateOAuthAttempt("old", "b", "v", "n", time.Now().Add(time.Second)); err != nil {
 				t.Fatal(err)
 			}
+			oldSub, err := s.SavePushSubscription(u.ID, model.PushSubscriptionRequest{Endpoint: "https://old.example/sub"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			recentSub, err := s.SavePushSubscription(u.ID, model.PushSubscriptionRequest{Endpoint: "https://recent.example/sub"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			base := time.Now().UTC()
+			_, _ = s.ClaimReminderDelivery(oldSub.ID, base.AddDate(0, 0, -31), base)
+			_, _ = s.ClaimReminderDelivery(recentSub.ID, base.AddDate(0, 0, -2), base)
 			if err := s.PurgeExpired(time.Now().Add(2 * time.Second)); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := s.ConsumeOAuthAttempt("old", "b"); err == nil {
 				t.Fatal("expired attempt survived the purge")
 			}
+			if name == "memory" {
+				ms := s.(*MemoryStore)
+				ms.mu.RLock()
+				_, oldExists := ms.deliveries[deliveryKey(oldSub.ID, base.AddDate(0, 0, -31))]
+				_, recentExists := ms.deliveries[deliveryKey(recentSub.ID, base.AddDate(0, 0, -2))]
+				ms.mu.RUnlock()
+				if oldExists || !recentExists {
+					t.Fatalf("delivery retention old=%v recent=%v", oldExists, recentExists)
+				}
+			} else {
+				ps := s.(*PGStore)
+				var oldCount, recentCount int
+				_ = ps.db.QueryRow(`SELECT COUNT(*) FROM reminder_deliveries WHERE subscription_id=$1`, oldSub.ID).Scan(&oldCount)
+				_ = ps.db.QueryRow(`SELECT COUNT(*) FROM reminder_deliveries WHERE subscription_id=$1`, recentSub.ID).Scan(&recentCount)
+				if oldCount != 0 || recentCount != 1 {
+					t.Fatalf("delivery retention old=%d recent=%d", oldCount, recentCount)
+				}
+			}
 			if _, err := s.GetUserBySession("live"); err != nil {
 				t.Fatalf("live session purged: %v", err)
+			}
+			if name == "memory" {
+				ms := s.(*MemoryStore)
+				ms.mu.RLock()
+				_, oldExists := ms.deliveries[deliveryKey(oldSub.ID, base.AddDate(0, 0, -31))]
+				_, recentExists := ms.deliveries[deliveryKey(recentSub.ID, base.AddDate(0, 0, -2))]
+				ms.mu.RUnlock()
+				if oldExists || !recentExists {
+					t.Fatalf("delivery retention old=%v recent=%v", oldExists, recentExists)
+				}
+			} else {
+				ps := s.(*PGStore)
+				var oldCount, recentCount int
+				_ = ps.db.QueryRow(`SELECT COUNT(*) FROM reminder_deliveries WHERE subscription_id=$1`, oldSub.ID).Scan(&oldCount)
+				_ = ps.db.QueryRow(`SELECT COUNT(*) FROM reminder_deliveries WHERE subscription_id=$1`, recentSub.ID).Scan(&recentCount)
+				if oldCount != 0 || recentCount != 1 {
+					t.Fatalf("delivery retention old=%d recent=%d", oldCount, recentCount)
+				}
 			}
 		}
 	})
@@ -165,6 +212,37 @@ func TestPurgeExpiredKeepsLiveData(t *testing.T) {
 func forEachStore(t *testing.T, fn func(t *testing.T, name string, s Store)) {
 	t.Run("memory", func(t *testing.T) { fn(t, "memory", NewMemoryStore()) })
 	t.Run("postgres", func(t *testing.T) { fn(t, "postgres", pgTestStore(t)) })
+}
+
+func TestReminderTargetsRequireCurrentConsent(t *testing.T) {
+	forEachStore(t, func(t *testing.T, name string, s Store) {
+		no, _ := s.LinkWorkOSIdentity("no-"+name, "no-"+name+"@example.com", "No", true)
+		yes, _ := s.LinkWorkOSIdentity("yes-"+name, "yes-"+name+"@example.com", "Yes", true)
+		for _, u := range []*model.User{no, yes} {
+			_, err := s.SetRole(u.ID, model.RoleOwner)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = s.SavePushSubscription(u.ID, model.PushSubscriptionRequest{Endpoint: "https://" + u.ID + ".example/sub"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = s.UpsertReminderPreference(u.ID, model.ReminderPreference{Enabled: true, Time: "08:00", Timezone: "UTC"})
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := s.RecordConsent(yes.ID, model.ConsentVersion); err != nil {
+			t.Fatal(err)
+		}
+		targets, err := s.ListReminderTargets()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(targets) != 1 || targets[0].UserID != yes.ID {
+			t.Fatalf("targets=%+v want consented subscriber only", targets)
+		}
+	})
 }
 
 func TestSentNotesListedForTheirAuthor(t *testing.T) {

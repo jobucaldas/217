@@ -55,6 +55,9 @@ func (h *Handler) GetCycle(w http.ResponseWriter, r *http.Request) {
 		writeCalendarSubjectError(w, err)
 		return
 	}
+	if err := h.requireSubjectConsent(w, getUserID(r), subjectID); err != nil {
+		return
+	}
 	today := time.Now().UTC()
 	if raw := r.URL.Query().Get("today"); raw != "" {
 		parsed, err := time.Parse("2006-01-02", raw)

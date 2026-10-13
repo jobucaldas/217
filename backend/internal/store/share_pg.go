@@ -40,6 +40,13 @@ func (s *PGStore) DeleteUser(userID string) error {
 		return fmt.Errorf("deleting user: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	var lockedID string
+	if err := tx.QueryRow(`SELECT id FROM users WHERE id = $1 FOR UPDATE`, userID).Scan(&lockedID); err != nil {
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("user not found")
+		}
+		return fmt.Errorf("locking user for deletion: %w", err)
+	}
 	// A departing partner leaves the owner's share revoked, not "active"
 	// with nobody on the other end (partner_id is set NULL below).
 	if _, err := tx.Exec(`UPDATE calendar_shares SET status = 'revoked', updated_at = NOW()
@@ -285,13 +292,6 @@ func (s *PGStore) CalendarSubjectID(userID string) (string, error) {
 }
 
 func (s *PGStore) ListInboxNotes(ownerID string) ([]*model.PartnerNote, error) {
-	user, err := s.GetUserByID(ownerID)
-	if err != nil {
-		return nil, err
-	}
-	if model.NormalizeRole(user.Role) != model.RoleOwner {
-		return nil, fmt.Errorf("only owners have an inbox")
-	}
 	rows, err := s.db.Query(
 		`SELECT n.id, n.owner_id, n.partner_id, n.body_sealed, n.created_at, n.read_at
 		 FROM partner_notes n
@@ -460,4 +460,67 @@ func (s *PGStore) SetRole(userID, role string) (*model.User, error) {
 		return nil, err
 	}
 	return s.GetUserByID(userID)
+}
+
+func (s *PGStore) ListAccountShares(userID string) ([]*model.CalendarShare, error) {
+	rows, err := s.db.Query(`SELECT id,owner_id,COALESCE(partner_id,''),status,created_at,updated_at FROM calendar_shares WHERE owner_id=$1 OR partner_id=$1 ORDER BY created_at`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []*model.CalendarShare{}
+	for rows.Next() {
+		v := &model.CalendarShare{}
+		if err := rows.Scan(&v.ID, &v.OwnerID, &v.PartnerID, &v.Status, &v.CreatedAt, &v.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+func (s *PGStore) ListAccountSubscriptions(userID string) ([]model.ExportPushSubscription, error) {
+	rows, err := s.db.Query(`SELECT id,sealed FROM push_subscriptions WHERE user_id=$1`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []model.ExportPushSubscription{}
+	for rows.Next() {
+		var id string
+		var sealed []byte
+		if err := rows.Scan(&id, &sealed); err != nil {
+			return nil, err
+		}
+		var payload pushPayload
+		if err := openJSON(s.kr, sealed, pushCtx(id, userID), &payload); err != nil {
+			return nil, err
+		}
+		out = append(out, model.ExportPushSubscription{Endpoint: payload.Endpoint})
+	}
+	return out, rows.Err()
+}
+
+func (s *PGStore) ListReceivedPartnerNotes(userID string) ([]*model.PartnerNote, error) {
+	rows, err := s.db.Query(`SELECT n.id,n.owner_id,n.partner_id,n.body_sealed,n.created_at,n.read_at FROM partner_notes n WHERE n.owner_id=$1 ORDER BY n.created_at DESC`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []*model.PartnerNote{}
+	for rows.Next() {
+		n := &model.PartnerNote{}
+		var sealed []byte
+		var read sql.NullTime
+		if err := rows.Scan(&n.ID, &n.OwnerID, &n.PartnerID, &sealed, &n.CreatedAt, &read); err != nil {
+			return nil, err
+		}
+		if n.Body, err = s.kr.OpenString(sealed, noteCtx(n.ID, n.OwnerID, n.PartnerID)); err != nil {
+			return nil, err
+		}
+		if read.Valid {
+			n.ReadAt = &read.Time
+		}
+		out = append(out, n)
+	}
+	return out, rows.Err()
 }

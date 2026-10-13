@@ -65,9 +65,12 @@ type Store interface {
 
 	// Partner → owner inbox notes
 	ListInboxNotes(ownerID string) ([]*model.PartnerNote, error)
+	ListReceivedPartnerNotes(userID string) ([]*model.PartnerNote, error)
 	CreatePartnerNote(partnerID, body string) (*model.PartnerNote, error)
 	// ListSentPartnerNotes returns the notes a partner wrote (export).
 	ListSentPartnerNotes(partnerID string) ([]*model.PartnerNote, error)
+	ListAccountShares(userID string) ([]*model.CalendarShare, error)
+	ListAccountSubscriptions(userID string) ([]model.ExportPushSubscription, error)
 	MarkInboxNoteRead(ownerID, noteID string) error
 
 	Close() error

@@ -12,10 +12,11 @@ import (
 )
 
 type memoryDelivery struct {
-	sent        bool
-	claimedAt   time.Time
-	nextAttempt time.Time
-	attempts    int
+	reminderDate time.Time
+	sent         bool
+	claimedAt    time.Time
+	nextAttempt  time.Time
+	attempts     int
 }
 
 type memorySession struct {
@@ -466,7 +467,7 @@ func (s *MemoryStore) ListReminderTargets() ([]model.ReminderTarget, error) {
 			continue
 		}
 		user := s.findUserLocked(subscription.UserID)
-		if user == nil || model.NormalizeRole(user.Role) == model.RolePartner {
+		if user == nil || !user.HasConsent() || model.NormalizeRole(user.Role) == model.RolePartner {
 			// Pill reminders are for the person taking it.
 			continue
 		}
@@ -495,6 +496,7 @@ func (s *MemoryStore) ClaimReminderDelivery(subscriptionID string, reminderDate,
 		}
 	}
 	delivery.claimedAt = now
+	delivery.reminderDate = reminderDate
 	delivery.attempts++
 	s.deliveries[key] = delivery
 	return true, nil

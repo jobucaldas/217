@@ -152,6 +152,12 @@ func TestCycleEndpointSharedWithPartner(t *testing.T) {
 	if _, err := s.AcceptShare(partner.ID, enabled.InviteCode); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s.RecordConsent(owner.ID, model.ConsentVersion); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RecordConsent(partner.ID, model.ConsentVersion); err != nil {
+		t.Fatal(err)
+	}
 
 	w := call(t, h, h.GetCycle, http.MethodGet, "/api/cycle?today="+today.Format("2006-01-02"), partnerCookie, "")
 	if w.Code != http.StatusOK {

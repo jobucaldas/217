@@ -132,6 +132,11 @@ func (s *MemoryStore) PurgeExpired(now time.Time) error {
 			delete(s.oauthAttempts, k)
 		}
 	}
+	for key, delivery := range s.deliveries {
+		if delivery.reminderDate.Before(now.AddDate(0, 0, -30)) {
+			delete(s.deliveries, key)
+		}
+	}
 	for id, share := range s.shares {
 		if share.Status == model.ShareRevoked && !share.UpdatedAt.After(now.Add(-model.RetentionAfterRevoke)) {
 			delete(s.shares, id)
@@ -380,9 +385,6 @@ func (s *MemoryStore) ListInboxNotes(ownerID string) ([]*model.PartnerNote, erro
 	if user == nil {
 		return nil, fmt.Errorf("user not found")
 	}
-	if model.NormalizeRole(user.Role) != model.RoleOwner {
-		return nil, fmt.Errorf("only owners have an inbox")
-	}
 	out := make([]*model.PartnerNote, 0)
 	for _, note := range s.partnerNotes {
 		if note.OwnerID != ownerID {
@@ -478,4 +480,42 @@ func (s *MemoryStore) SetRole(userID, role string) (*model.User, error) {
 		user.UpdatedAt = time.Now().UTC()
 	}
 	return sanitizeUser(user), nil
+}
+
+func (s *MemoryStore) ListAccountShares(userID string) ([]*model.CalendarShare, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := []*model.CalendarShare{}
+	for _, sh := range s.shares {
+		if sh.OwnerID == userID || sh.PartnerID == userID {
+			c := *sh
+			c.InviteCode = ""
+			out = append(out, &c)
+		}
+	}
+	return out, nil
+}
+func (s *MemoryStore) ListAccountSubscriptions(userID string) ([]model.ExportPushSubscription, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := []model.ExportPushSubscription{}
+	for _, sub := range s.subscriptions {
+		if sub.UserID == userID {
+			out = append(out, model.ExportPushSubscription{Endpoint: sub.Endpoint})
+		}
+	}
+	return out, nil
+}
+
+func (s *MemoryStore) ListReceivedPartnerNotes(userID string) ([]*model.PartnerNote, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := []*model.PartnerNote{}
+	for _, n := range s.partnerNotes {
+		if n.OwnerID == userID {
+			c := *n
+			out = append(out, &c)
+		}
+	}
+	return out, nil
 }

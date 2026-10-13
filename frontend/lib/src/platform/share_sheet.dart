@@ -25,3 +25,12 @@ Future<bool> shareText(String text, {String? subject}) async {
     return false;
   }
 }
+
+/// Shares a JSON file created in Android's cache directory through FileProvider.
+Future<bool> shareJsonFile(String name, String content) async {
+  if (!canShareNatively) return false;
+  try {
+    await intentsChannel.invokeMethod<void>('shareFile', {'name': name, 'content': content});
+    return true;
+  } on PlatformException { return false; } on MissingPluginException { return false; }
+}

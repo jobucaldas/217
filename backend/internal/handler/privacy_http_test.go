@@ -59,6 +59,39 @@ func TestDataEndpointsWaitForConsent(t *testing.T) {
 	}
 }
 
+func TestPartnerCalendarRequiresOwnerConsent(t *testing.T) {
+	h, s := newTestHandler(t)
+	owner, _ := s.LinkWorkOSIdentity("privacy-owner", "owner-privacy@example.com", "Owner", true)
+	partner, _ := s.LinkWorkOSIdentity("privacy-partner", "partner-privacy@example.com", "Partner", true)
+	_, _ = s.SetRole(owner.ID, model.RoleOwner)
+	share, _ := s.EnableShare(owner.ID)
+	_, _ = s.AcceptShare(partner.ID, share.InviteCode)
+	_, _ = s.RecordConsent(partner.ID, model.ConsentVersion)
+	cookie := sessionCookie(t, s, partner.ID)
+	for _, route := range []struct {
+		name string
+		call func(*httptest.ResponseRecorder)
+	}{
+		{"entries", func(w *httptest.ResponseRecorder) {
+			h.ConsentMiddleware(h.ListEntries)(w, authedRequest(http.MethodGet, "/api/entries?year=2026&month=10", cookie, nil))
+		}},
+		{"stats", func(w *httptest.ResponseRecorder) {
+			h.ConsentMiddleware(h.GetStats)(w, authedRequest(http.MethodGet, "/api/stats?year=2026&month=10", cookie, nil))
+		}},
+		{"cycle", func(w *httptest.ResponseRecorder) {
+			h.ConsentMiddleware(h.GetCycle)(w, authedRequest(http.MethodGet, "/api/cycle", cookie, nil))
+		}},
+	} {
+		t.Run(route.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			route.call(w)
+			if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "consent required") {
+				t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
 func TestExportHasEverythingAboutTheCaller(t *testing.T) {
 	h, s := newTestHandler(t)
 	owner, _ := s.LinkWorkOSIdentity("user_exp_owner", "owner@example.com", "Owner", true)
@@ -79,6 +112,12 @@ func TestExportHasEverythingAboutTheCaller(t *testing.T) {
 	if _, err := s.CreatePartnerNote(partner.ID, "hello"); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s.UpsertPartnerAlerts(partner.ID, model.PartnerAlertPreference{PMSEnabled: true, PMSTime: "09:00", PillEnabled: true, PillTime: "21:00"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SavePushSubscription(partner.ID, model.PushSubscriptionRequest{Endpoint: "https://partner.example/push"}); err != nil {
+		t.Fatal(err)
+	}
 
 	export := func(userID string) model.AccountExport {
 		w := httptest.NewRecorder()
@@ -97,9 +136,22 @@ func TestExportHasEverythingAboutTheCaller(t *testing.T) {
 		len(mine.NotesReceived) != 1 || mine.NotesReceived[0].Body != "hello" || mine.Share.PartnerEmail != "partner@example.com" {
 		t.Fatalf("owner export incomplete: %+v", mine)
 	}
+	if _, err := s.UpsertPartnerAlerts(partner.ID, model.PartnerAlertPreference{PMSEnabled: true, PMSTime: "09:00", PillEnabled: true, PillTime: "21:00"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SavePushSubscription(partner.ID, model.PushSubscriptionRequest{Endpoint: "https://partner.example/push"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RevokeShare(owner.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetRole(partner.ID, model.RoleOwner); err != nil {
+		t.Fatal(err)
+	}
+	// The revoked share and preferences remain in the export after a role change.
 	theirs := export(partner.ID)
-	if len(theirs.Entries) != 0 || len(theirs.NotesSent) != 1 || theirs.PartnerAlerts == nil {
-		t.Fatalf("partner export must hold only the partner's own data: %+v", theirs)
+	if len(theirs.Entries) != 0 || len(theirs.NotesSent) != 1 || theirs.PartnerAlerts == nil || len(theirs.PushSubscriptions) != 1 || len(theirs.Shares) != 1 {
+		t.Fatalf("role-switched export incomplete or leaked entries: %+v", theirs)
 	}
 }
 

@@ -104,6 +104,11 @@ func (h *Handler) AuthConfig(w http.ResponseWriter, r *http.Request) {
 		body["workos_client_id"] = reporter.ClientID()
 	}
 	body["consent_version"] = model.ConsentVersion
+	if cfg, ok := h.oauthProvider.(auth.UserDeleteConfigurer); ok {
+		body["workos_user_deletion"] = cfg.CanDeleteUsers()
+	} else {
+		body["workos_user_deletion"] = false
+	}
 	if h.privacyContact != "" {
 		body["privacy_contact"] = h.privacyContact
 	}
@@ -473,6 +478,9 @@ func (h *Handler) ListEntries(w http.ResponseWriter, r *http.Request) {
 		now := time.Now().UTC()
 		year, month = now.Year(), int(now.Month())
 	}
+	if err := h.requireSubjectConsent(w, userID, subjectID); err != nil {
+		return
+	}
 
 	entries, err := h.store.ListEntries(subjectID, year, month)
 	if err != nil {
@@ -581,6 +589,9 @@ func (h *Handler) GetStats(w http.ResponseWriter, r *http.Request) {
 		writeCalendarSubjectError(w, err)
 		return
 	}
+	if err := h.requireSubjectConsent(w, userID, subjectID); err != nil {
+		return
+	}
 	year, month := parseYearMonth(r)
 	if year == 0 {
 		now := time.Now().UTC()
@@ -594,6 +605,24 @@ func (h *Handler) GetStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, stats)
+}
+
+// requireSubjectConsent protects a shared owner's calendar when the caller
+// has consented but the owner has not agreed to the current notice.
+func (h *Handler) requireSubjectConsent(w http.ResponseWriter, callerID, subjectID string) error {
+	if callerID == subjectID {
+		return nil
+	}
+	subject, err := h.store.GetUserByID(subjectID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return err
+	}
+	if !subject.HasConsent() {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "consent required"})
+		return fmt.Errorf("consent required")
+	}
+	return nil
 }
 
 // --- Reminder handlers ---

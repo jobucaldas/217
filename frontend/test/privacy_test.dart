@@ -1,6 +1,8 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -11,12 +13,14 @@ import 'package:a217/src/app.dart';
 import 'package:a217/src/config.dart';
 import 'package:a217/src/i18n.dart';
 import 'package:a217/src/platform/save_data.dart';
+import 'package:a217/src/platform/share_sheet.dart';
 import 'package:a217/src/screens/privacy_screens.dart';
 import 'package:a217/src/theme/app_theme.dart';
 
 /// A signed-in account that has not agreed to the privacy notice yet.
 class _ConsentServer {
   bool consented = false;
+  bool staleOnce = false;
   int? acceptedVersion;
   bool loggedOut = false;
   final calls = <String>[];
@@ -47,8 +51,8 @@ class _ConsentServer {
                 200,
               );
             case '/api/account/consent':
-              acceptedVersion =
-                  (jsonDecode(request.body) as Map)['version'] as int;
+              acceptedVersion = (jsonDecode(request.body) as Map)['version'] as int;
+              if (staleOnce) { staleOnce=false; return http.Response('{"error":"privacy notice changed","consent_version":2}',409); }
               consented = true;
               return http.Response(jsonEncode(_session()), 200);
             case '/api/auth/logout':
@@ -67,6 +71,8 @@ void main() {
   for (final brightness in Brightness.values) {
     testWidgets('consent screen gates the app until agreed ($brightness)',
         (tester) async {
+      tester.binding.platformDispatcher.platformBrightnessTestValue = brightness;
+      addTearDown(tester.binding.platformDispatcher.clearPlatformBrightnessTestValue);
       FlutterSecureStorage.setMockInitialValues({'pending_invite': 'ABCD1234'});
       final server = _ConsentServer();
       final api = server.client();
@@ -99,6 +105,18 @@ void main() {
     });
   }
 
+  testWidgets('409 consent refreshes and displays the new notice version', (tester) async {
+    final server = _ConsentServer()..staleOnce = true;
+    final api = server.client();
+    await tester.pumpWidget(App217(config: api.config, api: api));
+    await tester.pumpAndSettle();
+    final accept=find.byKey(const ValueKey('consent-accept'));
+    await tester.scrollUntilVisible(accept,200); await tester.ensureVisible(accept); await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('consent-checkbox'))); await tester.pump(); await tester.tap(accept); await tester.pumpAndSettle();
+    expect(find.byType(ConsentScreen), findsOneWidget);
+    expect(server.calls.where((c)=>c=='PUT /api/account/consent').length,1);
+  });
+
   testWidgets('declining consent signs out', (tester) async {
     final server = _ConsentServer();
     final api = server.client();
@@ -114,6 +132,19 @@ void main() {
     expect(server.loggedOut, isTrue, reason: server.calls.join(', '));
     expect(server.acceptedVersion, isNull);
     expect(find.text('Sign in'), findsOneWidget);
+  });
+
+  test('Android export invokes JSON file channel with name and body', () async {
+    debugDefaultTargetPlatformOverride=TargetPlatform.android;
+    addTearDown(()=>debugDefaultTargetPlatformOverride=null);
+    final calls=<MethodCall>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(intentsChannel,(call) async { calls.add(call); return null; });
+    addTearDown(()=>TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(intentsChannel,null));
+    await shareJsonFile('217-data-2026-10-13.json','{"ok":true}');
+    expect(calls.single.method,'shareFile');
+    expect((calls.single.arguments as Map)['name'],'217-data-2026-10-13.json');
+    expect((calls.single.arguments as Map)['content'],'{"ok":true}');
+    expect(calls.where((call)=>call.method=='shareText'),isEmpty);
   });
 
   testWidgets('download my data hands the export to the platform',

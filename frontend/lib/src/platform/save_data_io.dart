@@ -9,7 +9,8 @@ export 'save_data_outcome.dart';
 /// Downloads folder. Otherwise unsupported, so callers can copy instead.
 Future<SaveDataOutcome> saveDataFile(String name, String content) async {
   if (Platform.isAndroid) {
-    return await shareText(content, subject: name)
+    final shared = await shareJsonFile(name, content);
+    return shared
         ? const SaveDataOutcome(SaveDataHow.shared)
         : const SaveDataOutcome(SaveDataHow.unsupported);
   }

@@ -158,6 +158,9 @@ func TestSealExistingRowsDropsPlaintext(t *testing.T) {
 	if err != nil || len(notes) != 1 || notes[0].Body != "love note body" || notes[0].FromEmail != "bf@example.com" {
 		t.Fatalf("notes after sealing: %+v %v", notes, err)
 	}
+	if _, err := s.RecordConsent(owner, model.ConsentVersion); err != nil {
+		t.Fatal(err)
+	}
 	targets, err := s.UpsertReminderPreference(owner, model.ReminderPreference{Enabled: true, Time: "08:00", Timezone: "UTC"})
 	if err != nil || targets.SubscriptionCount != 1 {
 		t.Fatalf("subscription after sealing: %+v %v", targets, err)

@@ -106,7 +106,7 @@ POSTGRES_PASSWORD=
 DATA_ENCRYPTION_KEY=
 APP_BASE_URL=https://217.example.com   # or http://localhost:8787 to try it
 WORKOS_CLIENT_ID=client_...
-WORKOS_API_KEY=sk_...                  # recommended: "Delete account" needs it
+WORKOS_API_KEY=sk_...                  # optional: also deletes the WorkOS sign-in identity during account erasure
 # PRIVACY_CONTACT=privacy@example.com  # who answers privacy requests (shown in the app)
 # SITE_ADDRESS=217.example.com         # see the comment in compose.yaml
 ```

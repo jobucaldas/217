@@ -254,7 +254,7 @@ class _DeleteAccountSectionState extends State<DeleteAccountSection> {
       context: context,
       builder: (context) => AlertDialog(
         title: Text(widget.strings.deleteAccount),
-        content: Text(widget.strings.deleteAccountWarn),
+        content: Text(widget.strings.deleteAccountWarn(widget.api.workosUserDeletion)),
         actions: [
           DialogActionRow(
             secondary: DialogLinkButton(
@@ -377,7 +377,7 @@ class _PartnerJoinScreenState extends State<PartnerJoinScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: Text(widget.strings.deleteAccount),
-        content: Text(widget.strings.deleteAccountWarn),
+        content: Text(widget.strings.deleteAccountWarn(widget.api.workosUserDeletion)),
         actions: [
           DialogActionRow(
             secondary: DialogLinkButton(

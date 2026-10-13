@@ -19,6 +19,17 @@ class ApiClient {
   final AppConfig config;
   final http.Client _http;
   final FlutterSecureStorage _storage;
+  bool workosUserDeletion = false;
+
+  Future<void> loadAuthConfig() async {
+    try {
+      final response = await _send('GET', _uri('/api/auth/config'), auth: false);
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map) workosUserDeletion = decoded['workos_user_deletion'] == true;
+      }
+    } catch (_) {}
+  }
 
   static const _sessionKey = 'session_token';
   static const _apiBaseKey = 'api_base_url';
@@ -516,11 +527,18 @@ enum ServerCheck { ok, unreachable, notA217Server, signInNotConfigured }
 class ApiException implements Exception {
   ApiException(this.action, http.Response response)
       : statusCode = response.statusCode,
-        message = _errorField(response.body);
+        message = _errorField(response.body),
+        consentVersion = _consentVersionField(response.body);
 
   final String action;
   final int statusCode;
   final String message;
+  final int? consentVersion;
+
+  static int? _consentVersionField(String body) {
+    try { final decoded=jsonDecode(body); if(decoded is Map && decoded['consent_version'] is num) return (decoded['consent_version'] as num).toInt(); } catch (_) {}
+    return null;
+  }
 
   static String _errorField(String body) {
     try {

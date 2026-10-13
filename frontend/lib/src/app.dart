@@ -110,6 +110,7 @@ class _App217State extends State<App217> {
     try {
       await _api.loadPersistedApiBase();
       if (!_api.config.needsServerSetup) {
+        await _api.loadAuthConfig();
         session = await _api.currentSession();
         user = session.user;
         share = session.share ?? share;
@@ -148,6 +149,10 @@ class _App217State extends State<App217> {
       _remindersOn = enabled;
       _reminderHintDismissed = false;
     });
+  }
+
+  Future<void> _recoverConsent() async {
+    try { await _refreshSession(); } catch (_) {}
   }
 
   Future<void> _refreshSession() async {
@@ -461,6 +466,10 @@ class _App217State extends State<App217> {
         strings: _strings,
         version: _consentVersion,
         onAccepted: _onConsented,
+        onNoticeChanged: (version) async {
+          try { await _refreshSession(); } catch (_) {}
+          if (mounted) setState(() { _consentRequired = true; _consentVersion = version; });
+        },
         onDecline: _logout,
         onOpenSettings: _openSettings,
       );
@@ -493,6 +502,7 @@ class _App217State extends State<App217> {
       palette: _palette,
       onOpenSettings: _openSettings,
       onShareChanged: (share) => setState(() => _share = share),
+      onConsentRequired: _recoverConsent,
       // Partners get alerts instead of a daily reminder, so no bubble for them.
       showReminderHint: _user!.isOwner &&
           _remindersOn == false &&

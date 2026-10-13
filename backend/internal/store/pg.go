@@ -480,7 +480,7 @@ func (s *PGStore) ListReminderTargets() ([]model.ReminderTarget, error) {
 		FROM push_subscriptions ps
 		JOIN users u ON u.id = ps.user_id
 		JOIN reminder_preferences rp ON rp.user_id = ps.user_id
-		WHERE rp.enabled = TRUE AND COALESCE(u.role, '') <> 'partner'`)
+		WHERE rp.enabled = TRUE AND COALESCE(u.role, '') <> 'partner' AND u.consent_version >= $1`, model.ConsentVersion)
 	if err != nil {
 		return nil, fmt.Errorf("listing reminder targets: %w", err)
 	}

@@ -14,12 +14,14 @@ const RetentionAfterRevoke = 30 * 24 * time.Hour
 // AccountExport is everything the API holds about one account (LGPD art. 18:
 // access and portability).
 type AccountExport struct {
-	ExportedAt    time.Time               `json:"exported_at"`
-	User          *User                   `json:"user"`
-	Share         *ShareState             `json:"share"`
-	Entries       []*Entry                `json:"entries"`
-	NotesReceived []*PartnerNote          `json:"partner_notes_received"`
-	NotesSent     []*PartnerNote          `json:"partner_notes_sent"`
-	Reminder      *ReminderPreference     `json:"reminder_preference"`
-	PartnerAlerts *PartnerAlertPreference `json:"partner_alerts,omitempty"`
+	ExportedAt        time.Time                `json:"exported_at"`
+	User              *User                    `json:"user"`
+	Share             *ShareState              `json:"share"`
+	Entries           []*Entry                 `json:"entries"`
+	NotesReceived     []*PartnerNote           `json:"partner_notes_received"`
+	NotesSent         []*PartnerNote           `json:"partner_notes_sent"`
+	Reminder          *ReminderPreference      `json:"reminder_preference"`
+	PartnerAlerts     *PartnerAlertPreference  `json:"partner_alerts,omitempty"`
+	PushSubscriptions []ExportPushSubscription `json:"push_subscriptions"`
+	Shares            []*CalendarShare         `json:"shares"`
 }

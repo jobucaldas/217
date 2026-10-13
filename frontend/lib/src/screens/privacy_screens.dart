@@ -108,6 +108,7 @@ class ConsentScreen extends StatefulWidget {
     required this.strings,
     required this.version,
     required this.onAccepted,
+    this.onNoticeChanged,
     required this.onDecline,
     required this.onOpenSettings,
   });
@@ -116,6 +117,7 @@ class ConsentScreen extends StatefulWidget {
   final Strings strings;
   final int version;
   final ValueChanged<SessionSnapshot> onAccepted;
+  final ValueChanged<int>? onNoticeChanged;
   final VoidCallback onDecline;
   final VoidCallback onOpenSettings;
 
@@ -142,6 +144,10 @@ class _ConsentScreenState extends State<ConsentScreen> {
       widget.onAccepted(await widget.api.acceptConsent(widget.version));
     } catch (err) {
       if (!mounted) return;
+      if (err is ApiException && err.statusCode == 409 && err.consentVersion != null) {
+        widget.onNoticeChanged?.call(err.consentVersion!);
+        return;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(friendlyError(widget.strings, err))),
       );

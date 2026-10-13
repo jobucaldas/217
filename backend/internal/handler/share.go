@@ -79,11 +79,9 @@ func (h *Handler) ExportAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out.NotesReceived = []*model.PartnerNote{}
-	if user.EffectiveRole() == model.RoleOwner {
-		if out.NotesReceived, err = h.store.ListInboxNotes(userID); err != nil {
-			fail("inbox", err)
-			return
-		}
+	if out.NotesReceived, err = h.store.ListReceivedPartnerNotes(userID); err != nil {
+		fail("inbox", err)
+		return
 	}
 	if out.NotesSent, err = h.store.ListSentPartnerNotes(userID); err != nil {
 		fail("sent notes", err)
@@ -93,11 +91,17 @@ func (h *Handler) ExportAccount(w http.ResponseWriter, r *http.Request) {
 		fail("reminder", err)
 		return
 	}
-	if user.EffectiveRole() == model.RolePartner {
-		if out.PartnerAlerts, err = h.store.GetPartnerAlerts(userID); err != nil {
-			fail("partner alerts", err)
-			return
-		}
+	if out.PartnerAlerts, err = h.store.GetPartnerAlerts(userID); err != nil {
+		fail("partner alerts", err)
+		return
+	}
+	if out.Shares, err = h.store.ListAccountShares(userID); err != nil {
+		fail("shares", err)
+		return
+	}
+	if out.PushSubscriptions, err = h.store.ListAccountSubscriptions(userID); err != nil {
+		fail("subscriptions", err)
+		return
 	}
 	w.Header().Set("Content-Disposition", `attachment; filename="217-data-`+out.ExportedAt.Format("2006-01-02")+`.json"`)
 	writeJSON(w, http.StatusOK, out)

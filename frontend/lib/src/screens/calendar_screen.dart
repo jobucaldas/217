@@ -24,6 +24,7 @@ class CalendarScreen extends StatefulWidget {
     required this.onOpenSettings,
     this.share = const ShareState(status: 'none'),
     this.onShareChanged,
+    this.onConsentRequired,
     this.palette = AppPalette.blue,
     this.showReminderHint = false,
     this.onDismissReminderHint,
@@ -35,6 +36,7 @@ class CalendarScreen extends StatefulWidget {
   final Strings strings;
   final VoidCallback onOpenSettings;
   final ValueChanged<ShareState>? onShareChanged;
+  final VoidCallback? onConsentRequired;
   final AppPalette palette;
 
   /// Bubble pointing at the reminder setting; closes itself after a while.
@@ -162,6 +164,7 @@ class _CalendarScreenState extends State<CalendarScreen>
       });
     } catch (err) {
       if (!mounted) return;
+      if (err is ApiException && err.statusCode == 403 && err.message == 'consent required') { widget.onConsentRequired?.call(); return; }
       setState(() => _error = friendlyError(widget.strings, err));
       return;
     }

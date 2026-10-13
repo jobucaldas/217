@@ -29,6 +29,7 @@ class SettingsPage extends StatefulWidget {
     this.user,
     this.share,
     this.onShareChanged,
+    this.onConsentRequired,
     this.onAccountDeleted,
     this.onLogout,
     this.onRoleChanged,
@@ -48,6 +49,7 @@ class SettingsPage extends StatefulWidget {
   final User? user;
   final ShareState? share;
   final ValueChanged<ShareState>? onShareChanged;
+  final VoidCallback? onConsentRequired;
   final VoidCallback? onAccountDeleted;
   final Future<void> Function()? onLogout;
 

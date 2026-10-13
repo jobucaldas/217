@@ -280,10 +280,14 @@ class Strings {
   // Account
   String get deleteAccount =>
       _t('Delete account', 'Excluir conta', 'Eliminar cuenta');
-  String get deleteAccountWarn => _t(
-        'This permanently deletes your data and login account, and withdraws your consent. This cannot be undone.',
-        'Isso apaga permanentemente seus dados e a conta de login, e revoga seu consentimento. Não dá para desfazer.',
-        'Esto elimina de forma permanente tus datos y tu cuenta, y retira tu consentimiento. No se puede deshacer.',
+  String deleteAccountWarn(bool deletesLogin) => deletesLogin ? _t(
+        'This permanently deletes your data and WorkOS sign-in identity, and withdraws your consent. This cannot be undone.',
+        'Isso apaga permanentemente seus dados e sua identidade de login da WorkOS, e revoga seu consentimento. Não dá para desfazer.',
+        'Esto elimina permanentemente tus datos y tu identidad de inicio de sesión de WorkOS, y retira tu consentimiento. No se puede deshacer.',
+      ) : _t(
+        'This permanently deletes your data on this server and withdraws your consent. Your WorkOS login identity remains. This cannot be undone.',
+        'Isso apaga permanentemente seus dados neste servidor e revoga seu consentimento. Sua identidade de login da WorkOS permanece. Não dá para desfazer.',
+        'Esto elimina permanentemente tus datos en este servidor y retira tu consentimiento. Tu identidad de inicio de sesión de WorkOS permanece. No se puede deshacer.',
       );
   String get deleteAccountConfirm => _t(
         'Delete permanently',
@@ -572,9 +576,9 @@ class Strings {
   String get privacyWhereTitle => _t('Where and who sees it',
       'Onde fica e quem vê', 'Dónde está y quién lo ve');
   String privacyWhereBody(String server) => _t(
-        'On the server $server, run by its operator (the controller). It is encrypted in transit (TLS) and at rest (AES-256). Only you and a partner you invite see your calendar. Sign-in is handled by WorkOS, which receives your email.',
-        'No servidor $server, mantido por quem o opera (o controlador). Fica criptografado em trânsito (TLS) e em repouso (AES-256). Só você e o parceiro que você convidar veem seu calendário. O login é feito pela WorkOS, que recebe seu email.',
-        'En el servidor $server, gestionado por quien lo opera (el responsable). Está cifrado en tránsito (TLS) y en reposo (AES-256). Solo tú y la pareja que invites ven tu calendario. El inicio de sesión lo hace WorkOS, que recibe tu email.',
+        'On the server $server, run by its operator (the controller). It is encrypted in transit (TLS). Calendar entries, notes, names and emails are encrypted at rest with AES-256. Reminder times, alert times and operational timestamps are stored so the app can run and are not sealed. Only you and a partner you invite see your calendar. Sign-in is handled by WorkOS, which receives your email.',
+        'No servidor $server, mantido por quem o opera (o controlador). Fica criptografado em trânsito (TLS). Registros do calendário, notas, nomes e emails são criptografados em repouso com AES-256. Horários de lembretes e alertas e registros operacionais são guardados para o app funcionar e não são selados. Só você e o parceiro que você convidar veem seu calendário. O login é feito pela WorkOS, que recebe seu email.',
+        'En el servidor $server, gestionado por quien lo opera (el responsable). Está cifrado en tránsito (TLS). Las entradas del calendario, notas, nombres y correos están cifrados en reposo con AES-256. Las horas de recordatorios y alertas y las marcas operativas se guardan para que funcione la app y no están selladas. Solo tú y la pareja que invites ven tu calendario. El inicio de sesión lo hace WorkOS, que recibe tu email.',
       );
   String get privacyRightsTitle =>
       _t('Your rights', 'Seus direitos', 'Tus derechos');
