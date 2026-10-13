@@ -402,14 +402,14 @@ class _CalendarScreenState extends State<CalendarScreen>
     final next = _cycle.nextWindow(_today);
     final shortDay = DateFormat.MMMd(locale);
     final String? cycleLine;
-    if (_cycle.note.isNotEmpty) {
-      cycleLine = widget.strings.cycleStageNote(_cycle.note);
-    } else if (next == null) {
+    if (next == null) {
       cycleLine = widget.share.canEditCalendar ? widget.strings.cycleHintOwner : null;
     } else if (inPms) {
       cycleLine = widget.strings.cyclePmsNow(shortDay.format(next.periodStart));
     } else if (todayKind == CycleDayKind.predictedPeriod) {
       cycleLine = widget.strings.cyclePeriodNow;
+    } else if (next.pmsStart.year < 2) {
+      cycleLine = widget.strings.cycleNextNoPms(shortDay.format(next.periodStart));
     } else {
       cycleLine = widget.strings.cycleNext(
         shortDay.format(next.periodStart),
@@ -521,6 +521,23 @@ class _CalendarScreenState extends State<CalendarScreen>
                             color: inPms ? scheme.onSurface : scheme.onSurfaceVariant,
                             fontWeight: inPms ? FontWeight.w600 : null,
                           ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              if (_cycle.note.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
+                  child: Row(
+                    key: const ValueKey('cycle-stage-note'),
+                    children: [
+                      Icon(Icons.info_outline, size: 16, color: scheme.onSurfaceVariant),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          widget.strings.cycleStageNote(_cycle.note),
+                          style: text.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
                         ),
                       ),
                     ],

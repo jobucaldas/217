@@ -458,6 +458,11 @@ class Strings {
         'Próxima menstruação ~$period · TPM a partir de $pms',
         'Próxima regla ~$period · SPM desde $pms',
       );
+  String cycleNextNoPms(String period) => _t(
+        'Next period ~$period',
+        'Próxima menstruação ~$period',
+        'Próxima regla ~$period',
+      );
   String cyclePmsNow(String period) => _t(
         'PMS likely now · period ~$period',
         'Provável TPM agora · menstruação ~$period',

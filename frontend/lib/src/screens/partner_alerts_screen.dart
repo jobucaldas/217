@@ -36,6 +36,7 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
   bool _loading = true;
   bool _saving = false;
   String? _error;
+  bool _pmsSuppressed = false;
   PartnerAlertPreference _pref = const PartnerAlertPreference();
 
   @override
@@ -48,12 +49,21 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
     setState(() {
       _loading = true;
       _error = null;
+      _pmsSuppressed = false;
     });
     try {
       final pref = await widget.api.getPartnerAlerts();
+      CycleInfo? cycle;
+      try {
+        final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+        cycle = await widget.api.getCycle(today);
+      } catch (_) {
+        // Alert preferences remain usable if the calendar cycle is unavailable.
+      }
       if (!mounted) return;
       setState(() {
         _pref = pref;
+        _pmsSuppressed = cycle?.note == 'pms_suppressed_menopause';
         _loading = false;
       });
     } catch (err) {
@@ -210,10 +220,11 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
                     ),
                   ),
                 ),
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: Text(strings.pmsNotCounted, style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
-                ),
+                if (_pmsSuppressed)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Text(strings.pmsNotCounted, style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
+                  ),
                 const SizedBox(height: 16),
                 _alertCard(
                   key: const ValueKey('alert-pms'),

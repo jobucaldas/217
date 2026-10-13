@@ -320,6 +320,11 @@ void main() {
       )));
       await tester.pumpAndSettle();
       expect(find.textContaining('217 counts no PMS'), findsOneWidget);
+      final line = find.byKey(const ValueKey('cycle-line'));
+      expect(line, findsOneWidget);
+      expect(find.textContaining('Next period ~'), findsOneWidget);
+      expect(find.textContaining('0001'), findsNothing);
+      expect(find.byKey(const ValueKey('cycle-stage-note')), findsOneWidget);
       expect(find.byKey(ValueKey('pms-${today.month}-${today.day}')), findsNothing);
     });
 
@@ -337,6 +342,8 @@ void main() {
       )));
       await tester.pumpAndSettle();
       expect(find.textContaining('perimenopause. Cycles can still happen'), findsOneWidget);
+      expect(find.byKey(const ValueKey('cycle-stage-note')), findsOneWidget);
+      expect(find.textContaining('PMS likely now'), findsOneWidget);
       expect(find.byKey(ValueKey('pms-${today.month}-${today.day}')), findsWidgets);
     });
 
@@ -426,6 +433,7 @@ void main() {
       expect(find.text('Pill not logged'), findsOneWidget);
       expect(find.text('09:00'), findsOneWidget);
       expect(find.text('21:00'), findsOneWidget);
+      expect(find.text(_en.pmsNotCounted), findsNothing);
 
       await tester.tap(find.descendant(
         of: find.byKey(const ValueKey('alert-pill')),
@@ -448,6 +456,28 @@ void main() {
           .colorScheme;
       final time = tester.widget<Text>(find.text('09:00'));
       expect(meetsBodyContrast(time.style!.color!, scheme.surface), isTrue);
+    });
+
+    testWidgets('partner alerts explain suppressed PMS only for menopause ($brightness)', (tester) async {
+      await tester.pumpWidget(_app(brightness, PartnerAlertsScreen(
+        key: const ValueKey('menopause-alerts'),
+        api: _CycleApi(cycle: const CycleInfo(note: 'pms_suppressed_menopause')),
+        strings: _en,
+        share: const ShareState(status: 'active', ownerName: 'Her'),
+        reschedule: (_) async => LocalReminderSyncStatus.scheduled,
+      )));
+      await tester.pumpAndSettle();
+      expect(find.text(_en.pmsNotCounted), findsOneWidget);
+
+      await tester.pumpWidget(_app(brightness, PartnerAlertsScreen(
+        key: const ValueKey('perimenopause-alerts'),
+        api: _CycleApi(cycle: const CycleInfo(note: 'pms_counted_perimenopause')),
+        strings: _en,
+        share: const ShareState(status: 'active', ownerName: 'Her'),
+        reschedule: (_) async => LocalReminderSyncStatus.scheduled,
+      )));
+      await tester.pumpAndSettle();
+      expect(find.text(_en.pmsNotCounted), findsNothing);
     });
 
     testWidgets('settings: partner gets Alerts, owner can switch role '
