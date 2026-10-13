@@ -10,11 +10,12 @@ import (
 
 // Simple fixed-window IP rate limiter for auth endpoints.
 type ipRateLimiter struct {
-	mu     sync.Mutex
-	limit  int
-	window time.Duration
-	hits   map[string]int
-	resets map[string]time.Time
+	mu        sync.Mutex
+	limit     int
+	window    time.Duration
+	hits      map[string]int
+	resets    map[string]time.Time
+	nextSweep time.Time
 }
 
 func newIPRateLimiter(limit int, window time.Duration) *ipRateLimiter {
@@ -36,6 +37,16 @@ func (l *ipRateLimiter) allow(key string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := time.Now()
+	// Forget expired windows so one-off addresses do not pile up forever.
+	if now.After(l.nextSweep) {
+		for k, reset := range l.resets {
+			if now.After(reset) {
+				delete(l.resets, k)
+				delete(l.hits, k)
+			}
+		}
+		l.nextSweep = now.Add(l.window)
+	}
 	if reset, ok := l.resets[key]; !ok || now.After(reset) {
 		l.resets[key] = now.Add(l.window)
 		l.hits[key] = 1

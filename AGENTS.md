@@ -16,6 +16,7 @@ Switching role is refused while a calendar is shared. Period days drive cycle/PM
 - Auth: WorkOS AuthKit (PKCE; API key server-side only)
 - Database: PostgreSQL 16 — containerized (Docker Compose; Podman works too)
 - Reverse Proxy: Caddy — Flutter web UI + `/api/*`
+- Crypto: personal data sealed in the API (`backend/internal/fieldcrypt`, AES-256-GCM, `DATA_ENCRYPTION_KEY`) before PostgreSQL; internal hops TLS via the `certs` service (`server -init-tls`)
 
 ## Layout
 - `backend/` — Go API (`Dockerfile`: `dev` stage + production image)
@@ -27,7 +28,7 @@ Switching role is refused while a calendar is shared. Period days drive cycle/PM
 Fully containerized with Docker Compose (Podman works too). DO NOT install project SDKs on the host. No Makefile: everything is a compose service (see the Development section of `README.md`).
 
 ```sh
-docker compose up --build                 # postgres + backend + web (built from local code) at :8787
+docker compose up --build                 # certs + postgres + backend + web (built from local code) at :8787
 docker compose run --rm test-backend      # gofmt/vet/test
 docker compose run --rm test-frontend     # flutter analyze + test
 docker compose run --rm apk               # debug APK
@@ -51,9 +52,9 @@ Android deep-link PKCE:
 └──────┬───────┘                 └─────────┘
        │ /api/* (cookie or Bearer)
        v
-┌──────────────┐   /api/*   ┌──────────┐   SQL   ┌────────────┐
+┌──────────────┐ /api/* TLS ┌──────────┐ SQL TLS ┌────────────┐
 │ Caddy :8787  │ ─────────> │ Go API   │ ──────> │ PostgreSQL │
-└──────────────┘            └──────────┘         └────────────┘
+└──────────────┘            └──────────┘ sealed  └────────────┘
 ```
 
 ## API Endpoints
@@ -77,7 +78,8 @@ Android deep-link PKCE:
 - `GET|PUT /api/partner-alerts` (partner) — `{pms_enabled, pms_time, pill_enabled, pill_time}`
 
 ## Testing expectations
-- Backend: `docker compose run --rm test-backend`
+- Backend: `docker compose run --rm test-backend` (store tests also hit PostgreSQL when `TEST_DATABASE_URL` is set; CI sets it)
+- New personal-data columns are sealed (`internal/store/sealed.go`); `TestSealExistingRowsDropsPlaintext` checks a dump and the raw table files for plaintext
 - Frontend: `docker compose run --rm test-frontend`
 - Web tryout: `docker compose up --build` then open http://localhost:8787/
 - APK: `docker compose run --rm apk`

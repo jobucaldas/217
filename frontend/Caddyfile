@@ -1,9 +1,21 @@
 # 217 web: the Flutter bundle plus the Go API on one origin (cookie AuthKit needs it).
 #
 # SITE_ADDRESS      ":8787" (plain HTTP, the default) or a domain for automatic HTTPS
-# BACKEND_UPSTREAM  where the API listens
+# BACKEND_UPSTREAM  where the API listens; "https://backend:3000" encrypts this hop
+#                   too (the API's CA must be trusted, e.g. SSL_CERT_DIR=/certs)
 {$SITE_ADDRESS::8787} {
     encode gzip
+
+    header {
+        # Browsers only honor HSTS on HTTPS responses, so plain-HTTP tryouts are unaffected.
+        Strict-Transport-Security "max-age=31536000"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "no-referrer"
+        X-Frame-Options "DENY"
+        Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+        Content-Security-Policy "frame-ancestors 'none'; base-uri 'self'; object-src 'none'; form-action 'self'"
+        -Server
+    }
 
     handle /api/* {
         reverse_proxy {$BACKEND_UPSTREAM:backend:3000}

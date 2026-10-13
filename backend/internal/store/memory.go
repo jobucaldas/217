@@ -21,8 +21,6 @@ type memorySession struct {
 	UserID    string
 	CreatedAt time.Time
 	ExpiresAt time.Time
-	UserAgent string
-	IPAddress string
 }
 
 type memoryOAuthAttempt struct {
@@ -508,7 +506,7 @@ func (s *MemoryStore) FinishReminderDelivery(subscriptionID string, reminderDate
 	return nil
 }
 
-func (s *MemoryStore) CreateSession(userID, sessionID string, expiresAt time.Time, userAgent, ip string) error {
+func (s *MemoryStore) CreateSession(userID, sessionID string, expiresAt time.Time) error {
 	hash := hashString(sessionID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -517,7 +515,7 @@ func (s *MemoryStore) CreateSession(userID, sessionID string, expiresAt time.Tim
 			delete(s.sessions, key)
 		}
 	}
-	s.sessions[hash] = memorySession{UserID: userID, CreatedAt: time.Now().UTC(), ExpiresAt: expiresAt, UserAgent: userAgent, IPAddress: ip}
+	s.sessions[hash] = memorySession{UserID: userID, CreatedAt: time.Now().UTC(), ExpiresAt: expiresAt}
 	return nil
 }
 

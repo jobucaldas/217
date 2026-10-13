@@ -16,10 +16,11 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/server ./cmd/server
 
 FROM docker.io/library/alpine:3.20
+# Its own uid (not the web image's 65532), so only the API can read its TLS key.
 RUN apk add --no-cache ca-certificates \
-	&& adduser -D -H -u 65532 -g nonroot nonroot
+	&& adduser -D -H -u 10001 -g api api
 COPY --from=build /out/server /usr/local/bin/server
-USER 65532:65532
+USER 10001:10001
 EXPOSE 3000
 ENTRYPOINT ["/usr/local/bin/server"]
 CMD ["-addr", ":3000"]

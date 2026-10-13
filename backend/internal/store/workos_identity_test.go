@@ -1,56 +1,16 @@
 package store
 
 import (
-	"net/url"
-	"os"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"217/backend/db"
 )
 
 // Both stores must enforce the same ownership boundary, including nonce replay.
 func TestWorkOSIdentityStoreContract(t *testing.T) {
 	t.Run("memory", func(t *testing.T) { testWorkOSIdentityStore(t, NewMemoryStore()) })
-	t.Run("postgres", func(t *testing.T) {
-		dsn := os.Getenv("TEST_DATABASE_URL")
-		if dsn == "" {
-			t.Skip("set TEST_DATABASE_URL to a disposable PostgreSQL database")
-		}
-		admin, err := NewPGStore(dsn)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer admin.Close()
-		schema := "test_workos_" + strings.ReplaceAll(generateID(), "-", "")
-		if _, err := admin.db.Exec(`CREATE SCHEMA "` + schema + `"`); err != nil {
-			t.Fatal(err)
-		}
-		defer func() {
-			if _, err := admin.db.Exec(`DROP SCHEMA "` + schema + `" CASCADE`); err != nil {
-				t.Error(err)
-			}
-		}()
-		u, err := url.Parse(dsn)
-		if err != nil {
-			t.Fatal(err)
-		}
-		q := u.Query()
-		q.Set("search_path", schema)
-		u.RawQuery = q.Encode()
-		s, err := NewPGStore(u.String())
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer s.Close()
-		if err := db.Migrate(s.db); err != nil {
-			t.Fatal(err)
-		}
-		testWorkOSIdentityStore(t, s)
-	})
+	t.Run("postgres", func(t *testing.T) { testWorkOSIdentityStore(t, pgTestStore(t)) })
 }
 
 func testWorkOSIdentityStore(t *testing.T, s Store) {

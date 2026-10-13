@@ -12,13 +12,33 @@ import (
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
 
-func Migrate(db *sql.DB) error {
+// Step is a migration written in Go, for changes SQL cannot make on its own
+// (sealing existing rows needs the application's encryption key). Tx runs in
+// the migration's transaction; NoTx runs outside one, for statements such as
+// VACUUM, and must be safe to repeat if interrupted.
+type Step struct {
+	Tx   func(tx *sql.Tx) error
+	NoTx func(db *sql.DB) error
+}
+
+// goSteps are the Go-coded migrations, ordered with the SQL files by name.
+// Callers supply their implementations to Migrate.
+var goSteps = []string{"018_seal_existing_rows", "019_rewrite_sealed_tables"}
+
+// Migrate applies every pending migration in name order.
+func Migrate(db *sql.DB, steps map[string]Step) error {
+	return MigrateBefore(db, steps, "")
+}
+
+// MigrateBefore applies pending migrations whose name sorts before stop
+// (every migration when stop is empty). Tests use it to seed an older schema.
+func MigrateBefore(db *sql.DB, steps map[string]Step, stop string) error {
 	files, err := migrationsFS.ReadDir("migrations")
 	if err != nil {
 		return fmt.Errorf("reading migrations dir: %w", err)
 	}
 
-	var names []string
+	names := append([]string{}, goSteps...)
 	for _, f := range files {
 		if !f.IsDir() && strings.HasSuffix(f.Name(), ".sql") {
 			names = append(names, f.Name())
@@ -34,6 +54,9 @@ func Migrate(db *sql.DB) error {
 	}
 
 	for _, name := range names {
+		if stop != "" && name >= stop {
+			break
+		}
 		var count int
 		err := db.QueryRow("SELECT COUNT(*) FROM schema_migrations WHERE version = $1", name).Scan(&count)
 		if err != nil {
@@ -43,17 +66,34 @@ func Migrate(db *sql.DB) error {
 			continue
 		}
 
-		content, err := migrationsFS.ReadFile("migrations/" + name)
-		if err != nil {
-			return fmt.Errorf("reading %s: %w", name, err)
+		var step Step
+		if strings.HasSuffix(name, ".sql") {
+			content, err := migrationsFS.ReadFile("migrations/" + name)
+			if err != nil {
+				return fmt.Errorf("reading %s: %w", name, err)
+			}
+			step.Tx = func(tx *sql.Tx) error {
+				_, err := tx.Exec(string(content))
+				return err
+			}
+		} else if step = steps[name]; step.Tx == nil && step.NoTx == nil {
+			return fmt.Errorf("migration %s needs the data encryption key", name)
 		}
 
 		log.Printf("applying migration: %s", name)
+		if step.NoTx != nil {
+			if err := step.NoTx(db); err != nil {
+				return fmt.Errorf("applying %s: %w", name, err)
+			}
+		}
+		if step.Tx == nil {
+			step.Tx = func(*sql.Tx) error { return nil }
+		}
 		tx, err := db.Begin()
 		if err != nil {
 			return fmt.Errorf("beginning %s: %w", name, err)
 		}
-		if _, err = tx.Exec(string(content)); err != nil {
+		if err = step.Tx(tx); err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("applying %s: %w", name, err)
 		}
