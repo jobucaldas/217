@@ -322,21 +322,16 @@ func (s *PGStore) checkKey() error {
 
 // reseal rewrites values sealed with a previous key under the primary key,
 // recomputing their blind indexes, so the previous key can then be dropped.
+// Each row is swapped only if it still holds the value read (no long
+// transaction, no locks on rows that need nothing): a row another instance
+// rewrote meanwhile keeps that newer value, and the next start reseals it.
 func (s *PGStore) reseal() error {
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-
 	type sealedRow struct {
 		id, a, b string
 		x, y     []byte
 	}
-	// Hold row locks from collection through commit so concurrent writes cannot
-	// be replaced by stale payloads. Stable ordering also serializes rotations.
-	collect := func(query string, scan func(*sql.Rows, *sealedRow) error) ([]sealedRow, error) {
-		rows, err := tx.Query(query + ` ORDER BY id FOR UPDATE`)
+	stale := func(query string, scan func(*sql.Rows, *sealedRow) error) ([]sealedRow, error) {
+		rows, err := s.db.Query(query)
 		if err != nil {
 			return nil, err
 		}
@@ -354,8 +349,17 @@ func (s *PGStore) reseal() error {
 		return out, rows.Err()
 	}
 	count := 0
+	swap := func(query string, args ...any) error {
+		res, err := s.db.Exec(query, args...)
+		if err != nil {
+			return err
+		}
+		n, _ := res.RowsAffected()
+		count += int(n)
+		return nil
+	}
 
-	users, err := collect(`SELECT id, email_sealed, name_sealed FROM users`,
+	users, err := stale(`SELECT id, email_sealed, name_sealed FROM users`,
 		func(rs *sql.Rows, r *sealedRow) error { return rs.Scan(&r.id, &r.x, &r.y) })
 	if err != nil {
 		return fmt.Errorf("reading users: %w", err)
@@ -365,14 +369,14 @@ func (s *PGStore) reseal() error {
 		if err := s.openUser(u, r.x, r.y); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(`UPDATE users SET email_sealed = $2, name_sealed = $3, email_index = $4 WHERE id = $1`,
-			r.id, s.kr.SealString(u.Email, userEmailCtx(r.id)), s.kr.SealString(u.Name, userNameCtx(r.id)), emailIndex(s.kr, u.Email)); err != nil {
+		if err := swap(`UPDATE users SET email_sealed = $2, name_sealed = $3, email_index = $4
+			WHERE id = $1 AND email_sealed = $5 AND name_sealed = $6`,
+			r.id, s.kr.SealString(u.Email, userEmailCtx(r.id)), s.kr.SealString(u.Name, userNameCtx(r.id)), emailIndex(s.kr, u.Email), r.x, r.y); err != nil {
 			return fmt.Errorf("resealing user: %w", err)
 		}
 	}
-	count += len(users)
 
-	entries, err := collect(`SELECT id, user_id, to_char(date, 'YYYY-MM-DD'), sealed FROM entries`,
+	entries, err := stale(`SELECT id, user_id, to_char(date, 'YYYY-MM-DD'), sealed FROM entries`,
 		func(rs *sql.Rows, r *sealedRow) error { return rs.Scan(&r.id, &r.a, &r.b, &r.x) })
 	if err != nil {
 		return fmt.Errorf("reading entries: %w", err)
@@ -382,13 +386,12 @@ func (s *PGStore) reseal() error {
 		if err != nil {
 			return fmt.Errorf("opening entry %s: %w", r.id, err)
 		}
-		if _, err := tx.Exec(`UPDATE entries SET sealed = $2 WHERE id = $1`, r.id, s.kr.Seal(plain, entryCtx(r.a, r.b))); err != nil {
+		if err := swap(`UPDATE entries SET sealed = $2 WHERE id = $1 AND sealed = $3`, r.id, s.kr.Seal(plain, entryCtx(r.a, r.b)), r.x); err != nil {
 			return fmt.Errorf("resealing entry: %w", err)
 		}
 	}
-	count += len(entries)
 
-	notes, err := collect(`SELECT id, owner_id, partner_id, body_sealed FROM partner_notes`,
+	notes, err := stale(`SELECT id, owner_id, partner_id, body_sealed FROM partner_notes`,
 		func(rs *sql.Rows, r *sealedRow) error { return rs.Scan(&r.id, &r.a, &r.b, &r.x) })
 	if err != nil {
 		return fmt.Errorf("reading partner notes: %w", err)
@@ -399,13 +402,12 @@ func (s *PGStore) reseal() error {
 		if err != nil {
 			return fmt.Errorf("opening partner note %s: %w", r.id, err)
 		}
-		if _, err := tx.Exec(`UPDATE partner_notes SET body_sealed = $2 WHERE id = $1`, r.id, s.kr.Seal(plain, ctx)); err != nil {
+		if err := swap(`UPDATE partner_notes SET body_sealed = $2 WHERE id = $1 AND body_sealed = $3`, r.id, s.kr.Seal(plain, ctx), r.x); err != nil {
 			return fmt.Errorf("resealing partner note: %w", err)
 		}
 	}
-	count += len(notes)
 
-	shares, err := collect(`SELECT id, owner_id, invite_sealed FROM calendar_shares`,
+	shares, err := stale(`SELECT id, owner_id, invite_sealed FROM calendar_shares`,
 		func(rs *sql.Rows, r *sealedRow) error { return rs.Scan(&r.id, &r.a, &r.x) })
 	if err != nil {
 		return fmt.Errorf("reading shares: %w", err)
@@ -416,14 +418,13 @@ func (s *PGStore) reseal() error {
 		if err != nil {
 			return fmt.Errorf("opening share %s: %w", r.id, err)
 		}
-		if _, err := tx.Exec(`UPDATE calendar_shares SET invite_sealed = $2, invite_index = $3 WHERE id = $1`,
-			r.id, s.kr.SealString(code, ctx), inviteIndex(s.kr, code)); err != nil {
+		if err := swap(`UPDATE calendar_shares SET invite_sealed = $2, invite_index = $3 WHERE id = $1 AND invite_sealed = $4`,
+			r.id, s.kr.SealString(code, ctx), inviteIndex(s.kr, code), r.x); err != nil {
 			return fmt.Errorf("resealing share: %w", err)
 		}
 	}
-	count += len(shares)
 
-	subs, err := collect(`SELECT id, user_id, sealed FROM push_subscriptions`,
+	subs, err := stale(`SELECT id, user_id, sealed FROM push_subscriptions`,
 		func(rs *sql.Rows, r *sealedRow) error { return rs.Scan(&r.id, &r.a, &r.x) })
 	if err != nil {
 		return fmt.Errorf("reading push subscriptions: %w", err)
@@ -434,20 +435,24 @@ func (s *PGStore) reseal() error {
 		if err := openJSON(s.kr, r.x, ctx, &p); err != nil {
 			return fmt.Errorf("opening push subscription %s: %w", r.id, err)
 		}
-		if _, err := tx.Exec(`UPDATE push_subscriptions SET sealed = $2, endpoint_index = $3 WHERE id = $1`,
-			r.id, sealJSON(s.kr, p, ctx), endpointIndex(s.kr, p.Endpoint)); err != nil {
+		if err := swap(`UPDATE push_subscriptions SET sealed = $2, endpoint_index = $3 WHERE id = $1 AND sealed = $4`,
+			r.id, sealJSON(s.kr, p, ctx), endpointIndex(s.kr, p.Endpoint), r.x); err != nil {
 			return fmt.Errorf("resealing push subscription: %w", err)
 		}
 	}
-	count += len(subs)
 
-	// In-flight sign-ins (five minutes at most) just restart.
-	if _, err := tx.Exec(`DELETE FROM oauth_attempts`); err != nil {
-		return fmt.Errorf("clearing oauth attempts: %w", err)
+	// Sign-ins in flight on an old key (five minutes at most) just restart.
+	attempts, err := stale(`SELECT state_hash, sealed FROM oauth_attempts`,
+		func(rs *sql.Rows, r *sealedRow) error { return rs.Scan(&r.id, &r.x) })
+	if err != nil {
+		return fmt.Errorf("reading oauth attempts: %w", err)
 	}
-	if err := tx.Commit(); err != nil {
-		return err
+	for _, r := range attempts {
+		if _, err := s.db.Exec(`DELETE FROM oauth_attempts WHERE state_hash = $1 AND sealed = $2`, r.id, r.x); err != nil {
+			return fmt.Errorf("clearing oauth attempt: %w", err)
+		}
 	}
+
 	if count > 0 {
 		log.Printf("resealed %d rows under the primary data encryption key", count)
 	}
