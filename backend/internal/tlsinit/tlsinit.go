@@ -8,6 +8,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
@@ -142,7 +143,8 @@ func current(dir string, services []Service, now time.Time) bool {
 		if err != nil {
 			return false
 		}
-		if _, err := os.Stat(filepath.Join(dir, svc.Name, "tls.key")); err != nil {
+		// The key must parse and match the certificate, or the service cannot start.
+		if _, err := tls.LoadX509KeyPair(filepath.Join(dir, svc.Name, "tls.crt"), filepath.Join(dir, svc.Name, "tls.key")); err != nil {
 			return false
 		}
 		block, _ := pem.Decode(crtPEM)

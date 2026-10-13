@@ -59,4 +59,15 @@ func TestEnsureIssuesVerifiableCertsOnceAndRenews(t *testing.T) {
 	if issued, err := Ensure(dir, services, extra, now.Add(validity-renewBefore/2)); err != nil || !issued {
 		t.Fatalf("near expiry not renewed: %v %v", issued, err)
 	}
+
+	// A damaged or mismatched key gets the set reissued, not kept.
+	if err := os.WriteFile(filepath.Join(dir, "backend", "tls.key"), []byte("not a key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if issued, err := Ensure(dir, services, extra, now); err != nil || !issued {
+		t.Fatalf("broken key not reissued: %v %v", issued, err)
+	}
+	if _, err := tls.LoadX509KeyPair(filepath.Join(dir, "backend", "tls.crt"), filepath.Join(dir, "backend", "tls.key")); err != nil {
+		t.Fatalf("reissued pair does not load: %v", err)
+	}
 }
