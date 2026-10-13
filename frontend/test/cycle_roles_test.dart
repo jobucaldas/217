@@ -108,6 +108,13 @@ void main() {
     });
   });
 
+  test('cycle forecast copy explains the personal log basis', () {
+    final strings = const Strings(AppLanguage.en);
+    expect(strings.symptomPattern(4, 6), contains('recorded in 4 of your last 6 cycles'));
+    expect(const Strings(AppLanguage.pt).symptomName('headache'), 'Dor de cabeça');
+    expect(const Strings(AppLanguage.es).symptomName('cramps'), 'Cólicos');
+  });
+
   group('partner alert plan', () {
     final now = DateTime(2026, 10, 3, 12);
     final cycle = CycleInfo(predictions: [
@@ -356,7 +363,7 @@ void main() {
 
       expect(find.text('PMS heads-up'), findsOneWidget);
       expect(find.text('Pill not logged'), findsOneWidget);
-      expect(find.text('09:00'), findsOneWidget);
+      expect(find.text('09:00'), findsNWidgets(2));
       expect(find.text('21:00'), findsOneWidget);
 
       await tester.tap(find.descendant(
@@ -378,7 +385,10 @@ void main() {
 
       final scheme = Theme.of(tester.element(find.text('PMS heads-up')))
           .colorScheme;
-      final time = tester.widget<Text>(find.text('09:00'));
+      final time = tester.widget<Text>(find.descendant(
+        of: find.byKey(const ValueKey('alert-symptom')),
+        matching: find.text('09:00'),
+      ));
       expect(meetsBodyContrast(time.style!.color!, scheme.surface), isTrue);
     });
 

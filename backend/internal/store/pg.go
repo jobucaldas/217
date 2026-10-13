@@ -172,7 +172,7 @@ func (s *PGStore) GetEntry(userID, date string) (*model.Entry, error) {
 }
 
 // listEntriesBetween returns the entries dated within [from, to], oldest first.
-func (s *PGStore) listEntriesBetween(userID, from, to string) ([]*model.Entry, error) {
+func (s *PGStore) ListEntriesBetween(userID, from, to string) ([]*model.Entry, error) {
 	rows, err := s.db.Query(
 		`SELECT `+entryColumns+` FROM entries
 		 WHERE user_id = $1 AND date >= $2 AND date <= $3
@@ -202,7 +202,7 @@ func monthBounds(year, month int) (string, string) {
 
 func (s *PGStore) ListEntries(userID string, year, month int) ([]*model.Entry, error) {
 	from, to := monthBounds(year, month)
-	return s.listEntriesBetween(userID, from, to)
+	return s.ListEntriesBetween(userID, from, to)
 }
 
 func (s *PGStore) UpsertEntry(userID, date string, req model.UpsertRequest) (*model.Entry, error) {
@@ -225,7 +225,7 @@ func (s *PGStore) UpsertEntry(userID, date string, req model.UpsertRequest) (*mo
 		return nil, fmt.Errorf("upserting entry: %w", err)
 	}
 	e.Date = formatDate(dateVal)
-	e.Taken, e.Notes, e.Heart, e.Period = req.Taken, req.Notes, req.Heart, req.Period
+	e.Taken, e.Notes, e.Heart, e.Period, e.Symptoms = req.Taken, req.Notes, req.Heart, req.Period, req.Symptoms
 	return e, nil
 }
 

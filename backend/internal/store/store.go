@@ -21,6 +21,7 @@ type Store interface {
 	GetStats(userID string, year, month int) (*model.Stats, error)
 	// ListPeriodDays returns YYYY-MM-DD dates marked as period within [from, to].
 	ListPeriodDays(userID, from, to string) ([]string, error)
+	ListEntriesBetween(userID, from, to string) ([]*model.Entry, error)
 
 	GetReminderPreference(userID string) (*model.ReminderPreference, error)
 	UpsertReminderPreference(userID string, preference model.ReminderPreference) (*model.ReminderPreference, error)
@@ -50,7 +51,7 @@ type Store interface {
 	// SetRole picks owner or partner; switching is refused while a share is live.
 	SetRole(userID, role string) (*model.User, error)
 
-	// Partner notification preferences (PMS heads-up, pill not logged)
+	// Partner notification preferences (PMS, pill not logged, symptom patterns)
 	GetPartnerAlerts(userID string) (*model.PartnerAlertPreference, error)
 	UpsertPartnerAlerts(userID string, pref model.PartnerAlertPreference) (*model.PartnerAlertPreference, error)
 

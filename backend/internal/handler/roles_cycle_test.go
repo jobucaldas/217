@@ -164,6 +164,9 @@ func TestCycleEndpointSharedWithPartner(t *testing.T) {
 	if info.Estimated || info.CycleLength != 28 || len(info.PeriodStarts) != 3 || len(info.Predictions) != 3 {
 		t.Fatalf("unexpected cycle info: %+v", info)
 	}
+	if info.Symptoms == nil {
+		t.Fatal("symptom forecast payload should be an empty array when no patterns qualify")
+	}
 	want := today.AddDate(0, 0, -4+28).Format("2006-01-02")
 	if info.Predictions[0].PeriodStart != want {
 		t.Fatalf("first prediction %s, want %s", info.Predictions[0].PeriodStart, want)

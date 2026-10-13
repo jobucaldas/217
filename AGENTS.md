@@ -6,8 +6,8 @@ Cross-platform application for tracking anticonceptional intake.
 Android-first Flutter app for tracking anticonceptional intake via a calendar UI. Multi-user support with WorkOS AuthKit authentication, dark mode, and English, Português and Español UI (follows the device language; English otherwise).
 
 Roles are picked once after first sign-in (`users.role` is NULL until then):
-- **owner** — takes the pill; logs Taken/Missed, notes, intimacy and period days; creates the invite. Never joins another calendar.
-- **partner** — joins one owner's calendar read-only via invite; gets optional PMS and pill-not-logged alerts (separate toggles + times).
+- **owner** — takes the pill; logs Taken/Missed, notes, intimacy, period days and symptoms; creates the invite. Never joins another calendar.
+- **partner** — joins one owner's calendar read-only via invite; sees logged symptoms and supported patterns and gets optional PMS, pill-not-logged, and symptom-pattern alerts.
 Switching role is refused while a calendar is shared. Period days drive cycle/PMS predictions (`backend/internal/cycle`), drawn on both calendars (dashed amber ring = PMS, pink drop = period, outlined drop = predicted period).
 
 ## Tech Stack
@@ -71,11 +71,12 @@ Android deep-link PKCE:
 - `GET|POST|DELETE /api/entries/{date}` — body `{taken, notes, heart, period}`
 - `GET /api/stats?year=YYYY&month=MM`
 - `GET /api/cycle?today=YYYY-MM-DD` — period starts + next predicted periods/PMS windows
+- `/api/cycle` also includes owner-log symptom patterns with symptom id, date, hit count, and cycles considered.
 
 ### Roles, sharing, alerts (auth required)
 - `PUT /api/account/role` — `{role: owner|partner}`; 409 while shared
 - `POST /api/share/enable|revoke` (owner), `POST /api/share/accept` (unset role or partner)
-- `GET|PUT /api/partner-alerts` (partner) — `{pms_enabled, pms_time, pill_enabled, pill_time}`
+- `GET|PUT /api/partner-alerts` (partner) — `{pms_enabled, pms_time, pill_enabled, pill_time, symptom_enabled, symptom_time}`
 
 ## Testing expectations
 - Backend: `docker compose run --rm test-backend` (store tests also hit PostgreSQL when `TEST_DATABASE_URL` is set; CI sets it)
@@ -88,3 +89,4 @@ Android deep-link PKCE:
 - Live WorkOS sign-in / authenticated calendar not verified in CI
 - Reminder delivery on native Android (previous Web Push/PWA path) not ported
 - Partner alerts are local Android notifications planned from the last sync (app open/resume); no server push, so a pill logged after his last sync can still trigger that day's alert. Web shows the toggles but cannot deliver.
+- Symptom forecasts require at least three separately logged prior cycles and use the owner's own symptom logs around the same cycle day; they are patterns, not diagnoses or guarantees. Android schedules opted-in symptom reminders from the last sync; web displays patterns and toggles without delivering notifications.

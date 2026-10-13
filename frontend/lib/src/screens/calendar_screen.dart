@@ -189,12 +189,13 @@ class _CalendarScreenState extends State<CalendarScreen>
       todayLogged,
       widget.share.isActive,
       for (final w in cycle.predictions) w.pmsStart.toIso8601String(),
+      for (final f in cycle.symptoms) '${f.date.toIso8601String()}-${f.symptom}-${f.hits}',
     ].join('|');
     if (key == _alertSyncKey) return;
     try {
       final pref = await widget.api.getPartnerAlerts();
       // Only touch the OS scheduler once the partner opted in.
-      if (!pref.pmsEnabled && !pref.pillEnabled) return;
+      if (!pref.pmsEnabled && !pref.pillEnabled && !pref.symptomEnabled) return;
       await syncPartnerAlertsFrom(
         strings: widget.strings,
         pref: pref,
@@ -338,6 +339,7 @@ class _CalendarScreenState extends State<CalendarScreen>
         notes: result.notes,
         heart: result.heart,
         period: result.period,
+        symptoms: result.symptoms,
       );
     }
     await _load();
@@ -363,6 +365,7 @@ class _CalendarScreenState extends State<CalendarScreen>
         initialNotes: existing?.notes ?? '',
         initialHeart: existing?.heart ?? false,
         initialPeriod: existing?.period ?? false,
+        initialSymptoms: existing?.symptoms ?? const [],
         hadEntry: existing != null,
         onCommit: (result) {
           _persistDay(key, result).catchError((Object err) {
@@ -524,6 +527,15 @@ class _CalendarScreenState extends State<CalendarScreen>
                     ],
                   ),
                 ),
+              if (_cycle.symptoms.any((f) => DateFormat('yyyy-MM-dd').format(f.date) == _todayKey))
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(widget.strings.symptomLikelyMark, style: text.bodySmall),
+                    for (final forecast in _cycle.symptoms.where((f) => DateFormat('yyyy-MM-dd').format(f.date) == _todayKey))
+                      Text('${widget.strings.symptomName(forecast.symptom)} · ${widget.strings.symptomPattern(forecast.hits, forecast.cycles)}', key: const ValueKey('symptom-pattern-copy'), style: text.bodySmall),
+                  ]),
+                ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
                 child: Wrap(
@@ -554,6 +566,8 @@ class _CalendarScreenState extends State<CalendarScreen>
                       label: widget.strings.legendPms,
                       dashed: true,
                     ),
+                    _LegendDot(color: App217Colors.intimacy(brightness), label: widget.strings.symptomsLegend),
+                    _LegendDot(color: pmsColor, label: widget.strings.symptomLikelyLegend, outlined: true),
                   ],
                 ),
               ),
@@ -821,6 +835,7 @@ class _MonthGrid extends StatelessWidget {
         todayLabel: todayLabel,
         entry: entries[DateFormat('yyyy-MM-dd').format(date)],
         cycleKind: cycle.kindOf(date),
+        cycle: cycle,
         onTap: onDayTap,
         palette: palette,
       );
@@ -886,6 +901,7 @@ class _DayCell extends StatelessWidget {
     required this.onTap,
     required this.palette,
     this.cycleKind = CycleDayKind.none,
+    this.cycle = CycleInfo.empty,
   });
 
   final DateTime day;
@@ -893,6 +909,7 @@ class _DayCell extends StatelessWidget {
   final String todayLabel;
   final Entry? entry;
   final CycleDayKind cycleKind;
+  final CycleInfo cycle;
   final Future<void> Function(DateTime day) onTap;
   final AppPalette palette;
 
@@ -923,6 +940,8 @@ class _DayCell extends StatelessWidget {
     final predictedPeriod =
         !loggedPeriod && cycleKind == CycleDayKind.predictedPeriod;
     final isPms = cycleKind == CycleDayKind.pms;
+    final dateKey = DateFormat('yyyy-MM-dd').format(day);
+    final forecasts = cycle.symptoms.where((f) => DateFormat('yyyy-MM-dd').format(f.date) == dateKey).toList();
     final periodColor = bg == null
         ? App217Colors.period(brightness, palette)
         : onCell;
@@ -977,7 +996,7 @@ class _DayCell extends StatelessWidget {
                       color: bg == null ? scheme.primary : onCell,
                     ),
                   ),
-                if (hasNote || hasHeart || loggedPeriod || predictedPeriod)
+                if (hasNote || hasHeart || loggedPeriod || predictedPeriod || (entry?.symptoms.isNotEmpty ?? false) || forecasts.isNotEmpty)
                   Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -997,12 +1016,16 @@ class _DayCell extends StatelessWidget {
                           size: 11,
                           color: periodColor,
                         ),
+                      if (entry?.symptoms.isNotEmpty ?? false)
+                        Icon(Icons.circle, key: ValueKey('symptom-logged-${day.month}-${day.day}'), size: 8, color: App217Colors.intimacy(brightness)),
+                      if (forecasts.isNotEmpty)
+                        Icon(Icons.circle_outlined, key: ValueKey('symptom-likely-${day.month}-${day.day}'), size: 9, color: App217Colors.pms(brightness, palette)),
                       if ((loggedPeriod || predictedPeriod) &&
                           (hasHeart || hasNote))
                         const SizedBox(width: 2),
                       if (hasHeart)
                         Icon(Icons.favorite, size: 11, color: onCell),
-                      if (hasHeart && hasNote) const SizedBox(width: 2),
+                      if (hasHeart && (hasNote || forecasts.isNotEmpty)) const SizedBox(width: 2),
                       if (hasNote)
                         Icon(Icons.sticky_note_2_outlined,
                             size: 11, color: onCell),
@@ -1066,19 +1089,22 @@ class DayEditResult {
     required this.notes,
     this.heart = false,
     this.period = false,
+    this.symptoms = const [],
   }) : clear = false;
   const DayEditResult.clear()
       : clear = true,
         taken = null,
         notes = '',
         heart = false,
-        period = false;
+        period = false,
+        symptoms = const [];
 
   final bool clear;
   final bool? taken;
   final String notes;
   final bool heart;
   final bool period;
+  final List<String> symptoms;
 }
 
 /// Day mark bottom sheet: status + note affordance aligned with the date.
@@ -1092,6 +1118,7 @@ class DayEditorSheet extends StatefulWidget {
     required this.hadEntry,
     this.initialHeart = false,
     this.initialPeriod = false,
+    this.initialSymptoms = const [],
     this.onCommit,
   });
 
@@ -1101,6 +1128,7 @@ class DayEditorSheet extends StatefulWidget {
   final String initialNotes;
   final bool initialHeart;
   final bool initialPeriod;
+  final List<String> initialSymptoms;
   final bool hadEntry;
 
   /// When set (production calendar), persist immediately — do not rely on the
@@ -1116,7 +1144,14 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
   late String _notes = widget.initialNotes;
   late bool _heart = widget.initialHeart;
   late bool _period = widget.initialPeriod;
+  final Set<String> _symptoms = {};
   late bool _hadEntry = widget.hadEntry;
+
+  @override
+  void initState() {
+    super.initState();
+    _symptoms.addAll(widget.initialSymptoms);
+  }
 
   DayEditResult _saveResult({
     required bool? taken,
@@ -1128,6 +1163,7 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
         notes: notes.trim(),
         heart: heart,
         period: _period,
+        symptoms: _symptoms.toList()..sort(),
       );
 
   /// Heart and period toggles persist at once and keep the sheet open, like
@@ -1135,7 +1171,7 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
   void _persistToggle() {
     final status = _taken ?? widget.initialTaken;
     final DayEditResult result;
-    if (status == null && _notes.trim().isEmpty && !_heart && !_period) {
+    if (status == null && _notes.trim().isEmpty && !_heart && !_period && _symptoms.isEmpty) {
       if (!_hadEntry) return;
       result = const DayEditResult.clear();
       _hadEntry = false;
@@ -1159,6 +1195,11 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
 
   void _togglePeriod() {
     setState(() => _period = !_period);
+    _persistToggle();
+  }
+
+  void _toggleSymptom(String symptom) {
+    setState(() { if (!_symptoms.add(symptom)) _symptoms.remove(symptom); });
     _persistToggle();
   }
 
@@ -1238,7 +1279,7 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
 
     // Empty note + no heart + no status → clear any existing note-only entry.
     // Keep the day sheet open — only the note dialog closed.
-    if (status == null && notes.trim().isEmpty && !heart && !_period) {
+    if (status == null && notes.trim().isEmpty && !heart && !_period && _symptoms.isEmpty) {
       if (_hadEntry) {
         _hadEntry = false;
         final clear = const DayEditResult.clear();
@@ -1331,6 +1372,13 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
               ),
             ],
           ),
+          const SizedBox(height: 14),
+          Align(alignment: Alignment.centerLeft, child: Text(widget.strings.symptomsTitle, style: Theme.of(context).textTheme.titleSmall)),
+          const SizedBox(height: 6),
+          Wrap(spacing: 8, runSpacing: 4, children: [
+            for (final id in const ['cramps','headache','bloating','breast_tenderness','mood_change','fatigue'])
+              FilterChip(label: Text(widget.strings.symptomName(id)), selected: _symptoms.contains(id), onSelected: (_) => _toggleSymptom(id), key: ValueKey('symptom-$id')),
+          ]),
           const SizedBox(height: 14),
           SegmentedButton<bool>(
             emptySelectionAllowed: true,

@@ -27,6 +27,7 @@ class _FakeCalendarApi extends ApiClient {
     String notes = '',
     bool heart = false,
     bool period = false,
+    List<String> symptoms = const [],
   }) async =>
       Entry(
         date: date,
@@ -34,6 +35,7 @@ class _FakeCalendarApi extends ApiClient {
         notes: notes,
         heart: heart,
         period: period,
+        symptoms: symptoms,
       );
 
   @override

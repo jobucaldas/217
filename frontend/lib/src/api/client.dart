@@ -403,11 +403,12 @@ class ApiClient {
     String notes = '',
     bool heart = false,
     bool period = false,
+    List<String> symptoms = const [],
   }) async {
     final response = await _send(
       'POST',
       _uri('/api/entries/$date'),
-      body: {'taken': taken, 'notes': notes, 'heart': heart, 'period': period},
+      body: {'taken': taken, 'notes': notes, 'heart': heart, 'period': period, 'symptoms': symptoms},
     );
     if (response.statusCode != 200) {
       throw ApiException('upsert entry', response);

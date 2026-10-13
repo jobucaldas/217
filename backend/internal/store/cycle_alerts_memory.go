@@ -7,6 +7,21 @@ import (
 	"217/backend/internal/model"
 )
 
+func (s *MemoryStore) ListEntriesBetween(userID, from, to string) ([]*model.Entry, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var out []*model.Entry
+	for k, e := range s.entries {
+		if strings.HasPrefix(k, userID+":") && e.Date >= from && e.Date <= to {
+			copyEntry := *e
+			copyEntry.Symptoms = append([]string(nil), e.Symptoms...)
+			out = append(out, &copyEntry)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Date < out[j].Date })
+	return out, nil
+}
+
 func (s *MemoryStore) ListPeriodDays(userID, from, to string) ([]string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -30,6 +45,8 @@ func (s *MemoryStore) GetPartnerAlerts(userID string) (*model.PartnerAlertPrefer
 	pref, ok := s.partnerAlerts[userID]
 	if !ok {
 		pref = model.DefaultPartnerAlertPreference()
+	} else if pref.SymptomTime == "" {
+		pref.SymptomTime = model.DefaultSymptomTime
 	}
 	return &pref, nil
 }

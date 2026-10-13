@@ -52,10 +52,11 @@ func endpointIndex(kr *fieldcrypt.Keyring, endpoint string) []byte {
 
 // entryPayload is the sealed part of an entry: everything but who and when.
 type entryPayload struct {
-	Taken  *bool  `json:"taken"`
-	Notes  string `json:"notes"`
-	Heart  bool   `json:"heart"`
-	Period bool   `json:"period"`
+	Taken    *bool    `json:"taken"`
+	Notes    string   `json:"notes"`
+	Heart    bool     `json:"heart"`
+	Period   bool     `json:"period"`
+	Symptoms []string `json:"symptoms,omitempty"`
 }
 
 type pushPayload struct {
@@ -86,7 +87,7 @@ func openJSON(kr *fieldcrypt.Keyring, sealed []byte, ctx string, v any) error {
 }
 
 func (s *PGStore) sealEntry(userID, date string, req model.UpsertRequest) []byte {
-	return sealJSON(s.kr, entryPayload{Taken: req.Taken, Notes: req.Notes, Heart: req.Heart, Period: req.Period}, entryCtx(userID, date))
+	return sealJSON(s.kr, entryPayload{Taken: req.Taken, Notes: req.Notes, Heart: req.Heart, Period: req.Period, Symptoms: req.Symptoms}, entryCtx(userID, date))
 }
 
 func (s *PGStore) openEntry(e *model.Entry, sealed []byte) error {
@@ -94,7 +95,7 @@ func (s *PGStore) openEntry(e *model.Entry, sealed []byte) error {
 	if err := openJSON(s.kr, sealed, entryCtx(e.UserID, e.Date), &p); err != nil {
 		return fmt.Errorf("opening entry %s: %w", e.ID, err)
 	}
-	e.Taken, e.Notes, e.Heart, e.Period = p.Taken, p.Notes, p.Heart, p.Period
+	e.Taken, e.Notes, e.Heart, e.Period, e.Symptoms = p.Taken, p.Notes, p.Heart, p.Period, p.Symptoms
 	return nil
 }
 

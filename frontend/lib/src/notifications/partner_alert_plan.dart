@@ -19,6 +19,7 @@ class PlannedAlert {
 /// Notification ids reserved for partner alerts (daily reminder uses 21701).
 const partnerPmsIdBase = 21710;
 const partnerPillIdBase = 21720;
+const partnerSymptomIdBase = 21730;
 const partnerAlertIdCount = 10;
 
 /// How many days ahead pill alerts are queued between syncs.
@@ -39,8 +40,23 @@ List<PlannedAlert> planPartnerAlerts({
   required String Function(CycleWindow window) pmsBody,
   required String pillTitle,
   required String pillBody,
+  String Function(SymptomForecast forecast)? symptomTitle,
+  String Function(SymptomForecast forecast)? symptomBody,
 }) {
   final out = <PlannedAlert>[];
+  if (pref.symptomEnabled && symptomTitle != null && symptomBody != null) {
+    final t = parseReminderTime(pref.symptomTime);
+    var i = 0;
+    final forecasts = cycle.symptoms.where((f) => f.date.isAfter(DateTime(now.year, now.month, now.day))).toList()
+      ..sort((a, b) => a.date.compareTo(b.date));
+    for (final f in forecasts) {
+      if (i >= partnerAlertIdCount) break;
+      final when = DateTime(f.date.year, f.date.month, f.date.day, t.hour, t.minute);
+      if (!when.isAfter(now)) continue;
+      out.add(PlannedAlert(id: partnerSymptomIdBase + i, when: when, title: symptomTitle(f), body: symptomBody(f)));
+      i++;
+    }
+  }
   if (pref.pmsEnabled) {
     final t = parseReminderTime(pref.pmsTime);
     var i = 0;

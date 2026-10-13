@@ -1,6 +1,7 @@
 package cycle
 
 import (
+	"217/backend/internal/model"
 	"testing"
 	"time"
 )
@@ -81,6 +82,46 @@ func TestPredictMergesSmallGapsAndIgnoresOutliers(t *testing.T) {
 	info := Predict(days, day("2026-09-10"))
 	if len(info.PeriodStarts) != 2 || info.CycleLength != 28 || info.PeriodLength != 5 {
 		t.Fatalf("unexpected: %+v", info)
+	}
+}
+
+func TestForecastSymptomsThresholdWindowAndInsufficientHistory(t *testing.T) {
+	starts := []string{"2026-01-01", "2026-01-29", "2026-02-26", "2026-03-26", "2026-04-23", "2026-05-21"}
+	var entries []*model.Entry
+	for _, start := range starts[:5] {
+		entries = append(entries, &model.Entry{Date: day(start).AddDate(0, 0, 10).Format(layout), Symptoms: []string{"headache"}})
+	}
+	entries = append(entries, &model.Entry{Date: "2026-01-06", Symptoms: []string{"cramps"}})
+	entries = append(entries, &model.Entry{Date: "2026-02-03", Symptoms: []string{"cramps"}})
+	entries = append(entries, &model.Entry{Date: "2026-03-03", Symptoms: []string{"cramps"}})
+	got := ForecastSymptoms(entries, starts, []string{"2026-05-27"}, 28)
+	if len(got) != 1 || got[0].Symptom != "cramps" || got[0].Hits != 3 || got[0].Cycles != 5 {
+		t.Fatalf("expected cycle-day 7 pattern at threshold, got %+v", got)
+	}
+	if got := ForecastSymptoms(entries[:2], starts, []string{"2026-05-27"}, 28); len(got) != 0 {
+		t.Fatalf("insufficient symptom history should be empty: %+v", got)
+	}
+}
+
+func TestForecastSymptomsDoesNotPredictBelowHalf(t *testing.T) {
+	starts := []string{"2026-01-01", "2026-01-29", "2026-02-26", "2026-03-26", "2026-04-23", "2026-05-21"}
+	entries := []*model.Entry{}
+	for _, idx := range []int{0, 1} {
+		entries = append(entries, &model.Entry{Date: day(starts[idx]).AddDate(0, 0, 5).Format(layout), Symptoms: []string{"fatigue"}})
+	}
+	if got := ForecastSymptoms(entries, starts, []string{"2026-05-27"}, 28); len(got) != 0 {
+		t.Fatalf("2 of 5 cycles must not predict: %+v", got)
+	}
+}
+
+func TestForecastSymptomsRequiresThreeCyclesWithAnySymptoms(t *testing.T) {
+	starts := []string{"2026-01-01", "2026-01-29", "2026-02-26", "2026-03-26", "2026-04-23"}
+	entries := []*model.Entry{
+		{Date: "2026-01-07", Symptoms: []string{"cramps"}},
+		{Date: "2026-02-04", Symptoms: []string{"cramps"}},
+	}
+	if got := ForecastSymptoms(entries, starts, []string{"2026-04-30"}, 28); len(got) != 0 {
+		t.Fatalf("fewer than three symptom-covered cycles must not predict: %+v", got)
 	}
 }
 
