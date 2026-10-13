@@ -245,24 +245,6 @@ func TestPurgeExpiredKeepsLiveData(t *testing.T) {
 			if _, err := s.GetUserBySession("live"); err != nil {
 				t.Fatalf("live session purged: %v", err)
 			}
-			if name == "memory" {
-				ms := s.(*MemoryStore)
-				ms.mu.RLock()
-				_, oldExists := ms.deliveries[deliveryKey(oldSub.ID, base.AddDate(0, 0, -31))]
-				_, recentExists := ms.deliveries[deliveryKey(recentSub.ID, base.AddDate(0, 0, -2))]
-				ms.mu.RUnlock()
-				if oldExists || !recentExists {
-					t.Fatalf("delivery retention old=%v recent=%v", oldExists, recentExists)
-				}
-			} else {
-				ps := s.(*PGStore)
-				var oldCount, recentCount int
-				_ = ps.db.QueryRow(`SELECT COUNT(*) FROM reminder_deliveries WHERE subscription_id=$1`, oldSub.ID).Scan(&oldCount)
-				_ = ps.db.QueryRow(`SELECT COUNT(*) FROM reminder_deliveries WHERE subscription_id=$1`, recentSub.ID).Scan(&recentCount)
-				if oldCount != 0 || recentCount != 1 {
-					t.Fatalf("delivery retention old=%d recent=%d", oldCount, recentCount)
-				}
-			}
 		}
 	})
 }

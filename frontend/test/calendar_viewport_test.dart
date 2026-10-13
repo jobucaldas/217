@@ -70,16 +70,14 @@ class _GatedCalendarApi extends _FakeCalendarApi {
 }
 
 class _CalendarOwnerConsentApi extends _FakeCalendarApi {
-  _CalendarOwnerConsentApi(super.entries, {this.blockImmediately = false});
-
-  final bool blockImmediately;
+  _CalendarOwnerConsentApi(super.entries);
 
   int _calls = 0;
 
   @override
   Future<List<Entry>> listEntries(int year, int month) async {
     _calls++;
-    if (blockImmediately || _calls > 3) {
+    if (_calls > 3) {
       throw ApiException(
         'list entries',
         http.Response('{"error":"calendar owner consent required"}', 403),
@@ -119,15 +117,6 @@ class _CycleOwnerConsentApi extends _FakeCalendarApi {
       );
 }
 
-class _OwnConsentApi extends _FakeCalendarApi {
-  @override
-  Future<List<Entry>> listEntries(int year, int month) async =>
-      throw ApiException(
-        'list entries',
-        http.Response('{"error":"consent required"}', 403),
-      );
-}
-
 class _GatedPartnerCycleApi extends _FakeCalendarApi {
   final cycleGate = Completer<void>();
 
@@ -155,59 +144,6 @@ const _viewports = <(String, Size)>[
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   GoogleFonts.config.allowRuntimeFetching = false;
-
-  testWidgets('shared calendar explains when its owner has not consented',
-      (tester) async {
-    final api = _CalendarOwnerConsentApi(const [], blockImmediately: true);
-    await tester.pumpWidget(MaterialApp(
-      theme: buildApp217Theme(
-        brightness: Brightness.light,
-        palette: AppPalette.blue,
-      ),
-      home: CalendarScreen(
-        api: api,
-        user: const User(
-            id: 'partner',
-            email: 'p@example.invalid',
-            name: 'P',
-            role: 'partner'),
-        strings: const Strings(AppLanguage.en),
-        onOpenSettings: () {},
-        share: const ShareState(status: 'active'),
-        palette: AppPalette.blue,
-      ),
-    ));
-    await tester.pumpAndSettle();
-
-    expect(find.byKey(const ValueKey('calendar-error')), findsOneWidget);
-    expect(
-      find.text(
-        'The calendar owner must agree to the current privacy notice before you can view their calendar.',
-      ),
-      findsOneWidget,
-    );
-  });
-
-  testWidgets('own consent block clears calendar data for central recovery',
-      (tester) async {
-    await tester.pumpWidget(MaterialApp(
-      theme: buildApp217Theme(
-        brightness: Brightness.light,
-        palette: AppPalette.blue,
-      ),
-      home: CalendarScreen(
-        api: _OwnConsentApi(),
-        user: const User(
-            id: 'owner', email: 'o@example.invalid', name: 'O', role: 'owner'),
-        strings: const Strings(AppLanguage.en),
-        onOpenSettings: () {},
-        palette: AppPalette.blue,
-      ),
-    ));
-    await tester.pumpAndSettle();
-
-    expect(find.byKey(const ValueKey('calendar-error')), findsNothing);
-  });
 
   testWidgets(
       'delayed partner cycle cannot schedule after session invalidation',

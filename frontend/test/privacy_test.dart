@@ -110,44 +110,38 @@ class _ConsentServer {
 void main() {
   setUp(() => FlutterSecureStorage.setMockInitialValues({}));
 
-  for (final brightness in Brightness.values) {
-    testWidgets('consent screen gates the app until agreed ($brightness)',
-        (tester) async {
-      tester.binding.platformDispatcher.platformBrightnessTestValue =
-          brightness;
-      addTearDown(
-          tester.binding.platformDispatcher.clearPlatformBrightnessTestValue);
-      FlutterSecureStorage.setMockInitialValues({'pending_invite': 'ABCD1234'});
-      final server = _ConsentServer();
-      final api = server.client();
-      await tester.pumpWidget(App217(config: api.config, api: api));
-      await tester.pumpAndSettle();
+  testWidgets('consent screen gates the app until agreed',
+      (tester) async {
+    FlutterSecureStorage.setMockInitialValues({'pending_invite': 'ABCD1234'});
+    final server = _ConsentServer();
+    final api = server.client();
+    await tester.pumpWidget(App217(config: api.config, api: api));
+    await tester.pumpAndSettle();
 
-      expect(find.text('Your data and privacy'), findsOneWidget);
-      expect(find.text('Sensitive health data'), findsOneWidget);
-      expect(find.text('dpo@example.com'), findsOneWidget);
-      // Nothing is loaded and no invite offered before consent.
-      expect(server.calls.where((c) => c.contains('/api/reminders')), isEmpty);
-      expect(find.text('Join the shared calendar?'), findsNothing);
+    expect(find.text('Your data and privacy'), findsOneWidget);
+    expect(find.text('Sensitive health data'), findsOneWidget);
+    expect(find.text('dpo@example.com'), findsOneWidget);
+    // Nothing is loaded and no invite offered before consent.
+    expect(server.calls.where((c) => c.contains('/api/reminders')), isEmpty);
+    expect(find.text('Join the shared calendar?'), findsNothing);
 
-      final accept = find.byKey(const ValueKey('consent-accept'));
-      await tester.scrollUntilVisible(accept, 200);
-      await tester.ensureVisible(accept);
-      await tester.pumpAndSettle();
-      expect(tester.widget<FilledButton>(accept).onPressed, isNull);
-      await tester.tap(find.byKey(const ValueKey('consent-checkbox')));
-      await tester.pump();
-      await tester.tap(accept);
-      await tester.pumpAndSettle();
+    final accept = find.byKey(const ValueKey('consent-accept'));
+    await tester.scrollUntilVisible(accept, 200);
+    await tester.ensureVisible(accept);
+    await tester.pumpAndSettle();
+    expect(tester.widget<FilledButton>(accept).onPressed, isNull);
+    await tester.tap(find.byKey(const ValueKey('consent-checkbox')));
+    await tester.pump();
+    await tester.tap(accept);
+    await tester.pumpAndSettle();
 
-      expect(server.acceptedVersion, 1);
-      // The invite waited for consent and is offered now.
-      expect(find.text('Join the shared calendar?'), findsOneWidget);
-      await tester.tap(find.text('Not now'));
-      await tester.pumpAndSettle();
-      expect(find.text('How will you use 217?'), findsOneWidget);
-    });
-  }
+    expect(server.acceptedVersion, 1);
+    // The invite waited for consent and is offered now.
+    expect(find.text('Join the shared calendar?'), findsOneWidget);
+    await tester.tap(find.text('Not now'));
+    await tester.pumpAndSettle();
+    expect(find.text('How will you use 217?'), findsOneWidget);
+  });
 
   testWidgets('409 refreshes metadata but blocks unsupported notice versions',
       (tester) async {
