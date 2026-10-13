@@ -9,7 +9,7 @@ import '../errors.dart';
 import '../i18n.dart';
 import '../models.dart';
 import '../notifications/local_reminders.dart';
-import '../notifications/partner_alert_sync.dart';
+import '../notifications/partner_alert_sync_queue.dart';
 import '../theme/app_theme.dart';
 import 'dialog_actions.dart';
 import 'reminder_hint.dart';
@@ -28,6 +28,7 @@ class CalendarScreen extends StatefulWidget {
     this.onShareChanged,
     this.onConsentRequired,
     this.partnerAlertScheduler,
+    this.partnerAlertSyncQueue,
     this.cancelDailyReminder,
     this.palette = AppPalette.blue,
     this.showReminderHint = false,
@@ -44,6 +45,7 @@ class CalendarScreen extends StatefulWidget {
   final VoidCallback? onConsentRequired;
   final Future<LocalReminderSyncStatus> Function(List<PlannedAlert>)?
       partnerAlertScheduler;
+  final PartnerAlertSyncQueue? partnerAlertSyncQueue;
   final Future<LocalReminderSyncResult> Function()? cancelDailyReminder;
   final AppPalette palette;
 
@@ -65,7 +67,6 @@ class _CalendarScreenState extends State<CalendarScreen>
   int _cycleLoadGeneration = 0;
   int _loadGeneration = 0;
   int _alertSyncGeneration = 0;
-  Future<void> _alertSyncTail = Future<void>.value();
   Map<String, Entry> _entries = {};
   Map<String, Entry> _prevEntries = {};
   Map<String, Entry> _nextEntries = {};
@@ -228,10 +229,9 @@ class _CalendarScreenState extends State<CalendarScreen>
     final alertGeneration = ++_alertSyncGeneration;
     _alertSyncKey = null;
     if (widget.user.isPartner) {
-      unawaited(_enqueueAlertOperation(() async {
-        if (alertGeneration != _alertSyncGeneration) return;
-        await _cancelPartnerAlerts();
-      }));
+      if (alertGeneration == _alertSyncGeneration) {
+        unawaited(_cancelPartnerAlerts());
+      }
     }
     setState(() {
       _entries = {};
@@ -243,14 +243,13 @@ class _CalendarScreenState extends State<CalendarScreen>
     });
   }
 
-  Future<void> _enqueueAlertOperation(Future<void> Function() operation) {
-    final next = _alertSyncTail.then((_) => operation());
-    _alertSyncTail = next.catchError((Object _) {});
-    return next;
+  Future<LocalReminderSyncStatus> _cancelPartnerAlerts() async {
+    final queue = widget.partnerAlertSyncQueue;
+    if (queue != null) {
+      return await queue.cancel() ?? LocalReminderSyncStatus.cancelled;
+    }
+    return (widget.partnerAlertScheduler ?? syncPartnerAlerts)(const []);
   }
-
-  Future<LocalReminderSyncStatus> _cancelPartnerAlerts() =>
-      (widget.partnerAlertScheduler ?? syncPartnerAlerts)(const []);
 
   void _cancelDailyReminder() {
     final cancel = widget.cancelDailyReminder ??
@@ -290,26 +289,49 @@ class _CalendarScreenState extends State<CalendarScreen>
       for (final w in cycle.predictions) w.pmsStart.toIso8601String(),
     ].join('|');
     if (key == _alertSyncKey) return;
+    final queue = widget.partnerAlertSyncQueue;
+    final revision = queue?.beginIntent();
     try {
       final pref = await widget.api.getPartnerAlerts();
       if (!mounted || generation != _alertSyncGeneration) return;
       // Only touch the OS scheduler once the partner opted in.
-      await _enqueueAlertOperation(() async {
-        if (!mounted || generation != _alertSyncGeneration) return;
-        if (!pref.pmsEnabled && !pref.pillEnabled) {
-          await _cancelPartnerAlerts();
-        } else {
-          await syncPartnerAlertsFrom(
-            strings: widget.strings,
-            pref: pref,
-            cycle: cycle,
-            linked: widget.share.isActive,
-            todayLogged: todayLogged,
-            ownerName: widget.share.ownerName,
-            scheduler: widget.partnerAlertScheduler,
+      if (queue != null && (revision == null || !queue.isCurrent(revision))) {
+        return;
+      }
+      if (!pref.pmsEnabled && !pref.pillEnabled) {
+        if (queue != null) {
+          await queue.scheduleIfCurrent(
+            revision: revision!,
+            alerts: const [],
           );
+        } else {
+          await _cancelPartnerAlerts();
         }
-      });
+      } else {
+        final now = DateTime.now();
+        final day = DateFormat.MMMd(widget.strings.dateLocale);
+        final alerts = planPartnerAlerts(
+          now: now,
+          pref: pref,
+          cycle: cycle,
+          todayLogged: todayLogged,
+          pmsTitle: (_) => widget.strings.pmsNotifTitle,
+          pmsBody: (window) => widget.strings.pmsNotifBody(
+            widget.share.ownerName,
+            day.format(window.periodStart),
+          ),
+          pillTitle: widget.strings.pillNotifTitle,
+          pillBody: widget.strings.pillNotifBody(widget.share.ownerName),
+        );
+        if (queue != null) {
+          await queue.scheduleIfCurrent(
+            revision: revision!,
+            alerts: alerts,
+          );
+        } else {
+          await (widget.partnerAlertScheduler ?? syncPartnerAlerts)(alerts);
+        }
+      }
       if (mounted && generation == _alertSyncGeneration) _alertSyncKey = key;
     } catch (err) {
       if (!mounted || generation != _alertSyncGeneration) return;

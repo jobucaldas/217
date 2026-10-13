@@ -142,7 +142,8 @@ class ApiClient {
     final streamed =
         await _http.send(request).timeout(const Duration(seconds: 20));
     final response = await http.Response.fromStream(streamed);
-    if (response.statusCode == 403 &&
+    if (auth &&
+        response.statusCode == 403 &&
         ApiException._errorField(response.body) == 'consent required') {
       onConsentRequired?.call();
     }

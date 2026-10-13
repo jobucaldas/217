@@ -17,6 +17,8 @@ class DailyReminderSyncQueue {
 
   int get revision => _revision;
 
+  Future<void> get whenIdle => _tail;
+
   bool isCurrent(int revision) => revision == _revision;
 
   /// Records user intent before any network or preference read can yield.

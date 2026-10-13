@@ -8,6 +8,7 @@ import '../i18n.dart';
 import '../models.dart';
 import '../notifications/local_reminders.dart';
 import '../notifications/partner_alert_sync.dart';
+import '../notifications/partner_alert_sync_queue.dart';
 
 /// Partner notifications: PMS heads-up and pill-not-logged, each with its own
 /// toggle and time.
@@ -20,6 +21,7 @@ class PartnerAlertsScreen extends StatefulWidget {
     this.reschedule,
     this.partnerAlertScheduler,
     this.cancelPartnerAlerts,
+    this.syncQueue,
   });
 
   final ApiClient api;
@@ -32,6 +34,7 @@ class PartnerAlertsScreen extends StatefulWidget {
   final Future<LocalReminderSyncStatus> Function(List<PlannedAlert>)?
       partnerAlertScheduler;
   final Future<LocalReminderSyncStatus> Function()? cancelPartnerAlerts;
+  final PartnerAlertSyncQueue? syncQueue;
 
   @override
   State<PartnerAlertsScreen> createState() => _PartnerAlertsScreenState();
@@ -97,6 +100,8 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
 
   Future<void> _save(PartnerAlertPreference next) async {
     final previous = _pref;
+    final syncQueue = widget.syncQueue;
+    final revision = syncQueue?.beginIntent();
     setState(() {
       _pref = next;
       _saving = true;
@@ -104,7 +109,9 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
     });
     try {
       final saved = await widget.api.savePartnerAlerts(next);
-      final status = await (widget.reschedule ?? _reschedule)(saved);
+      final status = widget.reschedule != null
+          ? await widget.reschedule!(saved)
+          : await _reschedule(saved, revision: revision);
       if (!mounted) return;
       setState(() {
         _pref = saved;
@@ -118,6 +125,11 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
         ..hideCurrentSnackBar()
         ..showSnackBar(SnackBar(content: Text(widget.strings.reminderSaved)));
     } catch (err) {
+      if (err is ApiException &&
+          err.statusCode == 403 &&
+          err.message == 'consent required') {
+        await _cancelPartnerAlerts();
+      }
       if (!mounted) return;
       setState(() {
         _pref = previous;
@@ -129,9 +141,12 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
 
   /// Replans OS notifications from her latest calendar.
   Future<LocalReminderSyncStatus> _reschedule(
-    PartnerAlertPreference pref,
-  ) async {
-    if (!supportsLocalReminders && widget.partnerAlertScheduler == null) {
+    PartnerAlertPreference pref, {
+    int? revision,
+  }) async {
+    if (!supportsLocalReminders &&
+        widget.partnerAlertScheduler == null &&
+        widget.syncQueue == null) {
       return LocalReminderSyncStatus.unsupported;
     }
     final linked = widget.share.isActive;
@@ -154,6 +169,19 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
         return LocalReminderSyncStatus.cancelled;
       }
     }
+    final queue = widget.syncQueue;
+    if (queue != null && (revision == null || !queue.isCurrent(revision))) {
+      return LocalReminderSyncStatus.cancelled;
+    }
+    final Future<LocalReminderSyncStatus> Function(List<PlannedAlert>)?
+        scheduler = queue == null
+            ? widget.partnerAlertScheduler
+            : (alerts) async =>
+                await queue.scheduleIfCurrent(
+                  revision: revision!,
+                  alerts: alerts,
+                ) ??
+                LocalReminderSyncStatus.cancelled;
     return syncPartnerAlertsFrom(
       strings: widget.strings,
       pref: pref,
@@ -161,12 +189,17 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
       linked: linked,
       todayLogged: todayLogged,
       ownerName: widget.share.ownerName,
-      scheduler: widget.partnerAlertScheduler,
+      scheduler: scheduler,
     );
   }
 
-  Future<LocalReminderSyncStatus> _cancelPartnerAlerts() =>
-      (widget.cancelPartnerAlerts ?? () => syncPartnerAlerts(const []))();
+  Future<LocalReminderSyncStatus> _cancelPartnerAlerts() async {
+    final queue = widget.syncQueue;
+    if (queue != null) {
+      return await queue.cancel() ?? LocalReminderSyncStatus.cancelled;
+    }
+    return (widget.cancelPartnerAlerts ?? () => syncPartnerAlerts(const []))();
+  }
 
   Future<String?> _pickTime(String current) async {
     final t = parseReminderTime(current);

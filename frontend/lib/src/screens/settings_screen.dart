@@ -7,6 +7,7 @@ import '../errors.dart';
 import '../i18n.dart';
 import '../models.dart';
 import '../notifications/daily_reminder_sync_queue.dart';
+import '../notifications/partner_alert_sync_queue.dart';
 import '../platform/open_url.dart';
 import '../theme/app_theme.dart';
 import 'partner_alerts_screen.dart';
@@ -38,6 +39,7 @@ class SettingsPage extends StatefulWidget {
     this.onStageChanged,
     this.onRemindersToggled,
     this.dailyReminderSyncQueue,
+    this.partnerAlertSyncQueue,
     this.consentPending = false,
     this.expandServer = false,
   });
@@ -65,6 +67,7 @@ class SettingsPage extends StatefulWidget {
   /// Called after the reminder switch was saved, with its new value.
   final ValueChanged<bool>? onRemindersToggled;
   final DailyReminderSyncQueue? dailyReminderSyncQueue;
+  final PartnerAlertSyncQueue? partnerAlertSyncQueue;
 
   /// Signed in but the privacy notice is not agreed yet: the server refuses
   /// the data behind reminders, alerts, sharing, role and stage until then.
@@ -109,6 +112,16 @@ class _SettingsPageState extends State<SettingsPage> {
       setState(() => _savingStage = false);
       widget.onStageChanged?.call(session);
     } catch (error) {
+      if (error is ApiException &&
+          error.statusCode == 403 &&
+          error.message == 'consent required') {
+        await widget.dailyReminderSyncQueue?.cancel(
+          title: '217',
+          body: widget.strings.recordToday,
+        );
+        await widget.partnerAlertSyncQueue?.cancel();
+        widget.onConsentRequired?.call();
+      }
       if (mounted) {
         setState(() => _savingStage = false);
         _showSnack(friendlyError(widget.strings, error));
@@ -207,6 +220,7 @@ class _SettingsPageState extends State<SettingsPage> {
                             strings: widget.strings,
                             share: widget.share ??
                                 const ShareState(status: 'none'),
+                            syncQueue: widget.partnerAlertSyncQueue,
                           ),
                         ),
                       );

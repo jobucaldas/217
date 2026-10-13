@@ -321,8 +321,6 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('stage-menopause')), findsNothing);
-    await tester.pageBack();
-    await tester.pumpAndSettle();
     expect(find.byType(ConsentScreen), findsOneWidget);
   });
 
