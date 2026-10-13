@@ -59,20 +59,29 @@ func (s *PGStore) Prepare() error {
 	return nil
 }
 
-const userColumns = `u.id, u.email_sealed, u.name_sealed, COALESCE(u.role, ''), u.created_at, u.updated_at`
+const userColumns = `u.id, u.email_sealed, u.name_sealed, COALESCE(u.role, ''), u.created_at, u.updated_at, u.stage_sealed`
 
 type rowScanner interface{ Scan(dest ...any) error }
 
 // scanUser reads userColumns (plus extra destinations) and opens the sealed fields.
 func (s *PGStore) scanUser(row rowScanner, extra ...any) (*model.User, error) {
 	user := &model.User{}
-	var email, name []byte
-	dest := append([]any{&user.ID, &email, &name, &user.Role, &user.CreatedAt, &user.UpdatedAt}, extra...)
+	var email, name, stage []byte
+	dest := append([]any{&user.ID, &email, &name, &user.Role, &user.CreatedAt, &user.UpdatedAt, &stage}, extra...)
 	if err := row.Scan(dest...); err != nil {
 		return nil, err
 	}
 	if err := s.openUser(user, email, name); err != nil {
 		return nil, err
+	}
+	user.Stage = model.StageCycling
+	if len(stage) > 0 {
+		if err := openJSON(s.kr, stage, userStageCtx(user.ID), &user.Stage); err != nil {
+			return nil, fmt.Errorf("opening user %s stage: %w", user.ID, err)
+		}
+		if user.Stage == "" {
+			user.Stage = model.StageCycling
+		}
 	}
 	return user, nil
 }

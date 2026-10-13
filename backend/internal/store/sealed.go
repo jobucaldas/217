@@ -24,6 +24,7 @@ func canonID(id string) string {
 
 func userEmailCtx(userID string) string { return "users.email|" + canonID(userID) }
 func userNameCtx(userID string) string  { return "users.name|" + canonID(userID) }
+func userStageCtx(userID string) string { return "users.stage|" + canonID(userID) }
 
 // Entries are unique per (user, date), which therefore identifies the row.
 func entryCtx(userID, date string) string {
@@ -111,7 +112,7 @@ func (s *PGStore) openUser(user *model.User, email, name []byte) error {
 
 // sealedColumns lists every sealed column, for key checks.
 var sealedColumns = []struct{ table, column string }{
-	{"users", "email_sealed"}, {"users", "name_sealed"}, {"entries", "sealed"},
+	{"users", "email_sealed"}, {"users", "name_sealed"}, {"users", "stage_sealed"}, {"entries", "sealed"},
 	{"partner_notes", "body_sealed"}, {"calendar_shares", "invite_sealed"},
 	{"push_subscriptions", "sealed"}, {"oauth_attempts", "sealed"},
 }
@@ -285,7 +286,7 @@ func rewriteSealedTables(conn *sql.DB) error {
 // sealed value must carry a known key id, and one is opened for real.
 func (s *PGStore) checkKey() error {
 	for _, c := range sealedColumns {
-		rows, err := s.db.Query(`SELECT DISTINCT substring(` + c.column + ` from 1 for 5) FROM ` + c.table)
+		rows, err := s.db.Query(`SELECT DISTINCT substring(` + c.column + ` from 1 for 5) FROM ` + c.table + ` WHERE ` + c.column + ` IS NOT NULL`)
 		if err != nil {
 			return fmt.Errorf("reading sealed %s.%s: %w", c.table, c.column, err)
 		}
@@ -373,6 +374,21 @@ func (s *PGStore) reseal() error {
 			WHERE id = $1 AND email_sealed = $5 AND name_sealed = $6`,
 			r.id, s.kr.SealString(u.Email, userEmailCtx(r.id)), s.kr.SealString(u.Name, userNameCtx(r.id)), emailIndex(s.kr, u.Email), r.x, r.y); err != nil {
 			return fmt.Errorf("resealing user: %w", err)
+		}
+	}
+
+	stages, err := stale(`SELECT id, stage_sealed FROM users WHERE stage_sealed IS NOT NULL`,
+		func(rs *sql.Rows, r *sealedRow) error { return rs.Scan(&r.id, &r.x) })
+	if err != nil {
+		return fmt.Errorf("reading user stages: %w", err)
+	}
+	for _, r := range stages {
+		var stage string
+		if err := openJSON(s.kr, r.x, userStageCtx(r.id), &stage); err != nil {
+			return fmt.Errorf("opening user stage %s: %w", r.id, err)
+		}
+		if err := swap(`UPDATE users SET stage_sealed = $2 WHERE id = $1 AND stage_sealed = $3`, r.id, sealJSON(s.kr, stage, userStageCtx(r.id)), r.x); err != nil {
+			return fmt.Errorf("resealing user stage: %w", err)
 		}
 	}
 

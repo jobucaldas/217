@@ -106,6 +106,17 @@ void main() {
           DateTime(2026, 10, 29));
       expect(info.nextWindow(DateTime(2026, 11, 2)), isNull);
     });
+    test('menopause empty PMS dates never classify days', () {
+      final info = CycleInfo.fromJson({
+        'note': 'pms_suppressed_menopause',
+        'predictions': [
+          {'period_start': '2026-10-29', 'period_end': '2026-11-02', 'pms_start': '', 'pms_end': ''},
+        ],
+      });
+      expect(info.note, 'pms_suppressed_menopause');
+      expect(info.kindOf(DateTime(2026, 10, 28)), CycleDayKind.none);
+      expect(info.kindOf(DateTime(2026, 10, 29)), CycleDayKind.predictedPeriod);
+    });
   });
 
   group('partner alert plan', () {
@@ -151,6 +162,28 @@ void main() {
       ]);
       expect(alerts.first.body, 'pms 12');
       expect(alerts.map((a) => a.id).toSet().length, 2);
+    });
+    test('empty PMS windows do not notify but pill alerts remain', () {
+      final noPms = CycleInfo(predictions: [
+        CycleWindow(
+          periodStart: DateTime(2026, 10, 12),
+          periodEnd: DateTime(2026, 10, 16),
+          pmsStart: DateTime(1),
+          pmsEnd: DateTime(1),
+        ),
+      ]);
+      final alerts = planPartnerAlerts(
+        now: now,
+        pref: const PartnerAlertPreference(pmsEnabled: true, pillEnabled: true),
+        cycle: noPms,
+        todayLogged: false,
+        pmsTitle: (_) => 'pms',
+        pmsBody: (_) => 'pms',
+        pillTitle: 'pill',
+        pillBody: 'pill',
+      );
+      expect(alerts.where((a) => a.title == 'pms'), isEmpty);
+      expect(alerts.where((a) => a.title == 'pill'), isNotEmpty);
     });
 
     test('pill alerts skip today once logged and past times', () {
@@ -270,6 +303,41 @@ void main() {
       // Legend explains both marks.
       expect(find.text('Period'), findsOneWidget);
       expect(find.text('PMS'), findsOneWidget);
+    });
+
+    testWidgets('menopause suppresses PMS ring and shows translated note ($brightness)', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(390, 844));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      final cycle = CycleInfo(note: 'pms_suppressed_menopause', predictions: [
+        CycleWindow(periodStart: _d(today, 3), periodEnd: _d(today, 7), pmsStart: DateTime(1), pmsEnd: DateTime(1)),
+      ]);
+      await tester.pumpWidget(_app(brightness, CalendarScreen(
+        api: _CycleApi(cycle: cycle),
+        user: const User(id: 'o', email: 'o@example.com', name: 'Owner'),
+        share: const ShareState(status: 'none'), strings: _en, onOpenSettings: () {},
+      )));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('217 counts no PMS'), findsOneWidget);
+      expect(find.byKey(ValueKey('pms-${today.month}-${today.day}')), findsNothing);
+    });
+
+    testWidgets('perimenopause keeps PMS ring and shows note ($brightness)', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(390, 844));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      await tester.pumpWidget(_app(brightness, CalendarScreen(
+        api: _CycleApi(cycle: CycleInfo(note: 'pms_counted_perimenopause', predictions: [
+          CycleWindow(periodStart: _d(today, 3), periodEnd: _d(today, 7), pmsStart: _d(today, -2), pmsEnd: _d(today, 2)),
+        ])),
+        user: const User(id: 'o', email: 'o@example.com', name: 'Owner'),
+        share: const ShareState(status: 'none'), strings: _en, onOpenSettings: () {},
+      )));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('perimenopause. Cycles can still happen'), findsOneWidget);
+      expect(find.byKey(ValueKey('pms-${today.month}-${today.day}')), findsWidgets);
     });
 
     testWidgets('owner without period history gets the marking hint '

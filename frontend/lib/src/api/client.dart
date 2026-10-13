@@ -342,6 +342,12 @@ class ApiClient {
     );
   }
 
+  Future<SessionSnapshot> setStage(String stage) async {
+    final response = await _send('PUT', _uri('/api/account/stage'), body: {'stage': stage});
+    if (response.statusCode != 200) throw ApiException('set stage', response);
+    return SessionSnapshot.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
   /// Period history and predictions for the visible calendar. [today] is the
   /// device's local date (YYYY-MM-DD).
   Future<CycleInfo> getCycle(String today) async {

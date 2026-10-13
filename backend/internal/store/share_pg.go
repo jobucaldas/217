@@ -422,3 +422,21 @@ func (s *PGStore) SetRole(userID, role string) (*model.User, error) {
 	}
 	return s.GetUserByID(userID)
 }
+
+func (s *PGStore) SetStage(userID, stage string) (*model.User, error) {
+	if stage != "cycling" && stage != "perimenopause" && stage != "menopause" {
+		return nil, fmt.Errorf("invalid stage")
+	}
+	user, err := s.GetUserByID(userID)
+	if err != nil {
+		return nil, err
+	}
+	if user.EffectiveRole() != model.RoleOwner {
+		return nil, fmt.Errorf("only owners may set stage")
+	}
+	sealed := sealJSON(s.kr, stage, userStageCtx(userID))
+	if _, err := s.db.Exec(`UPDATE users SET stage_sealed = $1, updated_at = NOW() WHERE id = $2`, sealed, userID); err != nil {
+		return nil, fmt.Errorf("setting stage: %w", err)
+	}
+	return s.GetUserByID(userID)
+}

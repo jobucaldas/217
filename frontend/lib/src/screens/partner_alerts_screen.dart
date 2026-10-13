@@ -210,6 +210,10 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
                     ),
                   ),
                 ),
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Text(strings.pmsNotCounted, style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
+                ),
                 const SizedBox(height: 16),
                 _alertCard(
                   key: const ValueKey('alert-pms'),

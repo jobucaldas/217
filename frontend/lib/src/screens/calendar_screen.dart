@@ -402,7 +402,9 @@ class _CalendarScreenState extends State<CalendarScreen>
     final next = _cycle.nextWindow(_today);
     final shortDay = DateFormat.MMMd(locale);
     final String? cycleLine;
-    if (next == null) {
+    if (_cycle.note.isNotEmpty) {
+      cycleLine = widget.strings.cycleStageNote(_cycle.note);
+    } else if (next == null) {
       cycleLine = widget.share.canEditCalendar ? widget.strings.cycleHintOwner : null;
     } else if (inPms) {
       cycleLine = widget.strings.cyclePmsNow(shortDay.format(next.periodStart));

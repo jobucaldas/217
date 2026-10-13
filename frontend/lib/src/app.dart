@@ -371,6 +371,7 @@ class _App217State extends State<App217> {
             onLogout: _user == null ? null : _logout,
             onApiBaseChanged: _onApiBaseChanged,
             onRoleChanged: _user == null ? null : _onRoleChosen,
+            onStageChanged: _user == null ? null : _applySession,
             onRemindersToggled: _user == null ? null : _onRemindersToggled,
             expandServer: expandServer,
           ),
