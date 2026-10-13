@@ -172,10 +172,7 @@ func (h *Handler) sameOriginAllowed(r *http.Request) bool {
 		return true
 	}
 	origin := r.Header.Get("Origin")
-	if origin == "" {
-		return true
-	}
-	return origin == h.appOrigin()
+	return origin != "" && origin == h.appOrigin()
 }
 
 func isUnsafeMethod(method string) bool {
@@ -214,7 +211,8 @@ func (h *Handler) AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 			return
 		}
-		if isUnsafeMethod(r.Method) && !h.sameOriginAllowed(r) {
+		_, cookieErr := r.Cookie(h.sessionCookie)
+		if isUnsafeMethod(r.Method) && cookieErr == nil && !h.sameOriginAllowed(r) {
 			http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
 			return
 		}
@@ -245,7 +243,8 @@ func (h *Handler) CurrentSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
-	if !h.sameOriginAllowed(r) {
+	_, cookieErr := r.Cookie(h.sessionCookie)
+	if cookieErr == nil && !h.sameOriginAllowed(r) {
 		http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
 		return
 	}

@@ -80,6 +80,9 @@ func sessionCookie(t *testing.T, s *store.MemoryStore, userID string) *http.Cook
 func authedRequest(method, path string, cookie *http.Cookie, body []byte) *http.Request {
 	req := httptest.NewRequest(method, path, bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	if method == http.MethodPost || method == http.MethodPut || method == http.MethodPatch || method == http.MethodDelete {
+		req.Header.Set("Origin", "http://localhost:8080")
+	}
 	if cookie != nil {
 		req.AddCookie(cookie)
 	}
@@ -347,6 +350,45 @@ func TestSessionCookieAuthExpiryAndLogout(t *testing.T) {
 	}
 }
 
+func TestLogoutOriginRulesForCookieAndBearer(t *testing.T) {
+	h, s := newTestHandler(t)
+	user, err := s.CreateUser("logout-origin@example.com", "Logout Origin", "password123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cookie := sessionCookie(t, s, user.ID)
+
+	t.Run("cookie without origin is rejected and session remains", func(t *testing.T) {
+		req := authedRequest(http.MethodPost, "/api/auth/logout", cookie, nil)
+		req.Header.Del("Origin")
+		w := httptest.NewRecorder()
+		h.Logout(w, req)
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("status = %d, want %d", w.Code, http.StatusForbidden)
+		}
+		if _, err := s.GetUserBySession(cookie.Value); err != nil {
+			t.Fatalf("session was removed after rejected logout: %v", err)
+		}
+	})
+
+	t.Run("bearer without cookie or origin logs out", func(t *testing.T) {
+		token := "bearer-logout-token"
+		if err := s.CreateSession(user.ID, token, time.Now().Add(time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		w := httptest.NewRecorder()
+		h.Logout(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+		if _, err := s.GetUserBySession(token); err == nil {
+			t.Fatal("Bearer session remains after successful logout")
+		}
+	})
+}
+
 func TestOriginGuardRejectsUnsafeCrossOriginRequests(t *testing.T) {
 	h, s := newTestHandler(t)
 	user, err := s.CreateUser("origin@example.com", "Origin User", "password123")
@@ -362,6 +404,51 @@ func TestOriginGuardRejectsUnsafeCrossOriginRequests(t *testing.T) {
 	h.AuthMiddleware(h.UpsertEntry)(w, req)
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("expected origin guard to reject cross-site write, got %d", w.Code)
+	}
+}
+
+func TestCookieMutationRequiresGoodOriginButBearerDoesNot(t *testing.T) {
+	h, s := newTestHandler(t)
+	user, err := s.CreateUser("origin-check@example.com", "Origin Check", "password123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetRole(user.ID, "owner"); err != nil {
+		t.Fatal(err)
+	}
+	cookie := sessionCookie(t, s, user.ID)
+	body := []byte(`{"taken":true,"notes":""}`)
+	for _, tc := range []struct {
+		name       string
+		origin     string
+		bearer     bool
+		wantStatus int
+	}{
+		{name: "cookie missing origin", wantStatus: http.StatusForbidden},
+		{name: "cookie good origin", origin: "http://localhost:8080", wantStatus: http.StatusOK},
+		{name: "cookie evil origin", origin: "https://evil.example", wantStatus: http.StatusForbidden},
+		{name: "bearer missing origin", bearer: true, wantStatus: http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := authedRequest(http.MethodPost, "/api/entries/2026-05-14", nil, body)
+			if tc.bearer {
+				// Native clients send the same opaque session token as Bearer.
+				req.Header.Set("Authorization", "Bearer session-token-"+user.ID)
+			} else {
+				req.AddCookie(cookie)
+			}
+			if tc.origin != "" {
+				req.Header.Set("Origin", tc.origin)
+			} else {
+				req.Header.Del("Origin")
+			}
+			req.SetPathValue("date", "2026-05-14")
+			w := httptest.NewRecorder()
+			h.AuthMiddleware(h.UpsertEntry)(w, req)
+			if w.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d: %s", w.Code, tc.wantStatus, w.Body.String())
+			}
+		})
 	}
 }
 
