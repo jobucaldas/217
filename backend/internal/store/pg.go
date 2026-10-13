@@ -46,7 +46,9 @@ func NewPGStore(databaseURL string, kr *fieldcrypt.Keyring) (*PGStore, error) {
 }
 
 // Prepare verifies the key against stored data and, while previous keys are
-// configured, reseals values under the primary key. Run it after migrations.
+// configured, reseals values under the primary key. Run it after migrations
+// and before serving. Instances on different keyrings must not run at once:
+// blind indexes follow the primary key (see README, "Rotating the key").
 func (s *PGStore) Prepare() error {
 	if err := s.checkKey(); err != nil {
 		return err
