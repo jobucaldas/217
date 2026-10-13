@@ -264,25 +264,22 @@ void main() {
       ),
     );
 
-    await _connect(tester, 'http://self.example.com');
-    expect(find.text('The app only connects to https:// addresses'),
-        findsOneWidget);
-    expect(servers.requests, isEmpty);
-    expect(connected, 0);
-
-    var expectedConnections = 0;
-    for (final localBase in [
+    for (final httpBase in [
+      'http://self.example.com',
       'http://127.0.0.1:8787',
       'http://[::1]:8787',
       'http://10.0.2.2:8787',
     ]) {
-      await _connect(tester, localBase);
-      expectedConnections++;
-      expect(connected, expectedConnections,
-          reason: '$localBase should be allowed');
+      await _connect(tester, httpBase);
+      expect(find.text('The app only connects to https:// addresses'),
+          findsOneWidget,
+          reason: '$httpBase should be rejected');
+      expect(servers.requests, isEmpty,
+          reason: '$httpBase must not call the server');
+      expect(connected, 0);
     }
 
     await _connect(tester, 'self.example.com');
-    expect(connected, 4);
+    expect(connected, 1);
   });
 }

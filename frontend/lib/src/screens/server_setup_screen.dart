@@ -66,13 +66,7 @@ class _ServerSetupScreenState extends State<ServerSetupScreen> {
       setState(() => _error = strings.serverAddressInvalid);
       return;
     }
-    final uri = Uri.parse(base);
-    final localHttp = uri.scheme == 'http' &&
-        (uri.host == 'localhost' ||
-            uri.host == '127.0.0.1' ||
-            uri.host == '::1' ||
-            uri.host == '10.0.2.2');
-    if (widget.requireHttps && uri.scheme != 'https' && !localHttp) {
+    if (widget.requireHttps && Uri.parse(base).scheme != 'https') {
       setState(() => _error = strings.serverNeedsHttps);
       return;
     }
