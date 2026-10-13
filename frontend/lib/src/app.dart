@@ -22,13 +22,28 @@ import 'screens/share_screens.dart';
 import 'theme/app_theme.dart';
 import 'screens/dialog_actions.dart';
 
+typedef DailyReminderScheduler = Future<LocalReminderSyncResult> Function({
+  required bool enabled,
+  required String timeHhMm,
+  required String title,
+  required String body,
+});
+
 class App217 extends StatefulWidget {
-  const App217({super.key, required this.config, this.api});
+  const App217({
+    super.key,
+    required this.config,
+    this.api,
+    this.dailyReminderScheduler,
+    this.partnerAlertCanceller,
+  });
 
   final AppConfig config;
 
   /// Injected client for tests; production builds one from [config].
   final ApiClient? api;
+  final DailyReminderScheduler? dailyReminderScheduler;
+  final Future<void> Function()? partnerAlertCanceller;
 
   @override
   State<App217> createState() => _App217State();
@@ -54,6 +69,8 @@ class _App217State extends State<App217> {
 
   /// Whether the daily reminder is on; null until known (no bubble then).
   bool? _remindersOn;
+  int _sessionGeneration = 0;
+  Future<void> _notificationSyncTail = Future<void>.value();
 
   /// Routes pushed on top of home (Settings) are built once, so they listen
   /// here to pick up theme, language and session changes made from them.
@@ -123,6 +140,7 @@ class _App217State extends State<App217> {
       // Unreachable server: show the signed-out screen.
     }
     if (!mounted) return;
+    _sessionGeneration++;
     setState(() {
       _user = user;
       _share = share;
@@ -166,6 +184,7 @@ class _App217State extends State<App217> {
     final session = await _api.currentSession();
     _clearRemindersIfConsentRequired(session);
     if (!mounted) return;
+    _sessionGeneration++;
     setState(() {
       _user = session.user;
       _share = session.share ?? const ShareState(status: 'none');
@@ -175,17 +194,39 @@ class _App217State extends State<App217> {
 
   void _clearRemindersIfConsentRequired(SessionSnapshot session) {
     if (session.consentRequired) {
-      unawaited(Future.wait<void>([
-        syncLocalDailyReminder(
-          enabled: false,
-          timeHhMm: '09:00',
-          title: '217',
-          body: _strings.recordToday,
-        ).then<void>((_) {}),
-        syncPartnerAlerts(const []).then<void>((_) {}),
-      ]).then<void>((_) {}, onError: (Object _) {}));
+      final clear = _notificationSyncTail.then((_) async {
+        await Future.wait<void>([
+          _syncDailyReminder(
+            enabled: false,
+            timeHhMm: '09:00',
+          ).then<void>((_) {}),
+          _cancelPartnerAlerts(),
+        ]);
+      });
+      _notificationSyncTail = clear.then<void>((_) {}, onError: (Object _) {});
+      unawaited(_notificationSyncTail);
       // Do not delay showing the consent screen on local notification APIs.
       // Their failed channel calls are best effort; the next launch retries.
+    }
+  }
+
+  Future<LocalReminderSyncResult> _syncDailyReminder({
+    required bool enabled,
+    required String timeHhMm,
+  }) =>
+      (widget.dailyReminderScheduler ?? syncLocalDailyReminder)(
+        enabled: enabled,
+        timeHhMm: timeHhMm,
+        title: '217',
+        body: _strings.recordToday,
+      );
+
+  Future<void> _cancelPartnerAlerts() async {
+    final cancel = widget.partnerAlertCanceller;
+    if (cancel != null) {
+      await cancel();
+    } else {
+      await syncPartnerAlerts(const []);
     }
   }
 
@@ -202,9 +243,47 @@ class _App217State extends State<App217> {
   /// Agreed to the privacy notice: the app can load and offer what waited.
   Future<void> _onConsented(SessionSnapshot session) async {
     _applySession(session);
-    unawaited(_loadRemindersState());
+    final generation = _sessionGeneration;
+    unawaited(_restoreOwnerReminderAfterConsent(session, generation));
     await _offerPendingInvite();
   }
+
+  Future<void> _restoreOwnerReminderAfterConsent(
+    SessionSnapshot session,
+    int generation,
+  ) async {
+    final user = session.user;
+    if (session.consentRequired || user == null || !user.isOwner) return;
+
+    // Consent recovery can race the cancellation started by bootstrap. Let it
+    // finish before re-arming the saved local reminder.
+    await _notificationSyncTail;
+    if (!_isCurrentConsentedOwner(user.id, generation)) return;
+
+    try {
+      final pref = await _api.getReminderPreference();
+      if (!_isCurrentConsentedOwner(user.id, generation)) return;
+      if (mounted) setState(() => _remindersOn = pref?.enabled ?? false);
+      if (pref?.enabled != true ||
+          (!supportsLocalReminders && widget.dailyReminderScheduler == null)) {
+        return;
+      }
+
+      // Permission denial leaves the saved preference on. The reminder
+      // settings screen continues to report permissionDenied on its next load.
+      await _syncDailyReminder(enabled: true, timeHhMm: pref!.time);
+    } catch (_) {
+      // Consent is already accepted; a reminder restore failure must not gate
+      // the calendar or change the saved preference.
+    }
+  }
+
+  bool _isCurrentConsentedOwner(String userId, int generation) =>
+      mounted &&
+      generation == _sessionGeneration &&
+      !_consentRequired &&
+      _user?.id == userId &&
+      _user!.isOwner;
 
   Future<void> _setThemeMode(ThemeMode mode) async {
     setState(() => _themeMode = mode);
@@ -282,6 +361,7 @@ class _App217State extends State<App217> {
   }
 
   void _applySession(SessionSnapshot session) {
+    _sessionGeneration++;
     setState(() {
       _user = session.user ?? _user;
       _share = session.share ?? const ShareState(status: 'none');
@@ -316,6 +396,7 @@ class _App217State extends State<App217> {
   /// A different server means a different account: the API client already
   /// dropped the old token, so show the signed-out state.
   void _onApiBaseChanged() {
+    _sessionGeneration++;
     setState(() {
       _user = null;
       _share = const ShareState(status: 'none');
@@ -376,6 +457,7 @@ class _App217State extends State<App217> {
         final session = await _api.currentSession();
         _clearRemindersIfConsentRequired(session);
         if (!mounted) return;
+        _sessionGeneration++;
         setState(() {
           _user = session.user ?? user;
           _share = session.share ?? const ShareState(status: 'none');
@@ -404,6 +486,7 @@ class _App217State extends State<App217> {
   Future<void> _logout() async {
     await _api.logout();
     if (!mounted) return;
+    _sessionGeneration++;
     setState(() {
       _remindersOn = null;
       _user = null;
@@ -413,6 +496,7 @@ class _App217State extends State<App217> {
   }
 
   void _onAccountDeleted() {
+    _sessionGeneration++;
     setState(() {
       _user = null;
       _share = const ShareState(status: 'none');

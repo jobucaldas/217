@@ -13,6 +13,7 @@ import 'package:a217/src/api/client.dart';
 import 'package:a217/src/app.dart';
 import 'package:a217/src/config.dart';
 import 'package:a217/src/i18n.dart';
+import 'package:a217/src/notifications/local_reminders.dart';
 import 'package:a217/src/platform/save_data.dart';
 import 'package:a217/src/platform/share_sheet.dart';
 import 'package:a217/src/screens/privacy_screens.dart';
@@ -25,6 +26,10 @@ class _ConsentServer {
   int consentVersion = 1;
   int? acceptedVersion;
   bool loggedOut = false;
+  String role = '';
+  bool reminderEnabled = false;
+  String reminderTime = '09:00';
+  int reminderPreferenceCalls = 0;
   Completer<void>? sessionRefreshGate;
   final calls = <String>[];
 
@@ -33,7 +38,7 @@ class _ConsentServer {
           'id': 'u1',
           'email': 'me@example.com',
           'name': 'Me',
-          'role': ''
+          'role': role
         },
         'share': {'status': 'none', 'can_edit_calendar': false},
         'consent': {'version': consentVersion, 'required': !consented},
@@ -66,6 +71,31 @@ class _ConsentServer {
               }
               consented = true;
               return http.Response(jsonEncode(_session()), 200);
+            case '/api/reminders/preferences':
+              reminderPreferenceCalls++;
+              if (!consented) {
+                return http.Response('{"error":"consent required"}', 403);
+              }
+              return http.Response(
+                jsonEncode({
+                  'enabled': reminderEnabled,
+                  'time': reminderTime,
+                  'timezone': 'UTC',
+                  'deliverable': true,
+                }),
+                200,
+              );
+            case '/api/entries':
+              return consented
+                  ? http.Response('{"entries":[]}', 200)
+                  : http.Response('{"error":"consent required"}', 403);
+            case '/api/cycle':
+              return consented
+                  ? http.Response(
+                      '{"cycle_length":28,"period_length":5,"estimated":true}',
+                      200,
+                    )
+                  : http.Response('{"error":"consent required"}', 403);
             case '/api/auth/logout':
               loggedOut = true;
               return http.Response('{"status":"ok"}', 200);
@@ -180,6 +210,68 @@ void main() {
     expect(server.acceptedVersion, 1);
     expect(
         server.calls.where((c) => c == 'PUT /api/account/consent').length, 1);
+  });
+
+  testWidgets('consent acceptance restores saved owner reminder after cancel',
+      (tester) async {
+    final server = _ConsentServer()
+      ..role = 'owner'
+      ..reminderEnabled = true
+      ..reminderTime = '07:35';
+    final api = server.client();
+    final cancelGate = Completer<LocalReminderSyncResult>();
+    final reminderOperations = <String>[];
+    await tester.pumpWidget(App217(
+      config: api.config,
+      api: api,
+      partnerAlertCanceller: () async {},
+      dailyReminderScheduler: ({
+        required enabled,
+        required timeHhMm,
+        required title,
+        required body,
+      }) async {
+        if (enabled) {
+          reminderOperations.add('schedule:$timeHhMm');
+          return const LocalReminderSyncResult(
+            LocalReminderSyncStatus.scheduled,
+          );
+        }
+        reminderOperations.add('cancel-start');
+        final result = await cancelGate.future;
+        reminderOperations.add('cancel-finished');
+        return result;
+      },
+    ));
+    await tester.pumpAndSettle();
+    expect(find.byType(ConsentScreen), findsOneWidget);
+    expect(reminderOperations, ['cancel-start']);
+
+    final accept = find.byKey(const ValueKey('consent-accept'));
+    await tester.scrollUntilVisible(accept, 200);
+    await tester.ensureVisible(accept);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('consent-checkbox')));
+    await tester.pump();
+    await tester.tap(accept);
+    await tester.pumpAndSettle();
+
+    // The accepted session can be displayed immediately, but must wait for
+    // the startup cancellation before it reads and restores the saved plan.
+    expect(reminderOperations, ['cancel-start']);
+    expect(server.reminderPreferenceCalls, 0);
+    cancelGate.complete(
+      const LocalReminderSyncResult(LocalReminderSyncStatus.cancelled),
+    );
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(
+      reminderOperations,
+      ['cancel-start', 'cancel-finished', 'schedule:07:35'],
+      reason:
+          'role=${server.role}, preferenceCalls=${server.reminderPreferenceCalls}, calls=${server.calls}',
+    );
+    expect(server.reminderPreferenceCalls, 1);
   });
 
   testWidgets('declining consent signs out', (tester) async {
