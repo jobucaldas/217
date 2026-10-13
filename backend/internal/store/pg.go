@@ -390,10 +390,16 @@ func (s *PGStore) UpsertReminderPreference(userID string, preference model.Remin
 }
 
 func (s *PGStore) SavePushSubscription(userID string, request model.PushSubscriptionRequest) (*model.PushSubscription, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("starting push subscription save: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
 	index := endpointIndex(s.kr, request.Endpoint)
 	var owner string
 	id := uuid.NewString() // the seal is bound to the row id: reuse an existing row's
-	err := s.db.QueryRow(`SELECT id, user_id FROM push_subscriptions WHERE endpoint_index = $1`, index).Scan(&id, &owner)
+	err = tx.QueryRow(`SELECT id, user_id FROM push_subscriptions WHERE endpoint_index = $1`, index).Scan(&id, &owner)
 	if err != nil && err != sql.ErrNoRows {
 		return nil, fmt.Errorf("checking push subscription: %w", err)
 	}
@@ -401,9 +407,9 @@ func (s *PGStore) SavePushSubscription(userID string, request model.PushSubscrip
 		return nil, fmt.Errorf("subscription belongs to another user")
 	}
 	if err == sql.ErrNoRows {
-		count, countErr := s.CountPushSubscriptions(userID)
-		if countErr != nil {
-			return nil, countErr
+		var count int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM push_subscriptions WHERE user_id = $1`, userID).Scan(&count); err != nil {
+			return nil, fmt.Errorf("counting push subscriptions: %w", err)
 		}
 		if count >= model.MaxPushSubscriptions {
 			return nil, fmt.Errorf("push subscription limit reached")
@@ -411,7 +417,7 @@ func (s *PGStore) SavePushSubscription(userID string, request model.PushSubscrip
 	}
 	payload := pushPayload{Endpoint: request.Endpoint, P256DH: request.Keys.P256DH, Auth: request.Keys.Auth}
 	subscription := &model.PushSubscription{}
-	err = s.db.QueryRow(`INSERT INTO push_subscriptions (id, user_id, endpoint_index, sealed)
+	err = tx.QueryRow(`INSERT INTO push_subscriptions (id, user_id, endpoint_index, sealed)
 		VALUES ($1, $2, $3, $4)
 		ON CONFLICT (endpoint_index) DO UPDATE SET sealed = EXCLUDED.sealed, updated_at = NOW()
 		WHERE push_subscriptions.user_id = EXCLUDED.user_id
@@ -426,10 +432,14 @@ func (s *PGStore) SavePushSubscription(userID string, request model.PushSubscrip
 	}
 	if subscription.ID != canonID(id) {
 		// Another request created the row first: bind the seal to its id.
-		if _, err := s.db.Exec(`UPDATE push_subscriptions SET sealed = $2 WHERE id = $1`,
+		// Both writes stay private until commit, including on failure.
+		if _, err := tx.Exec(`UPDATE push_subscriptions SET sealed = $2 WHERE id = $1`,
 			subscription.ID, sealJSON(s.kr, payload, pushCtx(subscription.ID, userID))); err != nil {
 			return nil, fmt.Errorf("saving push subscription: %w", err)
 		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("committing push subscription: %w", err)
 	}
 	subscription.Endpoint, subscription.P256DH, subscription.Auth = request.Endpoint, request.Keys.P256DH, request.Keys.Auth
 	return subscription, nil

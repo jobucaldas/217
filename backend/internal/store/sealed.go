@@ -333,8 +333,10 @@ func (s *PGStore) reseal() error {
 		id, a, b string
 		x, y     []byte
 	}
+	// Hold row locks from collection through commit so concurrent writes cannot
+	// be replaced by stale payloads. Stable ordering also serializes rotations.
 	collect := func(query string, scan func(*sql.Rows, *sealedRow) error) ([]sealedRow, error) {
-		rows, err := tx.Query(query)
+		rows, err := tx.Query(query + ` ORDER BY id FOR UPDATE`)
 		if err != nil {
 			return nil, err
 		}

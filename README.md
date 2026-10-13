@@ -121,13 +121,15 @@ Open `APP_BASE_URL`. Update with `docker compose pull && docker compose up -d`; 
 Coming from a version without encryption at rest (no `certs` service in your `compose.yaml`)? Back up the `pgdata` volume, replace `compose.yaml` with the one above, add `DATA_ENCRYPTION_KEY` to `.env`, then pull and start: the first start encrypts the existing data, drops the plaintext and rewrites the tables. Older backups, and PostgreSQL's write-ahead log until it is recycled, can still hold plaintext; for a clean volume, move the (now encrypted) data to a fresh one and delete the old backups:
 
 ```sh
-docker compose stop backend web
-docker compose exec -T postgres pg_dump -U 217 -Fc 217 > 217.dump
-docker compose down && docker volume rm 217_pgdata
-docker compose up -d postgres && sleep 10
-docker compose exec -T postgres pg_restore -U 217 -d 217 --no-owner < 217.dump
-docker compose up -d && rm 217.dump
+docker compose stop backend web &&
+docker compose exec -T postgres pg_dump -U 217 -Fc 217 > 217.dump &&
+docker compose down && docker volume rm 217_pgdata &&
+docker compose up -d --wait postgres &&
+docker compose exec -T postgres pg_restore -U 217 -d 217 --no-owner --exit-on-error < 217.dump &&
+docker compose up -d
 ```
+
+If any command fails, stop and resolve the error before continuing. Keep `217.dump` until you have verified the restored data in the app, then delete it and any older plaintext backups. Do not rerun the dump command over your existing backup after removing the old volume.
 
 Optional server variables for the `backend` service: `SESSION_TTL` (e.g. `720h`), `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` (web push).
 
