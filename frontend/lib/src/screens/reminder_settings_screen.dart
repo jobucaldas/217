@@ -15,7 +15,6 @@ class ReminderSettingsScreen extends StatefulWidget {
     required this.strings,
     this.dailyReminderSyncQueue,
     this.onToggled,
-    this.onConsentRequired,
   });
 
   final ApiClient api;
@@ -24,7 +23,6 @@ class ReminderSettingsScreen extends StatefulWidget {
 
   /// Called after the on/off switch was saved, with its new value.
   final ValueChanged<bool>? onToggled;
-  final VoidCallback? onConsentRequired;
 
   @override
   State<ReminderSettingsScreen> createState() => _ReminderSettingsScreenState();
@@ -126,13 +124,6 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen> {
         _loading = false;
       });
     } catch (err) {
-      if (err is ApiException && err.statusCode == 403) {
-        await queue?.cancel(
-          title: '217',
-          body: widget.strings.recordToday,
-        );
-        widget.onConsentRequired?.call();
-      }
       if (!mounted) return;
       setState(() {
         _loading = false;
@@ -213,13 +204,6 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen> {
         SnackBar(content: Text(widget.strings.reminderSaved)),
       );
     } catch (err) {
-      if (err is ApiException && err.statusCode == 403) {
-        await queue?.cancel(
-          title: '217',
-          body: widget.strings.recordToday,
-        );
-        widget.onConsentRequired?.call();
-      }
       if (!mounted) return;
       setState(() {
         _saving = false;

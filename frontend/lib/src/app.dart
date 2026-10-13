@@ -189,6 +189,7 @@ class _App217State extends State<App217> {
       .whenComplete(() => _consentRecovery = null);
 
   void _onOwnConsentRequired() {
+    _sessionGeneration++;
     unawaited(_cancelDailyReminder());
     unawaited(_cancelPartnerAlerts());
     unawaited(_recoverConsent());
@@ -197,7 +198,6 @@ class _App217State extends State<App217> {
   Future<void> _refreshSession() async {
     await _api.loadAuthConfig();
     final session = await _api.currentSession();
-    _clearRemindersIfConsentRequired(session);
     if (!mounted) return;
     _cancelOwnerReminderIfSessionLeavesOwner(session);
     _cancelPartnerAlertsIfSessionLeavesPartner(session);
@@ -554,6 +554,12 @@ class _App217State extends State<App217> {
     );
   }
 
+  void _onAccountDeletionStarted() {
+    _sessionGeneration++;
+    unawaited(_cancelAllNotifications());
+    setState(() {});
+  }
+
   void _openSettings({bool expandServer = false}) {
     _navKey.currentState?.push(
       MaterialPageRoute(
@@ -571,10 +577,10 @@ class _App217State extends State<App217> {
             onThemeModeChanged: _setThemeMode,
             onPaletteChanged: _setPalette,
             onShareChanged: (share) => setState(() => _share = share),
+            onAccountDeleting: _user == null ? null : _onAccountDeletionStarted,
             onAccountDeleted: _user == null ? null : _onAccountDeleted,
             onLogout: _user == null ? null : _logout,
             onApiBaseChanged: _onApiBaseChanged,
-            onConsentRequired: _onOwnConsentRequired,
             onRoleChanged: _user == null ? null : _onRoleChosen,
             onStageChanged: _user == null ? null : _onStageChanged,
             onRemindersToggled: _user == null ? null : _onRemindersToggled,
@@ -670,6 +676,7 @@ class _App217State extends State<App217> {
         strings: _strings,
         revoked: _share.isRevoked,
         onJoined: _onJoinedCalendar,
+        onAccountDeleting: _onAccountDeletionStarted,
         onAccountDeleted: _onAccountDeleted,
         onOpenSettings: _openSettings,
         // Allowed while unlinked, in case the wrong role was picked.
@@ -685,14 +692,13 @@ class _App217State extends State<App217> {
       onOpenSettings: _openSettings,
       cycleRefreshSignal: _stageChanges,
       onShareChanged: (share) => setState(() => _share = share),
-      onConsentRequired: _onOwnConsentRequired,
       partnerAlertSyncQueue: _partnerAlertSyncQueue,
-      cancelDailyReminder: () async {
-        await _cancelDailyReminder();
-        return const LocalReminderSyncResult(
-          LocalReminderSyncStatus.cancelled,
-        );
-      },
+      sessionGeneration: _sessionGeneration,
+      isSessionCurrent: (generation, userId) =>
+          mounted &&
+          generation == _sessionGeneration &&
+          !_consentRequired &&
+          _user?.id == userId,
       // Partners get alerts instead of a daily reminder, so no bubble for them.
       showReminderHint: _user!.isOwner &&
           _remindersOn == false &&

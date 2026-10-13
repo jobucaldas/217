@@ -26,10 +26,10 @@ class CalendarScreen extends StatefulWidget {
     this.cycleRefreshSignal,
     this.share = const ShareState(status: 'none'),
     this.onShareChanged,
-    this.onConsentRequired,
     this.partnerAlertScheduler,
     this.partnerAlertSyncQueue,
-    this.cancelDailyReminder,
+    this.sessionGeneration = 0,
+    this.isSessionCurrent,
     this.palette = AppPalette.blue,
     this.showReminderHint = false,
     this.onDismissReminderHint,
@@ -42,11 +42,11 @@ class CalendarScreen extends StatefulWidget {
   final VoidCallback onOpenSettings;
   final Listenable? cycleRefreshSignal;
   final ValueChanged<ShareState>? onShareChanged;
-  final VoidCallback? onConsentRequired;
   final Future<LocalReminderSyncStatus> Function(List<PlannedAlert>)?
       partnerAlertScheduler;
   final PartnerAlertSyncQueue? partnerAlertSyncQueue;
-  final Future<LocalReminderSyncResult> Function()? cancelDailyReminder;
+  final int sessionGeneration;
+  final bool Function(int generation, String userId)? isSessionCurrent;
   final AppPalette palette;
 
   /// Bubble pointing at the reminder setting; closes itself after a while.
@@ -214,21 +214,19 @@ class _CalendarScreenState extends State<CalendarScreen>
       return true;
     }
     if (err.message == 'consent required') {
-      _clearCalendarData();
-      widget.onConsentRequired?.call();
-      if (widget.user.isOwner) _cancelDailyReminder();
+      _clearCalendarData(cancelPartnerAlerts: false);
       if (closeDayEditor && mounted) Navigator.of(context).maybePop();
       return true;
     }
     return false;
   }
 
-  void _clearCalendarData({String? error}) {
+  void _clearCalendarData({String? error, bool cancelPartnerAlerts = true}) {
     _loadGeneration++;
     _cycleLoadGeneration++;
     final alertGeneration = ++_alertSyncGeneration;
     _alertSyncKey = null;
-    if (widget.user.isPartner) {
+    if (cancelPartnerAlerts && widget.user.isPartner) {
       if (alertGeneration == _alertSyncGeneration) {
         unawaited(_cancelPartnerAlerts());
       }
@@ -251,21 +249,12 @@ class _CalendarScreenState extends State<CalendarScreen>
     return (widget.partnerAlertScheduler ?? syncPartnerAlerts)(const []);
   }
 
-  void _cancelDailyReminder() {
-    final cancel = widget.cancelDailyReminder ??
-        () => syncLocalDailyReminder(
-              enabled: false,
-              timeHhMm: '09:00',
-              title: '217',
-              body: widget.strings.recordToday,
-            );
-    unawaited(cancel().then<void>((_) {}, onError: (Object _) {}));
-  }
-
   /// Predictions are a bonus on top of the calendar: failures (older
   /// servers) leave the grid as is.
   Future<void> _loadCycle() async {
     final generation = ++_cycleLoadGeneration;
+    final sessionGeneration = widget.sessionGeneration;
+    final queueRevision = widget.partnerAlertSyncQueue?.revision;
     CycleInfo cycle;
     try {
       cycle = await widget.api.getCycle(_todayKey);
@@ -274,12 +263,30 @@ class _CalendarScreenState extends State<CalendarScreen>
       _handleConsentFailure(err);
       return;
     }
-    if (!mounted || generation != _cycleLoadGeneration) return;
+    if (!mounted ||
+        generation != _cycleLoadGeneration ||
+        !_isCurrentSession(sessionGeneration)) {
+      return;
+    }
     setState(() => _cycle = cycle);
-    if (widget.user.isPartner) await _syncPartnerAlerts(cycle);
+    if (widget.user.isPartner) {
+      await _syncPartnerAlerts(
+        cycle,
+        sessionGeneration: sessionGeneration,
+        queueRevision: queueRevision,
+      );
+    }
   }
 
-  Future<void> _syncPartnerAlerts(CycleInfo cycle) async {
+  bool _isCurrentSession(int generation) =>
+      mounted &&
+      (widget.isSessionCurrent?.call(generation, widget.user.id) ?? true);
+
+  Future<void> _syncPartnerAlerts(
+    CycleInfo cycle, {
+    required int sessionGeneration,
+    required int? queueRevision,
+  }) async {
     final generation = ++_alertSyncGeneration;
     final todayLogged = _todayEntry?.taken == true;
     final key = [
@@ -290,18 +297,22 @@ class _CalendarScreenState extends State<CalendarScreen>
     ].join('|');
     if (key == _alertSyncKey) return;
     final queue = widget.partnerAlertSyncQueue;
-    final revision = queue?.beginIntent();
     try {
       final pref = await widget.api.getPartnerAlerts();
-      if (!mounted || generation != _alertSyncGeneration) return;
+      if (!mounted ||
+          generation != _alertSyncGeneration ||
+          !_isCurrentSession(sessionGeneration)) {
+        return;
+      }
       // Only touch the OS scheduler once the partner opted in.
-      if (queue != null && (revision == null || !queue.isCurrent(revision))) {
+      if (queue != null &&
+          (queueRevision == null || !queue.isCurrent(queueRevision))) {
         return;
       }
       if (!pref.pmsEnabled && !pref.pillEnabled) {
         if (queue != null) {
-          await queue.scheduleIfCurrent(
-            revision: revision!,
+          await queue.scheduleBackgroundIfCurrent(
+            revision: queueRevision!,
             alerts: const [],
           );
         } else {
@@ -324,15 +335,19 @@ class _CalendarScreenState extends State<CalendarScreen>
           pillBody: widget.strings.pillNotifBody(widget.share.ownerName),
         );
         if (queue != null) {
-          await queue.scheduleIfCurrent(
-            revision: revision!,
+          await queue.scheduleBackgroundIfCurrent(
+            revision: queueRevision!,
             alerts: alerts,
           );
         } else {
           await (widget.partnerAlertScheduler ?? syncPartnerAlerts)(alerts);
         }
       }
-      if (mounted && generation == _alertSyncGeneration) _alertSyncKey = key;
+      if (mounted &&
+          generation == _alertSyncGeneration &&
+          _isCurrentSession(sessionGeneration)) {
+        _alertSyncKey = key;
+      }
     } catch (err) {
       if (!mounted || generation != _alertSyncGeneration) return;
       if (_handleConsentFailure(err)) return;

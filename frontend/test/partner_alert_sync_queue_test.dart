@@ -72,4 +72,61 @@ void main() {
     await Future.wait([plan, cancellation]);
     expect(calls, ['schedule', 'cancel']);
   });
+
+  test('logout cancellation invalidates a delayed background read', () async {
+    final calls = <List<PlannedAlert>>[];
+    final queue = PartnerAlertSyncQueue(scheduler: (alerts) async {
+      calls.add(alerts);
+      return LocalReminderSyncStatus.scheduled;
+    });
+    final readRevision = queue.revision;
+
+    await queue.cancel();
+    final result = await queue.scheduleBackgroundIfCurrent(
+      revision: readRevision,
+      alerts: [
+        PlannedAlert(
+          id: 21720,
+          when: DateTime(2026, 10, 14),
+          title: 'Reminder',
+          body: 'Pill not logged',
+        ),
+      ],
+    );
+
+    expect(result, isNull);
+    expect(calls, [const <PlannedAlert>[]]);
+  });
+
+  test('background planning cannot supersede a pending Settings save',
+      () async {
+    final calls = <List<PlannedAlert>>[];
+    final queue = PartnerAlertSyncQueue(scheduler: (alerts) async {
+      calls.add(alerts);
+      return LocalReminderSyncStatus.scheduled;
+    });
+    final settingsRevision = queue.beginIntent();
+    final oldEnabledPlan = [
+      PlannedAlert(
+        id: 21720,
+        when: DateTime(2026, 10, 14),
+        title: 'Reminder',
+        body: 'Pill not logged',
+      ),
+    ];
+
+    final backgroundResult = await queue.scheduleBackgroundIfCurrent(
+      revision: queue.revision,
+      alerts: oldEnabledPlan,
+    );
+    final settingsResult = await queue.scheduleIfCurrent(
+      revision: settingsRevision,
+      alerts: const [],
+    );
+    queue.finishIntent(settingsRevision);
+
+    expect(backgroundResult, isNull);
+    expect(settingsResult, LocalReminderSyncStatus.scheduled);
+    expect(calls, [const <PlannedAlert>[]]);
+  });
 }

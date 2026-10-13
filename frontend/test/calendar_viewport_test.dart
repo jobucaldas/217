@@ -10,6 +10,7 @@ import 'package:a217/src/config.dart';
 import 'package:a217/src/i18n.dart';
 import 'package:a217/src/models.dart';
 import 'package:a217/src/notifications/local_reminders.dart';
+import 'package:a217/src/notifications/partner_alert_sync_queue.dart';
 import 'package:a217/src/screens/calendar_screen.dart';
 import 'package:a217/src/theme/app_theme.dart';
 
@@ -127,6 +128,20 @@ class _OwnConsentApi extends _FakeCalendarApi {
       );
 }
 
+class _GatedPartnerCycleApi extends _FakeCalendarApi {
+  final cycleGate = Completer<void>();
+
+  @override
+  Future<CycleInfo> getCycle(String today) async {
+    await cycleGate.future;
+    return CycleInfo.empty;
+  }
+
+  @override
+  Future<PartnerAlertPreference> getPartnerAlerts() async =>
+      const PartnerAlertPreference(pillEnabled: true);
+}
+
 /// Representative monitor / window sizes where the month grid used to crop.
 const _viewports = <(String, Size)>[
   ('phone', Size(390, 844)),
@@ -143,7 +158,6 @@ void main() {
 
   testWidgets('shared calendar explains when its owner has not consented',
       (tester) async {
-    var consentRecoveryRequested = false;
     final api = _CalendarOwnerConsentApi(const [], blockImmediately: true);
     await tester.pumpWidget(MaterialApp(
       theme: buildApp217Theme(
@@ -160,7 +174,6 @@ void main() {
         strings: const Strings(AppLanguage.en),
         onOpenSettings: () {},
         share: const ShareState(status: 'active'),
-        onConsentRequired: () => consentRecoveryRequested = true,
         palette: AppPalette.blue,
       ),
     ));
@@ -173,13 +186,10 @@ void main() {
       ),
       findsOneWidget,
     );
-    expect(consentRecoveryRequested, isFalse);
   });
 
-  testWidgets('own consent block clears the local daily reminder',
+  testWidgets('own consent block clears calendar data for central recovery',
       (tester) async {
-    var consentRecoveryRequested = false;
-    var remindersCancelled = 0;
     await tester.pumpWidget(MaterialApp(
       theme: buildApp217Theme(
         brightness: Brightness.light,
@@ -191,20 +201,56 @@ void main() {
             id: 'owner', email: 'o@example.invalid', name: 'O', role: 'owner'),
         strings: const Strings(AppLanguage.en),
         onOpenSettings: () {},
-        onConsentRequired: () => consentRecoveryRequested = true,
-        cancelDailyReminder: () async {
-          remindersCancelled++;
-          return const LocalReminderSyncResult(
-              LocalReminderSyncStatus.cancelled);
-        },
         palette: AppPalette.blue,
       ),
     ));
     await tester.pumpAndSettle();
 
-    expect(consentRecoveryRequested, isTrue);
-    expect(remindersCancelled, 1);
     expect(find.byKey(const ValueKey('calendar-error')), findsNothing);
+  });
+
+  testWidgets(
+      'delayed partner cycle cannot schedule after session invalidation',
+      (tester) async {
+    final api = _GatedPartnerCycleApi();
+    final scheduled = <List<PlannedAlert>>[];
+    var sessionGeneration = 1;
+    final queue = PartnerAlertSyncQueue(
+      scheduler: (alerts) async {
+        scheduled.add(alerts);
+        return LocalReminderSyncStatus.scheduled;
+      },
+      canceller: () async {},
+    );
+    await tester.pumpWidget(MaterialApp(
+      theme: buildApp217Theme(
+        brightness: Brightness.light,
+        palette: AppPalette.blue,
+      ),
+      home: CalendarScreen(
+        api: api,
+        user: const User(
+          id: 'partner',
+          email: 'p@example.invalid',
+          name: 'P',
+          role: 'partner',
+        ),
+        strings: const Strings(AppLanguage.en),
+        onOpenSettings: () {},
+        share: const ShareState(status: 'active'),
+        partnerAlertSyncQueue: queue,
+        sessionGeneration: sessionGeneration,
+        isSessionCurrent: (generation, _) => generation == sessionGeneration,
+      ),
+    ));
+    await tester.pump();
+
+    sessionGeneration++;
+    await queue.cancel();
+    api.cycleGate.complete();
+    await tester.pumpAndSettle();
+
+    expect(scheduled, isEmpty);
   });
 
   testWidgets('owner consent block clears previously visible calendar data',

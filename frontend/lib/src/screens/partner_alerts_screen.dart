@@ -69,7 +69,9 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
         _loading = false;
       });
     } catch (err) {
-      await _cancelPartnerAlerts();
+      if (err is! ApiException || err.message != 'consent required') {
+        await _cancelPartnerAlerts();
+      }
       if (!mounted) return;
       setState(() {
         _loading = false;
@@ -125,17 +127,14 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
         ..hideCurrentSnackBar()
         ..showSnackBar(SnackBar(content: Text(widget.strings.reminderSaved)));
     } catch (err) {
-      if (err is ApiException &&
-          err.statusCode == 403 &&
-          err.message == 'consent required') {
-        await _cancelPartnerAlerts();
-      }
       if (!mounted) return;
       setState(() {
         _pref = previous;
         _saving = false;
         _error = friendlyError(widget.strings, err);
       });
+    } finally {
+      if (revision != null) syncQueue?.finishIntent(revision);
     }
   }
 
@@ -160,7 +159,9 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
         final entries = await widget.api.listEntries(now.year, now.month);
         todayLogged = entries.any((e) => e.date == today && e.taken == true);
       } catch (err) {
-        await _cancelPartnerAlerts();
+        if (err is! ApiException || err.message != 'consent required') {
+          await _cancelPartnerAlerts();
+        }
         _calendarDataError = err is ApiException &&
                 err.statusCode == 403 &&
                 err.message == 'calendar owner consent required'

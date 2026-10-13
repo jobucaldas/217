@@ -32,7 +32,7 @@ class SettingsPage extends StatefulWidget {
     this.user,
     this.share,
     this.onShareChanged,
-    this.onConsentRequired,
+    this.onAccountDeleting,
     this.onAccountDeleted,
     this.onLogout,
     this.onRoleChanged,
@@ -56,7 +56,7 @@ class SettingsPage extends StatefulWidget {
   final User? user;
   final ShareState? share;
   final ValueChanged<ShareState>? onShareChanged;
-  final VoidCallback? onConsentRequired;
+  final VoidCallback? onAccountDeleting;
   final VoidCallback? onAccountDeleted;
   final Future<void> Function()? onLogout;
 
@@ -112,16 +112,6 @@ class _SettingsPageState extends State<SettingsPage> {
       setState(() => _savingStage = false);
       widget.onStageChanged?.call(session);
     } catch (error) {
-      if (error is ApiException &&
-          error.statusCode == 403 &&
-          error.message == 'consent required') {
-        await widget.dailyReminderSyncQueue?.cancel(
-          title: '217',
-          body: widget.strings.recordToday,
-        );
-        await widget.partnerAlertSyncQueue?.cancel();
-        widget.onConsentRequired?.call();
-      }
       if (mounted) {
         setState(() => _savingStage = false);
         _showSnack(friendlyError(widget.strings, error));
@@ -243,7 +233,6 @@ class _SettingsPageState extends State<SettingsPage> {
                             dailyReminderSyncQueue:
                                 widget.dailyReminderSyncQueue,
                             onToggled: widget.onRemindersToggled,
-                            onConsentRequired: widget.onConsentRequired,
                           ),
                         ),
                       );
@@ -570,6 +559,7 @@ class _SettingsPageState extends State<SettingsPage> {
               DeleteAccountSection(
                 api: widget.api,
                 strings: widget.strings,
+                onAccountDeleting: widget.onAccountDeleting,
                 onAccountDeleted: () {
                   widget.onAccountDeleted!();
                   if (context.mounted) Navigator.of(context).pop();

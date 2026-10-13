@@ -111,8 +111,7 @@ void main() {
     expect(toggled, [true, false]);
   });
 
-  testWidgets('403 while saving cancels instead of scheduling locally',
-      (tester) async {
+  testWidgets('403 while saving does not schedule locally', (tester) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
     final api = _FakeReminderApi()
       ..saveError = ApiException(
@@ -133,7 +132,6 @@ void main() {
             : LocalReminderSyncStatus.cancelled,
       );
     });
-    var consentRecoveryCalls = 0;
     await tester.pumpWidget(
       MaterialApp(
         theme: buildApp217Theme(brightness: Brightness.light),
@@ -141,7 +139,6 @@ void main() {
           api: api,
           strings: const Strings(AppLanguage.en),
           dailyReminderSyncQueue: queue,
-          onConsentRequired: () => consentRecoveryCalls++,
         ),
       ),
     );
@@ -151,8 +148,7 @@ void main() {
     await tester.pumpAndSettle();
     debugDefaultTargetPlatformOverride = null;
 
-    expect(operations, [false]);
-    expect(consentRecoveryCalls, 1);
-    expect(queue.revision, 3);
+    expect(operations, isEmpty);
+    expect(queue.revision, 2);
   });
 }
