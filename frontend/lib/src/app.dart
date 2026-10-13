@@ -554,9 +554,10 @@ class _App217State extends State<App217> {
     );
   }
 
+  /// Drops in-flight alert plans; cancelling waits for the server to confirm,
+  /// so a failed deletion keeps the reminder and alerts.
   void _onAccountDeletionStarted() {
     _sessionGeneration++;
-    unawaited(_cancelAllNotifications());
     setState(() {});
   }
 
