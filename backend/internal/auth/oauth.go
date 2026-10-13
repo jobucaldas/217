@@ -42,3 +42,8 @@ type ClientIDReporter interface {
 type WorkOSUserDeleter interface {
 	DeleteUser(ctx context.Context, workosUserID string) error
 }
+
+// UserDeleteConfigurer optionally tells whether a WorkOSUserDeleter is usable.
+type UserDeleteConfigurer interface {
+	CanDeleteUsers() bool
+}

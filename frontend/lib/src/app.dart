@@ -13,6 +13,7 @@ import 'platform/open_url.dart';
 import 'prefs.dart';
 import 'screens/auth_screen.dart';
 import 'screens/calendar_screen.dart';
+import 'screens/privacy_screens.dart';
 import 'screens/role_screen.dart';
 import 'screens/server_setup_screen.dart';
 import 'screens/settings_screen.dart';
@@ -41,6 +42,10 @@ class _App217State extends State<App217> {
   User? _user;
   ShareState _share = const ShareState(status: 'none');
   bool _loading = true;
+
+  /// Signed in but not yet agreed to the server's privacy notice.
+  bool _consentRequired = false;
+  int _consentVersion = 0;
   AppLanguage _language = _deviceLanguage();
   ThemeMode _themeMode = ThemeMode.system;
   AppPalette _palette = AppPalette.blue;
@@ -101,10 +106,11 @@ class _App217State extends State<App217> {
 
     User? user;
     var share = const ShareState(status: 'none');
+    SessionSnapshot? session;
     try {
       await _api.loadPersistedApiBase();
       if (!_api.config.needsServerSetup) {
-        final session = await _api.currentSession();
+        session = await _api.currentSession();
         user = session.user;
         share = session.share ?? share;
       }
@@ -115,9 +121,10 @@ class _App217State extends State<App217> {
     setState(() {
       _user = user;
       _share = share;
+      _setConsent(session);
       _loading = false;
     });
-    if (user != null) {
+    if (user != null && !_consentRequired) {
       unawaited(_loadRemindersState());
       await _offerPendingInvite();
     }
@@ -149,7 +156,25 @@ class _App217State extends State<App217> {
     setState(() {
       _user = session.user;
       _share = session.share ?? const ShareState(status: 'none');
+      _setConsent(session);
     });
+  }
+
+  /// Call inside setState with each session the server returns.
+  void _setConsent(SessionSnapshot? session) {
+    if (session?.user == null) {
+      _consentRequired = false;
+      return;
+    }
+    _consentRequired = session!.consentRequired;
+    _consentVersion = session.consentVersion;
+  }
+
+  /// Agreed to the privacy notice: the app can load and offer what waited.
+  Future<void> _onConsented(SessionSnapshot session) async {
+    _applySession(session);
+    unawaited(_loadRemindersState());
+    await _offerPendingInvite();
   }
 
   Future<void> _setThemeMode(ThemeMode mode) async {
@@ -171,6 +196,8 @@ class _App217State extends State<App217> {
   /// when this account can join one: no role picked yet (joining makes it a
   /// partner), or a partner not linked to a calendar. Owners never join.
   Future<void> _offerPendingInvite() async {
+    // Joining waits for consent; the code stays saved until then.
+    if (_consentRequired) return;
     final code = (await _prefs.pendingInvite())?.trim() ?? '';
     final user = _user;
     if (code.isEmpty || user == null || !mounted) return;
@@ -229,6 +256,7 @@ class _App217State extends State<App217> {
     setState(() {
       _user = session.user ?? _user;
       _share = session.share ?? const ShareState(status: 'none');
+      if (session.user != null) _setConsent(session);
     });
   }
 
@@ -309,10 +337,13 @@ class _App217State extends State<App217> {
         setState(() {
           _user = session.user ?? user;
           _share = session.share ?? const ShareState(status: 'none');
+          _setConsent(session);
           _loading = false;
         });
-        unawaited(_loadRemindersState());
-        await _offerPendingInvite();
+        if (!_consentRequired) {
+          unawaited(_loadRemindersState());
+          await _offerPendingInvite();
+        }
       } else {
         setState(() => _loading = false);
       }
@@ -422,6 +453,16 @@ class _App217State extends State<App217> {
             : _api.config.hasDefaultServer
                 ? () => _openSettings(expandServer: true)
                 : _openServerSetup,
+      );
+    }
+    if (_consentRequired) {
+      return ConsentScreen(
+        api: _api,
+        strings: _strings,
+        version: _consentVersion,
+        onAccepted: _onConsented,
+        onDecline: _logout,
+        onOpenSettings: _openSettings,
       );
     }
     if (!_user!.hasRole) {

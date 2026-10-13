@@ -107,3 +107,86 @@ func TestDeleteUserRemovesData(t *testing.T) {
 		t.Fatalf("expected entries cleared, got %d", len(entries))
 	}
 }
+
+func TestDeletingPartnerRevokesTheShare(t *testing.T) {
+	forEachStore(t, func(t *testing.T, name string, s Store) {
+		{
+			owner, _ := s.LinkWorkOSIdentity("o-"+name, "o-"+name+"@example.com", "O", true)
+			partner, _ := s.LinkWorkOSIdentity("p-"+name, "p-"+name+"@example.com", "P", true)
+			if _, err := s.SetRole(owner.ID, model.RoleOwner); err != nil {
+				t.Fatal(err)
+			}
+			share, _ := s.EnableShare(owner.ID)
+			if _, err := s.AcceptShare(partner.ID, share.InviteCode); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.DeleteUser(partner.ID); err != nil {
+				t.Fatal(err)
+			}
+			state, err := s.GetShareState(owner.ID)
+			if err != nil || state.Status != model.ShareNone {
+				t.Fatalf("owner share after partner deleted: %+v %v", state, err)
+			}
+			if _, err := s.EnableShare(owner.ID); err != nil {
+				t.Fatalf("owner must be able to invite again: %v", err)
+			}
+			if _, err := s.SetRole(owner.ID, model.RoleOwner); err != nil {
+				t.Fatal(err)
+			}
+		}
+	})
+}
+
+func TestPurgeExpiredKeepsLiveData(t *testing.T) {
+	forEachStore(t, func(t *testing.T, name string, s Store) {
+		{
+			u, _ := s.LinkWorkOSIdentity("u-"+name, "u-"+name+"@example.com", "U", true)
+			if err := s.CreateSession(u.ID, "live", time.Now().Add(time.Hour)); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.CreateOAuthAttempt("old", "b", "v", "n", time.Now().Add(time.Second)); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.PurgeExpired(time.Now().Add(2 * time.Second)); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.ConsumeOAuthAttempt("old", "b"); err == nil {
+				t.Fatal("expired attempt survived the purge")
+			}
+			if _, err := s.GetUserBySession("live"); err != nil {
+				t.Fatalf("live session purged: %v", err)
+			}
+		}
+	})
+}
+
+// forEachStore runs fn against the memory store and, when TEST_DATABASE_URL
+// is set, PostgreSQL.
+func forEachStore(t *testing.T, fn func(t *testing.T, name string, s Store)) {
+	t.Run("memory", func(t *testing.T) { fn(t, "memory", NewMemoryStore()) })
+	t.Run("postgres", func(t *testing.T) { fn(t, "postgres", pgTestStore(t)) })
+}
+
+func TestSentNotesListedForTheirAuthor(t *testing.T) {
+	forEachStore(t, func(t *testing.T, name string, s Store) {
+		owner, _ := s.LinkWorkOSIdentity("so-"+name, "so-"+name+"@example.com", "O", true)
+		partner, _ := s.LinkWorkOSIdentity("sp-"+name, "sp-"+name+"@example.com", "P", true)
+		if _, err := s.SetRole(owner.ID, model.RoleOwner); err != nil {
+			t.Fatal(err)
+		}
+		share, _ := s.EnableShare(owner.ID)
+		if _, err := s.AcceptShare(partner.ID, share.InviteCode); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.CreatePartnerNote(partner.ID, "for you"); err != nil {
+			t.Fatal(err)
+		}
+		sent, err := s.ListSentPartnerNotes(partner.ID)
+		if err != nil || len(sent) != 1 || sent[0].Body != "for you" {
+			t.Fatalf("sent notes: %+v %v", sent, err)
+		}
+		if mine, _ := s.ListSentPartnerNotes(owner.ID); len(mine) != 0 {
+			t.Fatalf("owner wrote no notes, got %+v", mine)
+		}
+	})
+}

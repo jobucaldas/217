@@ -82,18 +82,34 @@ class ShareState {
 }
 
 class SessionSnapshot {
-  const SessionSnapshot({this.user, this.share});
+  const SessionSnapshot({
+    this.user,
+    this.share,
+    this.consentRequired = false,
+    this.consentVersion = 0,
+  });
 
   final User? user;
   final ShareState? share;
 
+  /// The user has not agreed to the server's current privacy notice yet;
+  /// the server refuses to process their data until they do.
+  final bool consentRequired;
+
+  /// Privacy notice version the server asks consent for.
+  final int consentVersion;
+
   factory SessionSnapshot.fromJson(Map<String, dynamic> json) {
     final userJson = json['user'];
+    final consent = json['consent'];
     return SessionSnapshot(
       user: userJson == null
           ? null
           : User.fromJson(userJson as Map<String, dynamic>),
       share: ShareState.fromJson(json['share'] as Map<String, dynamic>?),
+      consentRequired: consent is Map && consent['required'] == true,
+      consentVersion:
+          consent is Map ? (consent['version'] as num?)?.toInt() ?? 0 : 0,
     );
   }
 }
@@ -142,6 +158,7 @@ class Entry {
   });
 
   final String date;
+
   /// Null means Em aberto (no Taken/Missed yet); entry may still hold note/heart.
   final bool? taken;
   final String notes;

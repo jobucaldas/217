@@ -8,6 +8,7 @@ import '../models.dart';
 import '../platform/open_url.dart';
 import '../theme/app_theme.dart';
 import 'partner_alerts_screen.dart';
+import 'privacy_screens.dart';
 import 'reminder_settings_screen.dart';
 import 'role_screen.dart';
 import 'share_screens.dart';
@@ -456,6 +457,30 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
             ],
           ),
+          // Privacy (LGPD): the notice, and a copy of everything held.
+          if (widget.onAccountDeleted != null) ...[
+            const SizedBox(height: 20),
+            _SettingsSection(
+              children: [
+                ListTile(
+                  key: const ValueKey('privacy-notice'),
+                  leading: Icon(Icons.privacy_tip_outlined, color: scheme.primary),
+                  title: Text(widget.strings.privacyNotice),
+                  trailing:
+                      Icon(Icons.chevron_right, color: scheme.onSurfaceVariant),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => PrivacyNoticePage(
+                        api: widget.api,
+                        strings: widget.strings,
+                      ),
+                    ),
+                  ),
+                ),
+                DownloadDataTile(api: widget.api, strings: widget.strings),
+              ],
+            ),
+          ],
           // Account actions: pull away from prefs above; keep delete + logout tight.
           if (widget.onAccountDeleted != null || widget.onLogout != null) ...[
             const SizedBox(height: 40),

@@ -35,7 +35,18 @@ func (s *PGStore) WorkOSSubject(userID string) (string, error) {
 }
 
 func (s *PGStore) DeleteUser(userID string) error {
-	res, err := s.db.Exec(`DELETE FROM users WHERE id = $1`, userID)
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("deleting user: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	// A departing partner leaves the owner's share revoked, not "active"
+	// with nobody on the other end (partner_id is set NULL below).
+	if _, err := tx.Exec(`UPDATE calendar_shares SET status = 'revoked', updated_at = NOW()
+		WHERE partner_id = $1 AND status IN ('open', 'active')`, userID); err != nil {
+		return fmt.Errorf("revoking shares: %w", err)
+	}
+	res, err := tx.Exec(`DELETE FROM users WHERE id = $1`, userID)
 	if err != nil {
 		return fmt.Errorf("deleting user: %w", err)
 	}
@@ -43,7 +54,7 @@ func (s *PGStore) DeleteUser(userID string) error {
 	if n == 0 {
 		return fmt.Errorf("user not found")
 	}
-	return nil
+	return tx.Commit()
 }
 
 func (s *PGStore) buildShareState(user *model.User) (*model.ShareState, error) {
@@ -366,6 +377,34 @@ func (s *PGStore) CreatePartnerNote(partnerID, body string) (*model.PartnerNote,
 	note.FromName = user.Name
 	note.FromEmail = user.Email
 	return note, nil
+}
+
+func (s *PGStore) ListSentPartnerNotes(partnerID string) ([]*model.PartnerNote, error) {
+	rows, err := s.db.Query(
+		`SELECT id, owner_id, partner_id, body_sealed, created_at, read_at
+		 FROM partner_notes WHERE partner_id = $1 ORDER BY created_at DESC`, partnerID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("listing sent notes: %w", err)
+	}
+	defer rows.Close()
+	out := make([]*model.PartnerNote, 0)
+	for rows.Next() {
+		note := &model.PartnerNote{}
+		var readAt sql.NullTime
+		var body []byte
+		if err := rows.Scan(&note.ID, &note.OwnerID, &note.PartnerID, &body, &note.CreatedAt, &readAt); err != nil {
+			return nil, err
+		}
+		if note.Body, err = s.kr.OpenString(body, noteCtx(note.ID, note.OwnerID, note.PartnerID)); err != nil {
+			return nil, fmt.Errorf("opening partner note %s: %w", note.ID, err)
+		}
+		if readAt.Valid {
+			note.ReadAt = &readAt.Time
+		}
+		out = append(out, note)
+	}
+	return out, rows.Err()
 }
 
 func (s *PGStore) MarkInboxNoteRead(ownerID, noteID string) error {

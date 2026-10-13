@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"217/backend/internal/auth"
 	"217/backend/internal/model"
@@ -24,7 +25,82 @@ func (h *Handler) sessionPayload(user *model.User) map[string]interface{} {
 	return map[string]interface{}{
 		"user":  user,
 		"share": h.withInviteURL(share),
+		"consent": map[string]interface{}{
+			"version":  model.ConsentVersion,
+			"required": !user.HasConsent(),
+		},
 	}
+}
+
+// RecordConsent stores the user's agreement to the privacy notice version
+// the app showed; an outdated version is refused so the new text is shown.
+func (h *Handler) RecordConsent(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Version int `json:"version"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
+		return
+	}
+	if body.Version != model.ConsentVersion {
+		writeJSON(w, http.StatusConflict, map[string]interface{}{
+			"error": "privacy notice changed", "consent_version": model.ConsentVersion,
+		})
+		return
+	}
+	user, err := h.store.RecordConsent(getUserID(r), body.Version)
+	if err != nil {
+		log.Printf("record consent: %v", err)
+		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, h.sessionPayload(user))
+}
+
+// ExportAccount returns everything stored about the caller as a JSON file.
+func (h *Handler) ExportAccount(w http.ResponseWriter, r *http.Request) {
+	userID := getUserID(r)
+	user, err := h.store.GetUserByID(userID)
+	if err != nil {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	out := model.AccountExport{ExportedAt: time.Now().UTC(), User: user}
+	fail := func(what string, err error) {
+		log.Printf("export %s: %v", what, err)
+		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+	}
+	if out.Share, err = h.store.GetShareState(userID); err != nil {
+		fail("share", err)
+		return
+	}
+	if out.Entries, err = h.store.ListAllEntries(userID); err != nil {
+		fail("entries", err)
+		return
+	}
+	out.NotesReceived = []*model.PartnerNote{}
+	if user.EffectiveRole() == model.RoleOwner {
+		if out.NotesReceived, err = h.store.ListInboxNotes(userID); err != nil {
+			fail("inbox", err)
+			return
+		}
+	}
+	if out.NotesSent, err = h.store.ListSentPartnerNotes(userID); err != nil {
+		fail("sent notes", err)
+		return
+	}
+	if out.Reminder, err = h.store.GetReminderPreference(userID); err != nil {
+		fail("reminder", err)
+		return
+	}
+	if user.EffectiveRole() == model.RolePartner {
+		if out.PartnerAlerts, err = h.store.GetPartnerAlerts(userID); err != nil {
+			fail("partner alerts", err)
+			return
+		}
+	}
+	w.Header().Set("Content-Disposition", `attachment; filename="217-data-`+out.ExportedAt.Format("2006-01-02")+`.json"`)
+	writeJSON(w, http.StatusOK, out)
 }
 
 // withInviteURL adds the shareable web link for an open invite, e.g.
@@ -57,14 +133,14 @@ func (h *Handler) DeleteAccount(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	if subject != "" {
-		deleter, ok := h.oauthProvider.(auth.WorkOSUserDeleter)
-		if !ok || deleter == nil {
-			writeJSON(w, http.StatusServiceUnavailable, map[string]string{
-				"error": "WorkOS user delete is not configured; account not deleted",
-			})
-			return
-		}
+	// Without WORKOS_API_KEY the sign-in identity stays with WorkOS, but the
+	// data here (the sensitive part) is still deleted: the right to erasure
+	// must not hinge on optional server configuration.
+	deleter, canDelete := h.oauthProvider.(auth.WorkOSUserDeleter)
+	if c, ok := h.oauthProvider.(auth.UserDeleteConfigurer); ok && !c.CanDeleteUsers() {
+		canDelete = false
+	}
+	if subject != "" && canDelete {
 		if err := deleter.DeleteUser(r.Context(), subject); err != nil {
 			log.Printf("delete account workos user %s: %v", subject, err)
 			writeJSON(w, http.StatusBadGateway, map[string]string{
@@ -72,6 +148,8 @@ func (h *Handler) DeleteAccount(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+	} else if subject != "" {
+		log.Printf("delete account %s: WorkOS identity kept (WORKOS_API_KEY not set or provider unavailable)", userID)
 	}
 
 	if err := h.store.DeleteUser(userID); err != nil {

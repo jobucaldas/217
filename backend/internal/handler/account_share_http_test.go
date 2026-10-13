@@ -166,7 +166,9 @@ func (authOnlyProvider) Exchange(context.Context, string, string, string) (*auth
 	return nil, fmt.Errorf("unused")
 }
 
-func TestDeleteAccountFailsClosedWithoutWorkOSDeleter(t *testing.T) {
+// Erasure (LGPD art. 18) must not depend on WORKOS_API_KEY: without a
+// deleter the local data still goes; only the sign-in identity stays.
+func TestDeleteAccountWithoutWorkOSDeleterStillErasesData(t *testing.T) {
 	h, s := newTestHandler(t)
 	h.SetOAuthProvider(authOnlyProvider{})
 
@@ -178,11 +180,11 @@ func TestDeleteAccountFailsClosedWithoutWorkOSDeleter(t *testing.T) {
 	req := authedRequest(http.MethodDelete, "/api/account", cookie, nil)
 	w := httptest.NewRecorder()
 	h.AuthMiddleware(h.DeleteAccount)(w, req)
-	if w.Code != http.StatusServiceUnavailable {
-		t.Fatalf("expected 503, got %d %s", w.Code, w.Body.String())
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d %s", w.Code, w.Body.String())
 	}
-	if _, err := s.GetUserByID(user.ID); err != nil {
-		t.Fatalf("local user must remain: %v", err)
+	if _, err := s.GetUserByID(user.ID); err == nil {
+		t.Fatal("local user must be deleted")
 	}
 }
 

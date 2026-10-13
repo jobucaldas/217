@@ -152,6 +152,9 @@ func (w *WorkOSOAuth) ExchangeWithRedirect(ctx context.Context, code, codeVerifi
 	return userInfoFromWorkOS(&parsed)
 }
 
+// CanDeleteUsers reports whether DeleteUser can work (it needs the API key).
+func (w *WorkOSOAuth) CanDeleteUsers() bool { return w != nil && w.apiKey != "" }
+
 // DeleteUser permanently deletes the AuthKit user (DELETE /user_management/users/{id}).
 // A missing user (already deleted) is treated as success so retries stay idempotent.
 func (w *WorkOSOAuth) DeleteUser(ctx context.Context, workosUserID string) error {

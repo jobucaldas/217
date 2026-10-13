@@ -69,7 +69,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(
         find.text(
-          'This permanently deletes your data and login account. This cannot be undone.',
+          'This permanently deletes your data and login account, and withdraws your consent. This cannot be undone.',
         ),
         findsOneWidget,
       );

@@ -88,8 +88,15 @@ func (s *MemoryStore) DeleteUser(userID string) error {
 		}
 	}
 	for id, share := range s.shares {
-		if share.OwnerID == userID || share.PartnerID == userID {
+		switch {
+		case share.OwnerID == userID:
 			delete(s.shares, id)
+		case share.PartnerID == userID:
+			share.PartnerID = ""
+			if share.Status == model.ShareOpen || share.Status == model.ShareActive {
+				share.Status = model.ShareRevoked
+				share.UpdatedAt = time.Now().UTC()
+			}
 		}
 	}
 	for id, note := range s.partnerNotes {
@@ -98,6 +105,52 @@ func (s *MemoryStore) DeleteUser(userID string) error {
 		}
 	}
 	return nil
+}
+
+func (s *MemoryStore) RecordConsent(userID string, version int) (*model.User, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	u := s.findUserLocked(userID)
+	if u == nil {
+		return nil, fmt.Errorf("user not found")
+	}
+	now := time.Now().UTC()
+	u.ConsentVersion, u.ConsentedAt, u.UpdatedAt = version, &now, now
+	return sanitizeUser(u), nil
+}
+
+func (s *MemoryStore) PurgeExpired(now time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for k, sess := range s.sessions {
+		if !now.Before(sess.ExpiresAt) {
+			delete(s.sessions, k)
+		}
+	}
+	for k, a := range s.oauthAttempts {
+		if !now.Before(a.ExpiresAt) {
+			delete(s.oauthAttempts, k)
+		}
+	}
+	for id, share := range s.shares {
+		if share.Status == model.ShareRevoked && !share.UpdatedAt.After(now.Add(-model.RetentionAfterRevoke)) {
+			delete(s.shares, id)
+		}
+	}
+	return nil
+}
+
+func (s *MemoryStore) ListSentPartnerNotes(partnerID string) ([]*model.PartnerNote, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]*model.PartnerNote, 0)
+	for _, n := range s.partnerNotes {
+		if n.PartnerID == partnerID {
+			c := *n
+			out = append(out, &c)
+		}
+	}
+	return out, nil
 }
 
 func (s *MemoryStore) findUserLocked(userID string) *model.User {

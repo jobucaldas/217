@@ -179,8 +179,8 @@ class Strings {
         'Rode o 217 no seu próprio servidor e mantenha seus dados lá.',
         'Ejecuta 217 en tu propio servidor y guarda tus datos allí.',
       );
-  String get selfHostGuide =>
-      _t('Self-hosting guide', 'Guia de hospedagem própria', 'Guía para alojarlo tú');
+  String get selfHostGuide => _t('Self-hosting guide',
+      'Guia de hospedagem própria', 'Guía para alojarlo tú');
   String get dismiss => _t('Dismiss', 'Dispensar', 'Descartar');
   String get showMore =>
       _t('Advanced options', 'Opções avançadas', 'Opciones avanzadas');
@@ -278,11 +278,12 @@ class Strings {
       );
 
   // Account
-  String get deleteAccount => _t('Delete account', 'Excluir conta', 'Eliminar cuenta');
+  String get deleteAccount =>
+      _t('Delete account', 'Excluir conta', 'Eliminar cuenta');
   String get deleteAccountWarn => _t(
-        'This permanently deletes your data and login account. This cannot be undone.',
-        'Isso apaga permanentemente seus dados e a conta de login. Não dá para desfazer.',
-        'Esto elimina de forma permanente tus datos y tu cuenta. No se puede deshacer.',
+        'This permanently deletes your data and login account, and withdraws your consent. This cannot be undone.',
+        'Isso apaga permanentemente seus dados e a conta de login, e revoga seu consentimento. Não dá para desfazer.',
+        'Esto elimina de forma permanente tus datos y tu cuenta, y retira tu consentimiento. No se puede deshacer.',
       );
   String get deleteAccountConfirm => _t(
         'Delete permanently',
@@ -306,7 +307,8 @@ class Strings {
       _t('Send invite', 'Enviar convite', 'Enviar invitación');
   String get shareCopyCode => _t('Copy code', 'Copiar código', 'Copiar código');
   String get shareCopyLink => _t('Copy link', 'Copiar link', 'Copiar enlace');
-  String get codeCopied => _t('Code copied', 'Código copiado', 'Código copiado');
+  String get codeCopied =>
+      _t('Code copied', 'Código copiado', 'Código copiado');
   String get linkCopied => _t('Link copied', 'Link copiado', 'Enlace copiado');
   String get shareSubject => _t(
         'Invite to my 217 calendar',
@@ -335,8 +337,10 @@ class Strings {
     );
   }
 
-  String get shareEnable => _t('Create invite', 'Gerar convite', 'Crear invitación');
-  String get shareRevoke => _t('Revoke access', 'Revogar acesso', 'Revocar acceso');
+  String get shareEnable =>
+      _t('Create invite', 'Gerar convite', 'Crear invitación');
+  String get shareRevoke =>
+      _t('Revoke access', 'Revogar acesso', 'Revocar acceso');
   String get shareActiveWith =>
       _t('Shared with', 'Compartilhado com', 'Compartido con');
   String get shareWaiting => _t(
@@ -365,7 +369,8 @@ class Strings {
   String get inbox => _t('Inbox', 'Caixa de entrada', 'Bandeja de entrada');
   String get inboxEmpty =>
       _t('No notes yet.', 'Nenhuma nota ainda.', 'Aún no hay notas.');
-  String get leaveNote => _t('Leave a note', 'Deixar uma nota', 'Dejar una nota');
+  String get leaveNote =>
+      _t('Leave a note', 'Deixar uma nota', 'Dejar una nota');
   String get sendNote => _t('Send', 'Enviar', 'Enviar');
   String get noteSent => _t('Note sent', 'Nota enviada', 'Nota enviada');
   String get partnerRevokedTitle => _t(
@@ -534,5 +539,84 @@ class Strings {
         "${partnerName(name)} hadn't logged today's pill when 217 last synced.",
         '${partnerName(name)} não tinha registrado a pílula de hoje na última sincronização do 217.',
         '${partnerName(name)} no había registrado la píldora de hoy en la última sincronización de 217.',
+      );
+
+  // Privacy (LGPD)
+  String get privacyTitle => _t('Your data and privacy',
+      'Seus dados e privacidade', 'Tus datos y privacidad');
+  String get privacyNotice =>
+      _t('Privacy notice', 'Aviso de privacidade', 'Aviso de privacidad');
+  String get privacySensitiveTitle => _t(
+        'Sensitive health data',
+        'Dados sensíveis de saúde',
+        'Datos sensibles de salud',
+      );
+  String get privacySensitiveBody => _t(
+        "217 records when you take your contraceptive, missed days, notes, intimacy and period days. Under Brazil's LGPD (Law 13.709/2018) this is sensitive data about health and sex life, so it is only processed with your specific consent.",
+        '217 registra quando você toma o anticoncepcional, dias esquecidos, notas, intimidade e dias de menstruação. Pela LGPD (Lei 13.709/2018) são dados sensíveis de saúde e vida sexual, por isso só são tratados com o seu consentimento específico.',
+        '217 registra cuándo tomas el anticonceptivo, días olvidados, notas, intimidad y días de regla. Según la LGPD de Brasil (Ley 13.709/2018) son datos sensibles de salud y vida sexual, por eso solo se tratan con tu consentimiento específico.',
+      );
+  String get privacyWhatTitle =>
+      _t('What is stored', 'O que é guardado', 'Qué se guarda');
+  String get privacyWhatBody => _t(
+        'Your email and name from sign-in, your calendar entries, notes between you and your partner, and your reminder and alert times.',
+        'Seu email e nome do login, os registros do calendário, as notas entre você e seu parceiro, e os horários de lembretes e alertas.',
+        'Tu email y nombre del inicio de sesión, los registros del calendario, las notas entre tú y tu pareja, y las horas de recordatorios y alertas.',
+      );
+  String get privacyWhyTitle => _t('Why', 'Para quê', 'Para qué');
+  String get privacyWhyBody => _t(
+        'Only to show your calendar and stats, predict periods and PMS, remind you, and share the calendar read-only with the one partner you invite. Never for ads or profiling, and never sold.',
+        'Só para mostrar seu calendário e estatísticas, prever menstruação e TPM, lembrar você e compartilhar o calendário, só para leitura, com o parceiro que você convidar. Nunca para anúncios ou perfilamento, e nunca vendidos.',
+        'Solo para mostrar tu calendario y estadísticas, predecir la regla y el SPM, recordarte y compartir el calendario, solo lectura, con la pareja que invites. Nunca para anuncios o perfiles, y nunca se venden.',
+      );
+  String get privacyWhereTitle => _t('Where and who sees it',
+      'Onde fica e quem vê', 'Dónde está y quién lo ve');
+  String privacyWhereBody(String server) => _t(
+        'On the server $server, run by its operator (the controller). It is encrypted in transit (TLS) and at rest (AES-256). Only you and a partner you invite see your calendar. Sign-in is handled by WorkOS, which receives your email.',
+        'No servidor $server, mantido por quem o opera (o controlador). Fica criptografado em trânsito (TLS) e em repouso (AES-256). Só você e o parceiro que você convidar veem seu calendário. O login é feito pela WorkOS, que recebe seu email.',
+        'En el servidor $server, gestionado por quien lo opera (el responsable). Está cifrado en tránsito (TLS) y en reposo (AES-256). Solo tú y la pareja que invites ven tu calendario. El inicio de sesión lo hace WorkOS, que recibe tu email.',
+      );
+  String get privacyRightsTitle =>
+      _t('Your rights', 'Seus direitos', 'Tus derechos');
+  String get privacyRightsBody => _t(
+        'Download all your data, correct any day, stop sharing, or delete your account and everything in it at any time in Settings. Deleting the account withdraws this consent.',
+        'Baixe todos os seus dados, corrija qualquer dia, pare de compartilhar ou exclua sua conta e tudo nela quando quiser, em Ajustes. Excluir a conta revoga este consentimento.',
+        'Descarga todos tus datos, corrige cualquier día, deja de compartir o elimina tu cuenta y todo su contenido cuando quieras, en Ajustes. Eliminar la cuenta retira este consentimiento.',
+      );
+  String get privacyContactTitle => _t('Contact', 'Contato', 'Contacto');
+  String privacyContactBody(String? contact) =>
+      contact ??
+      _t(
+        'Ask whoever runs this server.',
+        'Fale com quem opera este servidor.',
+        'Pregunta a quien opera este servidor.',
+      );
+  String get consentCheckbox => _t(
+        'I agree to 217 processing my health data for these purposes.',
+        'Concordo que o 217 trate meus dados de saúde para essas finalidades.',
+        'Acepto que 217 trate mis datos de salud para estos fines.',
+      );
+  String get consentAccept =>
+      _t('Agree and continue', 'Concordar e continuar', 'Aceptar y continuar');
+  String get consentDecline =>
+      _t('Not now (sign out)', 'Agora não (sair)', 'Ahora no (cerrar sesión)');
+  String get downloadData =>
+      _t('Download my data', 'Baixar meus dados', 'Descargar mis datos');
+  String get downloadDataBlurb => _t(
+        'Everything this server holds about you, as a JSON file.',
+        'Tudo que este servidor guarda sobre você, em um arquivo JSON.',
+        'Todo lo que este servidor guarda sobre ti, en un archivo JSON.',
+      );
+  String dataSavedTo(String where) => _t(
+        'Saved to $where',
+        'Salvo em $where',
+        'Guardado en $where',
+      );
+  String get dataDownloaded =>
+      _t('Download started', 'Download iniciado', 'Descarga iniciada');
+  String get dataCopied => _t(
+        'Data copied to the clipboard',
+        'Dados copiados para a área de transferência',
+        'Datos copiados al portapapeles',
       );
 }

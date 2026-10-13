@@ -41,7 +41,8 @@ void main() {
       expect(size.height, TodayNudge.height);
       // Hugs text — not a stretched wide bar.
       expect(size.width, lessThan(300));
-      expect(size.width, greaterThan(160));
+      // Measured with the bundled Source Sans 3 (assets/fonts).
+      expect(size.width, greaterThan(120));
 
       // Roomy pill: 48dp tap target and generous side padding around the text.
       final pill = tester.getRect(find.byType(InkWell).first);

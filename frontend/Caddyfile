@@ -21,6 +21,25 @@
         reverse_proxy {$BACKEND_UPSTREAM:backend:3000}
     }
 
+    # The web engine's fallback fonts (web/flutter_bootstrap.js), fetched by
+    # this server so Google sees neither the user's address nor their headers.
+    handle_path /gstatic/* {
+        reverse_proxy https://fonts.gstatic.com {
+            header_up Host fonts.gstatic.com
+            header_up -Cookie
+            header_up -Authorization
+            header_up -Referer
+            header_up -Origin
+            header_up -Accept-Language
+            header_up User-Agent "217"
+            header_up -X-Forwarded-For
+            header_up -X-Forwarded-Host
+            header_up -X-Forwarded-Proto
+            header_up -Via
+            header_down -Set-Cookie
+        }
+    }
+
     # SPA fallback so deep links / refresh serve the Flutter shell.
     # Revalidate on every load (ETag keeps it cheap) so a new deploy shows up
     # at once instead of an old bundle lingering in the browser cache.

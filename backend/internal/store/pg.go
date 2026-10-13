@@ -59,7 +59,7 @@ func (s *PGStore) Prepare() error {
 	return nil
 }
 
-const userColumns = `u.id, u.email_sealed, u.name_sealed, COALESCE(u.role, ''), u.created_at, u.updated_at`
+const userColumns = `u.id, u.email_sealed, u.name_sealed, COALESCE(u.role, ''), u.created_at, u.updated_at, u.consent_version, u.consented_at`
 
 type rowScanner interface{ Scan(dest ...any) error }
 
@@ -67,9 +67,13 @@ type rowScanner interface{ Scan(dest ...any) error }
 func (s *PGStore) scanUser(row rowScanner, extra ...any) (*model.User, error) {
 	user := &model.User{}
 	var email, name []byte
-	dest := append([]any{&user.ID, &email, &name, &user.Role, &user.CreatedAt, &user.UpdatedAt}, extra...)
+	var consentedAt sql.NullTime
+	dest := append([]any{&user.ID, &email, &name, &user.Role, &user.CreatedAt, &user.UpdatedAt, &user.ConsentVersion, &consentedAt}, extra...)
 	if err := row.Scan(dest...); err != nil {
 		return nil, err
+	}
+	if consentedAt.Valid {
+		user.ConsentedAt = &consentedAt.Time
 	}
 	if err := s.openUser(user, email, name); err != nil {
 		return nil, err
@@ -198,6 +202,10 @@ func (s *PGStore) listEntriesBetween(userID, from, to string) ([]*model.Entry, e
 func monthBounds(year, month int) (string, string) {
 	first := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.UTC)
 	return formatDate(first), formatDate(first.AddDate(0, 1, -1))
+}
+
+func (s *PGStore) ListAllEntries(userID string) ([]*model.Entry, error) {
+	return s.listEntriesBetween(userID, "0001-01-01", "9999-12-31")
 }
 
 func (s *PGStore) ListEntries(userID string, year, month int) ([]*model.Entry, error) {
@@ -631,6 +639,36 @@ func (s *PGStore) DeleteAllSessionsForUser(userID string) error {
 	_, err := s.db.Exec(`DELETE FROM sessions WHERE user_id = $1`, userID)
 	if err != nil {
 		return fmt.Errorf("deleting sessions for user: %w", err)
+	}
+	return nil
+}
+
+func (s *PGStore) RecordConsent(userID string, version int) (*model.User, error) {
+	user, err := s.scanUser(s.db.QueryRow(`UPDATE users AS u SET consent_version = $2, consented_at = NOW(), updated_at = NOW()
+		WHERE u.id = $1 RETURNING `+userColumns, userID, version))
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("user not found")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("recording consent: %w", err)
+	}
+	return user, nil
+}
+
+func (s *PGStore) PurgeExpired(now time.Time) error {
+	now = now.UTC()
+	for _, q := range []struct {
+		what, sql string
+		arg       time.Time
+	}{
+		{"sessions", `DELETE FROM sessions WHERE expires_at <= $1`, now},
+		{"oauth attempts", `DELETE FROM oauth_attempts WHERE expires_at <= $1 OR consumed_at IS NOT NULL`, now},
+		{"reminder deliveries", `DELETE FROM reminder_deliveries WHERE reminder_date < ($1::timestamptz - INTERVAL '30 days')::date`, now},
+		{"revoked shares", `DELETE FROM calendar_shares WHERE status = 'revoked' AND updated_at <= $1`, now.Add(-model.RetentionAfterRevoke)},
+	} {
+		if _, err := s.db.Exec(q.sql, q.arg); err != nil {
+			return fmt.Errorf("purging %s: %w", q.what, err)
+		}
 	}
 	return nil
 }

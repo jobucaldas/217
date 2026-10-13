@@ -87,9 +87,10 @@ func main() {
 			ClientID:   os.Getenv("WORKOS_CLIENT_ID"),
 			AppBaseURL: os.Getenv("APP_BASE_URL"),
 		},
-		Keyring:     keyring,
-		TLSCertFile: os.Getenv("TLS_CERT_FILE"),
-		TLSKeyFile:  os.Getenv("TLS_KEY_FILE"),
+		Keyring:        keyring,
+		PrivacyContact: os.Getenv("PRIVACY_CONTACT"),
+		TLSCertFile:    os.Getenv("TLS_CERT_FILE"),
+		TLSKeyFile:     os.Getenv("TLS_KEY_FILE"),
 	}))
 }
 

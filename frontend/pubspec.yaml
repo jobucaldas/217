@@ -36,3 +36,7 @@ dependency_overrides:
 
 flutter:
   uses-material-design: true
+  # Fraunces and Source Sans 3 (OFL) ship with the app: google_fonts would
+  # otherwise download them from Google at runtime, sending users' IPs there.
+  assets:
+    - assets/fonts/

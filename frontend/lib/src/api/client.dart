@@ -246,6 +246,45 @@ class ApiClient {
     }
   }
 
+  /// Records agreement to privacy notice [version] (LGPD art. 11).
+  Future<SessionSnapshot> acceptConsent(int version) async {
+    final response = await _send(
+      'PUT',
+      _uri('/api/account/consent'),
+      body: {'version': version},
+    );
+    if (response.statusCode != 200) {
+      throw ApiException('consent', response);
+    }
+    return SessionSnapshot.fromJson(
+      jsonDecode(response.body) as Map<String, dynamic>,
+    );
+  }
+
+  /// Everything the server holds about this account, as JSON text.
+  Future<String> exportData() async {
+    final response = await _send('GET', _uri('/api/account/export'));
+    if (response.statusCode != 200) {
+      throw ApiException('export', response);
+    }
+    return response.body;
+  }
+
+  /// Who answers privacy requests for this server (email or URL), if set.
+  Future<String?> privacyContact() async {
+    try {
+      final response =
+          await _send('GET', _uri('/api/auth/config'), auth: false);
+      final decoded = jsonDecode(response.body);
+      final contact = decoded is Map ? decoded['privacy_contact'] : null;
+      return contact is String && contact.trim().isNotEmpty
+          ? contact.trim()
+          : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> deleteAccount() async {
     final response = await _send('DELETE', _uri('/api/account'));
     if (response.statusCode != 204 && response.statusCode != 200) {

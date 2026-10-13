@@ -72,6 +72,11 @@ Android deep-link PKCE:
 - `GET /api/stats?year=YYYY&month=MM`
 - `GET /api/cycle?today=YYYY-MM-DD` — period starts + next predicted periods/PMS windows
 
+### Privacy (auth required; reachable before consent)
+- `PUT /api/account/consent` — `{version}`; every other data endpoint answers 403 `consent required` until the current `model.ConsentVersion` is agreed
+- `GET /api/account/export` — all data about the caller (JSON attachment)
+- `DELETE /api/account` — erasure (WorkOS identity too when `WORKOS_API_KEY` is set)
+
 ### Roles, sharing, alerts (auth required)
 - `PUT /api/account/role` — `{role: owner|partner}`; 409 while shared
 - `POST /api/share/enable|revoke` (owner), `POST /api/share/accept` (unset role or partner)
