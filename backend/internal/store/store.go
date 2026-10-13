@@ -58,6 +58,7 @@ type Store interface {
 	CalendarSubjectID(userID string) (string, error)
 	// SetRole picks owner or partner; switching is refused while a share is live.
 	SetRole(userID, role string) (*model.User, error)
+	SetStage(userID, stage string) (*model.User, error)
 
 	// Partner notification preferences (PMS heads-up, pill not logged)
 	GetPartnerAlerts(userID string) (*model.PartnerAlertPreference, error)

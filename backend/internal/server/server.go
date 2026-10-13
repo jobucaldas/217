@@ -183,6 +183,7 @@ func Run(cfg Config) error {
 	mux.HandleFunc("PUT /api/account/consent", h.AuthMiddleware(h.RecordConsent))
 	mux.HandleFunc("GET /api/account/export", h.AuthMiddleware(h.ExportAccount))
 	mux.HandleFunc("PUT /api/account/role", h.ConsentMiddleware(h.SetRole))
+	mux.HandleFunc("PUT /api/account/stage", h.ConsentMiddleware(h.SetStage))
 	mux.HandleFunc("GET /api/cycle", h.ConsentMiddleware(h.GetCycle))
 	mux.HandleFunc("GET /api/partner-alerts", h.ConsentMiddleware(h.GetPartnerAlerts))
 	mux.HandleFunc("PUT /api/partner-alerts", h.ConsentMiddleware(h.UpsertPartnerAlerts))
@@ -275,6 +276,7 @@ func corsMiddleware(next http.Handler, appBaseURL string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
 		if origin != "" && allowedOrigin != "" && origin == allowedOrigin {
+			w.Header().Add("Vary", "Origin")
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")

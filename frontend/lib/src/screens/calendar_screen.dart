@@ -22,6 +22,7 @@ class CalendarScreen extends StatefulWidget {
     required this.user,
     required this.strings,
     required this.onOpenSettings,
+    this.cycleRefreshSignal,
     this.share = const ShareState(status: 'none'),
     this.onShareChanged,
     this.onConsentRequired,
@@ -35,6 +36,7 @@ class CalendarScreen extends StatefulWidget {
   final ShareState share;
   final Strings strings;
   final VoidCallback onOpenSettings;
+  final Listenable? cycleRefreshSignal;
   final ValueChanged<ShareState>? onShareChanged;
   final VoidCallback? onConsentRequired;
   final AppPalette palette;
@@ -54,6 +56,7 @@ class _CalendarScreenState extends State<CalendarScreen>
 
   /// Inputs of the last partner-alert sync; month swipes don't replan.
   String? _alertSyncKey;
+  int _cycleLoadGeneration = 0;
   Map<String, Entry> _entries = {};
   Map<String, Entry> _prevEntries = {};
   Map<String, Entry> _nextEntries = {};
@@ -98,7 +101,21 @@ class _CalendarScreenState extends State<CalendarScreen>
         }
       });
     WidgetsBinding.instance.addObserver(this);
+    widget.cycleRefreshSignal?.addListener(_onCycleRefresh);
     _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant CalendarScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.cycleRefreshSignal != widget.cycleRefreshSignal) {
+      oldWidget.cycleRefreshSignal?.removeListener(_onCycleRefresh);
+      widget.cycleRefreshSignal?.addListener(_onCycleRefresh);
+    }
+  }
+
+  void _onCycleRefresh() {
+    if (mounted) _loadCycle();
   }
 
   /// Back in the foreground: her calendar may have changed (and partner
@@ -111,6 +128,7 @@ class _CalendarScreenState extends State<CalendarScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    widget.cycleRefreshSignal?.removeListener(_onCycleRefresh);
     _wheelIdle?.cancel();
     _monthSnap.dispose();
     super.dispose();
@@ -174,13 +192,14 @@ class _CalendarScreenState extends State<CalendarScreen>
   /// Predictions are a bonus on top of the calendar: failures (older
   /// servers) leave the grid as is.
   Future<void> _loadCycle() async {
+    final generation = ++_cycleLoadGeneration;
     CycleInfo cycle;
     try {
       cycle = await widget.api.getCycle(_todayKey);
     } catch (_) {
       return;
     }
-    if (!mounted) return;
+    if (!mounted || generation != _cycleLoadGeneration) return;
     setState(() => _cycle = cycle);
     if (widget.user.isPartner) await _syncPartnerAlerts(cycle);
   }
@@ -406,11 +425,17 @@ class _CalendarScreenState extends State<CalendarScreen>
     final shortDay = DateFormat.MMMd(locale);
     final String? cycleLine;
     if (next == null) {
-      cycleLine = widget.share.canEditCalendar ? widget.strings.cycleHintOwner : null;
+      cycleLine = _cycle.note == 'pms_suppressed_menopause'
+          ? null
+          : widget.share.canEditCalendar
+              ? widget.strings.cycleHintOwner
+              : null;
     } else if (inPms) {
       cycleLine = widget.strings.cyclePmsNow(shortDay.format(next.periodStart));
     } else if (todayKind == CycleDayKind.predictedPeriod) {
       cycleLine = widget.strings.cyclePeriodNow;
+    } else if (next.pmsStart.year < 2) {
+      cycleLine = widget.strings.cycleNextNoPms(shortDay.format(next.periodStart));
     } else {
       cycleLine = widget.strings.cycleNext(
         shortDay.format(next.periodStart),
@@ -522,6 +547,23 @@ class _CalendarScreenState extends State<CalendarScreen>
                             color: inPms ? scheme.onSurface : scheme.onSurfaceVariant,
                             fontWeight: inPms ? FontWeight.w600 : null,
                           ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              if (_cycle.note.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
+                  child: Row(
+                    key: const ValueKey('cycle-stage-note'),
+                    children: [
+                      Icon(Icons.info_outline, size: 16, color: scheme.onSurfaceVariant),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          widget.strings.cycleStageNote(_cycle.note),
+                          style: text.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
                         ),
                       ),
                     ],

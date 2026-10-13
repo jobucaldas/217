@@ -4,12 +4,14 @@ class User {
     required this.email,
     required this.name,
     this.role = 'owner',
+    this.stage = 'cycling',
   });
 
   final String id;
   final String email;
   final String name;
   final String role;
+  final String stage;
 
   /// Takes the pill and fills the calendar.
   bool get isOwner => role == 'owner';
@@ -21,7 +23,7 @@ class User {
   bool get hasRole => isOwner || isPartner;
 
   User withRole(String next) =>
-      User(id: id, email: email, name: name, role: next);
+      User(id: id, email: email, name: name, role: next, stage: stage);
 
   factory User.fromJson(Map<String, dynamic> json) {
     return User(
@@ -29,6 +31,7 @@ class User {
       email: json['email'] as String,
       name: (json['name'] as String?) ?? '',
       role: (json['role'] as String?) ?? '',
+      stage: (json['stage'] as String?) ?? 'cycling',
     );
   }
 }
@@ -193,6 +196,7 @@ class CycleWindow {
   final DateTime pmsEnd;
 
   static DateTime _day(Object? raw) {
+    if (raw == null || raw == '') return DateTime(1);
     final parsed = DateTime.parse(raw as String);
     return DateTime(parsed.year, parsed.month, parsed.day);
   }
@@ -216,6 +220,8 @@ class CycleInfo {
     this.estimated = true,
     this.periodStarts = const [],
     this.predictions = const [],
+    this.note = '',
+    this.stage = 'cycling',
   });
 
   static const empty = CycleInfo();
@@ -227,6 +233,8 @@ class CycleInfo {
   final bool estimated;
   final List<DateTime> periodStarts;
   final List<CycleWindow> predictions;
+  final String note;
+  final String stage;
 
   bool get hasPredictions => predictions.isNotEmpty;
 
@@ -237,7 +245,7 @@ class CycleInfo {
   CycleDayKind kindOf(DateTime day) {
     final d = DateTime(day.year, day.month, day.day);
     for (final w in predictions) {
-      if (_within(d, w.pmsStart, w.pmsEnd)) return CycleDayKind.pms;
+      if (w.pmsStart.year > 1 && _within(d, w.pmsStart, w.pmsEnd)) return CycleDayKind.pms;
       if (_within(d, w.periodStart, w.periodEnd)) {
         return CycleDayKind.predictedPeriod;
       }
@@ -264,6 +272,8 @@ class CycleInfo {
         predictions: (json['predictions'] as List<dynamic>? ?? const [])
             .map((e) => CycleWindow.fromJson(e as Map<String, dynamic>))
             .toList(),
+        note: (json['note'] as String?) ?? '',
+        stage: (json['stage'] as String?) ?? 'cycling',
       );
 }
 

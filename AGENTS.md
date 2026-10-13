@@ -9,6 +9,7 @@ Roles are picked once after first sign-in (`users.role` is NULL until then):
 - **owner** — takes the pill; logs Taken/Missed, notes, intimacy and period days; creates the invite. Never joins another calendar.
 - **partner** — joins one owner's calendar read-only via invite; gets optional PMS and pill-not-logged alerts (separate toggles + times).
 Switching role is refused while a calendar is shared. Period days drive cycle/PMS predictions (`backend/internal/cycle`), drawn on both calendars (dashed amber ring = PMS, pink drop = period, outlined drop = predicted period).
+Owners can record cycling, perimenopause, or menopause; menopause suppresses PMS, while perimenopause keeps PMS when period days are logged.
 
 ## Tech Stack
 - Client: Flutter (Android + web)
@@ -79,6 +80,7 @@ Android deep-link PKCE:
 
 ### Roles, sharing, alerts (auth required)
 - `PUT /api/account/role` — `{role: owner|partner}`; 409 while shared
+- `PUT /api/account/stage` — `{stage: cycling|perimenopause|menopause}` (owner only)
 - `POST /api/share/enable|revoke` (owner), `POST /api/share/accept` (unset role or partner)
 - `GET|PUT /api/partner-alerts` (partner) — `{pms_enabled, pms_time, pill_enabled, pill_time}`
 

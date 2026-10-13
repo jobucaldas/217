@@ -135,6 +135,10 @@ If any command fails, stop and resolve the error before continuing. Keep `217.du
 
 Optional server variables for the `backend` service: `PRIVACY_CONTACT` (email or URL for privacy requests, shown in the app's privacy notice), `SESSION_TTL` (e.g. `720h`), `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` (web push).
 
+Owners can record cycling, perimenopause, or menopause; menopause suppresses PMS predictions while perimenopause keeps PMS when periods are logged.
+
+API: `PUT /api/account/stage` with `{stage: cycling|perimenopause|menopause}` (owner only).
+
 ## Get the apps
 
 Download from [GitHub Releases](https://github.com/jobucaldas/217/releases/tag/nightly):

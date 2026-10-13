@@ -56,6 +56,33 @@ func TestOriginFromValidatedBaseURL(t *testing.T) {
 	}
 }
 
+func TestCORSMiddlewareSetsVaryOnlyForAllowedOrigin(t *testing.T) {
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	h := corsMiddleware(next, "https://app.example/path")
+	for _, tc := range []struct {
+		name      string
+		origin    string
+		wantAllow string
+		wantVary  string
+	}{
+		{name: "allowed", origin: "https://app.example", wantAllow: "https://app.example", wantVary: "Origin"},
+		{name: "evil", origin: "https://evil.example"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/api/auth/config", nil)
+			req.Header.Set("Origin", tc.origin)
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+			if got := rec.Header().Get("Access-Control-Allow-Origin"); got != tc.wantAllow {
+				t.Errorf("allow-origin = %q, want %q", got, tc.wantAllow)
+			}
+			if got := rec.Header().Get("Vary"); got != tc.wantVary {
+				t.Errorf("Vary = %q, want %q", got, tc.wantVary)
+			}
+		})
+	}
+}
+
 func TestHardeningMiddleware(t *testing.T) {
 	var readErr error
 	h := secureHeaders(limitBody(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

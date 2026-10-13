@@ -519,3 +519,21 @@ func (s *MemoryStore) ListReceivedPartnerNotes(userID string) ([]*model.PartnerN
 	}
 	return out, nil
 }
+
+func (s *MemoryStore) SetStage(userID, stage string) (*model.User, error) {
+	if stage != "cycling" && stage != "perimenopause" && stage != "menopause" {
+		return nil, fmt.Errorf("invalid stage")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	u := s.findUserLocked(userID)
+	if u == nil {
+		return nil, fmt.Errorf("user not found")
+	}
+	if u.EffectiveRole() != model.RoleOwner {
+		return nil, fmt.Errorf("only owners may set stage")
+	}
+	u.Stage = stage
+	u.UpdatedAt = time.Now().UTC()
+	return sanitizeUser(u), nil
+}
