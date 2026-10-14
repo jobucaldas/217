@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
 
 import 'api/client.dart';
 import 'auth/sign_in.dart';
@@ -23,6 +24,7 @@ import 'screens/settings_screen.dart';
 import 'screens/share_screens.dart';
 import 'theme/app_theme.dart';
 import 'screens/dialog_actions.dart';
+import 'updates/update_check.dart';
 
 class App217 extends StatefulWidget {
   const App217({
@@ -32,6 +34,8 @@ class App217 extends StatefulWidget {
     this.dailyReminderScheduler,
     this.partnerAlertCanceller,
     this.partnerAlertScheduler,
+    this.updateClient,
+    this.installedVersion,
   });
 
   final AppConfig config;
@@ -42,6 +46,12 @@ class App217 extends StatefulWidget {
   final Future<void> Function()? partnerAlertCanceller;
   final PartnerAlertScheduler? partnerAlertScheduler;
 
+  /// Injected HTTP client for the update check; tests pass a mock.
+  final http.Client? updateClient;
+
+  /// Installed release tag; tests pass an older one. Defaults to [appVersion].
+  final String? installedVersion;
+
   @override
   State<App217> createState() => _App217State();
 }
@@ -50,6 +60,7 @@ class _App217State extends State<App217> {
   late final ApiClient _api = (widget.api ?? ApiClient(widget.config))
     ..onConsentRequired = _onOwnConsentRequired;
   late final AppearancePrefs _prefs = AppearancePrefs();
+  late final http.Client _updateHttp = widget.updateClient ?? http.Client();
   final GlobalKey<NavigatorState> _navKey = GlobalKey<NavigatorState>();
   final GlobalKey<ScaffoldMessengerState> _messengerKey =
       GlobalKey<ScaffoldMessengerState>();
@@ -64,6 +75,10 @@ class _App217State extends State<App217> {
   ThemeMode _themeMode = ThemeMode.system;
   AppPalette _palette = AppPalette.blue;
   bool _reminderHintDismissed = false;
+
+  /// Android opt-in: look for a newer APK when the signed-in shell opens.
+  bool _autoUpdate = false;
+  bool _updateChecked = false;
 
   /// Whether the daily reminder is on; null until known (no bubble then).
   bool? _remindersOn;
@@ -112,6 +127,7 @@ class _App217State extends State<App217> {
   void dispose() {
     _changes.dispose();
     _stageChanges.dispose();
+    if (widget.updateClient == null) _updateHttp.close();
     super.dispose();
   }
 
@@ -124,12 +140,14 @@ class _App217State extends State<App217> {
       final appearance = await _prefs.load();
       final language = await _prefs.loadLanguage();
       final hintGone = await _prefs.reminderHintDismissed();
+      final autoUpdate = await _prefs.autoUpdateEnabled();
       if (!mounted) return;
       setState(() {
         _themeMode = appearance.mode;
         _palette = appearance.palette;
         _language = language ?? _deviceLanguage();
         _reminderHintDismissed = hintGone;
+        _autoUpdate = autoUpdate;
       });
     } catch (_) {
       // Keep defaults.
@@ -161,8 +179,40 @@ class _App217State extends State<App217> {
     });
     if (user != null && !_consentRequired) {
       unawaited(_loadRemindersState());
+      unawaited(_maybeCheckForUpdate());
       await _offerPendingInvite();
     }
+  }
+
+  /// Once per app start, while signed in and opted in. [force] lets the
+  /// switch check right away. Never blocks; failures stay silent.
+  Future<void> _maybeCheckForUpdate({bool force = false}) async {
+    if (!_autoUpdate || _user == null || !isAndroidPlatform) return;
+    if (_updateChecked && !force) return;
+    _updateChecked = true;
+    final update = await checkForUpdate(
+      client: _updateHttp,
+      installed: widget.installedVersion ?? appVersion,
+    );
+    // The user may have opted out or signed out while the request was pending.
+    if (update == null || !mounted || !_autoUpdate || _user == null) return;
+    _messengerKey.currentState?.showSnackBar(
+      SnackBar(
+        duration: const Duration(seconds: 15),
+        content: Text(_strings.updateAvailable),
+        action: SnackBarAction(
+          label: _strings.updateAction,
+          // The browser downloads the APK; Android then asks to install it.
+          onPressed: () => openExternalUrl(update.apkUrl.toString()),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _setAutoUpdate(bool enabled) async {
+    setState(() => _autoUpdate = enabled);
+    await _prefs.saveAutoUpdate(enabled);
+    if (enabled) unawaited(_maybeCheckForUpdate(force: true));
   }
 
   Future<void> _loadRemindersState() async {
@@ -518,6 +568,7 @@ class _App217State extends State<App217> {
         });
         if (!_consentRequired) {
           unawaited(_loadRemindersState());
+          unawaited(_maybeCheckForUpdate());
           await _offerPendingInvite();
         }
       } else {
@@ -597,6 +648,8 @@ class _App217State extends State<App217> {
             dailyReminderSyncQueue: _dailyReminderSyncQueue,
             partnerAlertSyncQueue: _partnerAlertSyncQueue,
             consentPending: _consentRequired,
+            autoUpdate: _autoUpdate,
+            onAutoUpdateChanged: _setAutoUpdate,
             expandServer: expandServer,
           ),
         ),

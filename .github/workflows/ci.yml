@@ -52,11 +52,24 @@ jobs:
     defaults:
       run:
         working-directory: frontend
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
       - run: |
           git config --global --add safe.directory /sdks/flutter || true
           flutter pub get
+      - name: Compute version
+        # The release tag is computed once here (build time, not commit time, so a rebased
+        # older commit still sorts after the previous release) and reused by publish. The
+        # APK's versionName is the tag and its versionCode is the same instant in epoch
+        # seconds, so each newer build updates older installs.
+        id: version
+        run: |
+          NOW="$(date -u +%s)"
+          SHORT_SHA="$(printf '%s' "$GITHUB_SHA" | cut -c1-7)"
+          echo "tag=$(date -u -d "@$NOW" +%Y%m%d%H%M%S)_${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "build=$NOW" >> "$GITHUB_OUTPUT"
       - run: flutter analyze
       - run: flutter test
       - name: Build web bundle
@@ -64,9 +77,39 @@ jobs:
           flutter build web --release --no-web-resources-cdn --pwa-strategy=none
           # Stamp the commit so the live site can prove which bundle is running.
           printf 'BUILD_SHA=%s\n' "$GITHUB_SHA" > build/web/BUILD_SHA.txt
+      - name: Decode release keystore
+        # Pull requests from forks have no secrets: they skip and build a debug-signed APK.
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
+            if [ "$GITHUB_EVENT_NAME" = push ]; then
+              echo "::error::All four ANDROID_KEYSTORE_*/ANDROID_KEY_* secrets are required. Refusing to publish a debug-signed APK from main: Android will not update installs over it."
+              exit 1
+            fi
+            echo "Release signing secrets missing or incomplete; this build is debug-signed."
+            exit 0
+          fi
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+          {
+            echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/release.keystore"
+            echo "ANDROID_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD"
+            echo "ANDROID_KEY_ALIAS=$KEY_ALIAS"
+            echo "ANDROID_KEY_PASSWORD=$KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
       - name: Build release APK
         # No API_BASE_URL on purpose: the published APK asks for a server on first launch.
-        run: flutter build apk --release
+        env:
+          APP_VERSION: ${{ steps.version.outputs.tag }}
+          BUILD_NUMBER: ${{ steps.version.outputs.build }}
+        run: |
+          flutter build apk --release \
+            --build-name="$APP_VERSION" \
+            --build-number="$BUILD_NUMBER" \
+            --dart-define=APP_VERSION="$APP_VERSION"
       - uses: actions/upload-artifact@v4
         with:
           name: frontend-build
@@ -178,8 +221,9 @@ jobs:
           path: frontend/build/217-setup.exe
           retention-days: 3
 
-  # main only: GHCR images + app releases (APK, Windows installer, AppImage),
-  # both as `nightly` and immutable `datetime_sha`.
+  # main only: GHCR images + app releases (APK, Windows installer, AppImage), as the
+  # rolling `nightly` pre-release and an immutable `datetime_sha` release marked latest.
+  # The tag is computed in `frontend`, because the APK's versionName must equal it.
   publish:
     name: Publish (GHCR + GitHub Releases)
     if: github.event_name == 'push'
@@ -205,10 +249,9 @@ jobs:
       - name: Compute tags
         id: tags
         env:
-          COMMIT_TIMESTAMP: ${{ github.event.head_commit.timestamp }}
+          DATETIME_SHA: ${{ needs.frontend.outputs.tag }}
         run: |
-          DT="$(date -u -d "${COMMIT_TIMESTAMP:-now}" +%Y%m%d%H%M%S)"
-          echo "datetime_sha=${DT}_${GITHUB_SHA:0:7}" >> "$GITHUB_OUTPUT"
+          echo "datetime_sha=${DATETIME_SHA}" >> "$GITHUB_OUTPUT"
           echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/217" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
@@ -251,7 +294,7 @@ jobs:
           NOTES="$(printf '%s\n' \
             "Built from \`${SHORT_SHA}\` on \`main\` (${COMMIT_URL})." \
             "" \
-            "- \`.apk\`: Android (release build, debug-signed for sideloading)" \
+            "- \`.apk\`: Android (release build, signed with the project's release key; updates install over earlier releases)" \
             "- \`-setup.exe\`: Windows installer (per-user, unsigned: SmartScreen may warn)" \
             "- \`.AppImage\`: Linux (\`chmod +x\` and run)" \
             "" \
@@ -263,5 +306,5 @@ jobs:
             gh release create nightly --title Nightly --target "$GITHUB_SHA" --notes "${NOTES}" --prerelease
           fi
           gh release upload nightly 217-nightly.apk 217-nightly-x86_64.AppImage 217-nightly-setup.exe --clobber
-          gh release create "$TAG" --title "$TAG" --target "$GITHUB_SHA" --notes "${NOTES}" --prerelease \
+          gh release create "$TAG" --title "$TAG" --target "$GITHUB_SHA" --notes "${NOTES}" --latest \
             "217-${TAG}.apk" "217-${TAG}-x86_64.AppImage" "217-${TAG}-setup.exe"

@@ -18,6 +18,7 @@ class AppearancePrefs {
   static const reminderHintDismissedKey = 'reminder_hint_dismissed';
   static const fabSideKey = 'today_fab_side';
   static const fabBottomKey = 'today_fab_bottom';
+  static const autoUpdateKey = 'auto_update';
 
   Future<({ThemeMode mode, AppPalette palette})> load() async {
     final modeRaw = await _storage.read(key: themeModeKey);
@@ -61,6 +62,15 @@ class AppearancePrefs {
   /// Reminders were toggled: the calendar bubble may explain them again.
   Future<void> resetReminderHint() =>
       _storage.delete(key: reminderHintDismissedKey);
+
+  /// Opt-in update check on Android. Off unless the user turned it on.
+  Future<bool> autoUpdateEnabled() async {
+    final v = await _storage.read(key: autoUpdateKey);
+    return v == '1';
+  }
+
+  Future<void> saveAutoUpdate(bool enabled) =>
+      _storage.write(key: autoUpdateKey, value: enabled ? '1' : '0');
 
   /// Magnetic today FAB: `right` (default) or `left`, plus bottom inset in logical px.
   Future<({bool right, double bottom})> loadFabPosition() async {

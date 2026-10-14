@@ -885,6 +885,11 @@ void main() {
         const ShareState(status: 'none'),
       );
       expect(find.text('Reminder'), findsOneWidget);
+      await tester.scrollUntilVisible(
+        find.byKey(const ValueKey('settings-switch-partner')),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
       expect(find.byKey(const ValueKey('settings-switch-partner')),
           findsOneWidget);
 

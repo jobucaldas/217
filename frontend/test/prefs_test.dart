@@ -41,4 +41,15 @@ void main() {
     await prefs.resetReminderHint();
     expect(await AppearancePrefs().reminderHintDismissed(), isFalse);
   });
+
+  test('auto update check is off until turned on', () async {
+    FlutterSecureStorage.setMockInitialValues({});
+    final prefs = AppearancePrefs();
+    expect(AppearancePrefs.autoUpdateKey, 'auto_update');
+    expect(await prefs.autoUpdateEnabled(), isFalse);
+    await prefs.saveAutoUpdate(true);
+    expect(await AppearancePrefs().autoUpdateEnabled(), isTrue);
+    await prefs.saveAutoUpdate(false);
+    expect(await AppearancePrefs().autoUpdateEnabled(), isFalse);
+  });
 }

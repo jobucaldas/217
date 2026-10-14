@@ -4,6 +4,14 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// Release signing comes from the environment (CI decodes the keystore from a secret).
+val releaseKeystore: String? = System.getenv("ANDROID_KEYSTORE_PATH")
+val releaseKeystorePassword: String? = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+val releaseKeyAlias: String? = System.getenv("ANDROID_KEY_ALIAS")
+val releaseKeyPassword: String? = System.getenv("ANDROID_KEY_PASSWORD")
+val hasReleaseKey = listOf(releaseKeystore, releaseKeystorePassword, releaseKeyAlias, releaseKeyPassword)
+    .all { !it.isNullOrEmpty() }
+
 android {
     namespace = "com.jobucaldas.a217"
     compileSdk = flutter.compileSdkVersion
@@ -24,10 +32,22 @@ android {
         multiDexEnabled = true
     }
 
+    signingConfigs {
+        if (hasReleaseKey) {
+            create("release") {
+                storeFile = file(releaseKeystore!!)
+                storePassword = releaseKeystorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // Tryout builds stay debug-signed until a release keystore is configured.
-            signingConfig = signingConfigs.getByName("debug")
+            // Uses the release key only when all four ANDROID_* variables are set; otherwise
+            // (local builds, pull requests) it stays debug-signed, as tryout builds always were.
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
 }

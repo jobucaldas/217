@@ -15,6 +15,10 @@ bool get isDesktopPlatform =>
         defaultTargetPlatform == TargetPlatform.linux ||
         defaultTargetPlatform == TargetPlatform.macOS);
 
+/// Android builds only: the sole target that offers APK updates in-app.
+bool get isAndroidPlatform =>
+    !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+
 class AppConfig {
   AppConfig({
     required String apiBaseUrl,

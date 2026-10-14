@@ -277,6 +277,24 @@ class Strings {
         'En este navegador, los recordatorios en segundo plano necesitan notificaciones push del servidor.',
       );
 
+  // Updates (Android only)
+  String get autoUpdateTitle => _t(
+        'Check for updates automatically',
+        'Verificar atualizações automaticamente',
+        'Buscar actualizaciones automáticamente',
+      );
+  String get autoUpdateSubtitle => _t(
+        'Looks for a newer release when the app opens. Nothing is installed without your confirmation.',
+        'Procura uma versão nova quando o app abre. Nada é instalado sem a sua confirmação.',
+        'Busca una versión nueva al abrir la app. No se instala nada sin tu confirmación.',
+      );
+  String get updateAvailable => _t(
+        'A new version is available',
+        'Há uma versão nova disponível',
+        'Hay una versión nueva disponible',
+      );
+  String get updateAction => _t('Update', 'Atualizar', 'Actualizar');
+
   // Account
   String get deleteAccount =>
       _t('Delete account', 'Excluir conta', 'Eliminar cuenta');
