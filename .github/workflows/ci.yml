@@ -60,16 +60,16 @@ jobs:
           git config --global --add safe.directory /sdks/flutter || true
           flutter pub get
       - name: Compute version
-        # The release tag is computed once here and reused by publish. The APK's versionName is the tag and its
-        # versionCode is the commit time in epoch seconds, so each newer commit updates older installs.
+        # The release tag is computed once here (build time, not commit time, so a rebased
+        # older commit still sorts after the previous release) and reused by publish. The
+        # APK's versionName is the tag and its versionCode is the same instant in epoch
+        # seconds, so each newer build updates older installs.
         id: version
-        env:
-          COMMIT_TIMESTAMP: ${{ github.event.head_commit.timestamp }}
         run: |
-          DT="$(date -u -d "${COMMIT_TIMESTAMP:-now}" +%Y%m%d%H%M%S)"
+          NOW="$(date -u +%s)"
           SHORT_SHA="$(printf '%s' "$GITHUB_SHA" | cut -c1-7)"
-          echo "tag=${DT}_${SHORT_SHA}" >> "$GITHUB_OUTPUT"
-          echo "build=$(date -u -d "${COMMIT_TIMESTAMP:-now}" +%s)" >> "$GITHUB_OUTPUT"
+          echo "tag=$(date -u -d "@$NOW" +%Y%m%d%H%M%S)_${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "build=$NOW" >> "$GITHUB_OUTPUT"
       - run: flutter analyze
       - run: flutter test
       - name: Build web bundle
