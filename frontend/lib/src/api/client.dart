@@ -221,6 +221,9 @@ class ApiClient {
       'code_challenge': pkce.challenge,
       'code_challenge_method': 'S256',
       'state': pkce.state,
+      // Logout only ends our session; without this AuthKit reuses its own
+      // browser session and signs the user straight back in.
+      'max_age': '0',
     });
 
     // Android: deep link claimed by the manifest. Desktop: the plugin listens
