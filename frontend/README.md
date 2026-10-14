@@ -47,7 +47,7 @@ flutter build linux --release     # on Linux: clang cmake ninja-build libgtk-3-d
 
 ## Choosing a server (Android)
 
-Release APKs built without `API_BASE_URL` (like the published nightly) ship with no server. On first launch, `ServerSetupScreen` asks for one: a bare host gets `https://`, a pasted invite link (`…/?invite=CODE`) sets the server and keeps the invite for after sign-in, and **Connect** only saves a server whose `/api/auth/config` answers with AuthKit on. Release builds refuse `http://` (the release manifest blocks cleartext). Signed out, tapping **Server: …** on the sign-in screen opens the same screen to switch.
+Release APKs built without `API_BASE_URL` ship with no server. CI bakes one in from the `DEFAULT_SERVER_URL` repository variable; leave it unset to build without. On first launch, `ServerSetupScreen` asks for one: a bare host gets `https://`, a pasted invite link (`…/?invite=CODE`) sets the server and keeps the invite for after sign-in, and **Connect** only saves a server whose `/api/auth/config` answers with AuthKit on. Release builds refuse `http://` (the release manifest blocks cleartext). Signed out, tapping **Server: …** on the sign-in screen opens the same screen to switch.
 
 Builds with an `API_BASE_URL` (debug, or your own) skip that screen; there the sign-in screen links to **Settings → Advanced options → Self-hosted server URL** instead (leave it empty to use the built-in server).
 
