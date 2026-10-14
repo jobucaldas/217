@@ -101,15 +101,18 @@ jobs:
             echo "ANDROID_KEY_PASSWORD=$KEY_PASSWORD"
           } >> "$GITHUB_ENV"
       - name: Build release APK
-        # No API_BASE_URL on purpose: the published APK asks for a server on first launch.
+        # The repository variable DEFAULT_SERVER_URL bakes a default server into
+        # the APK. Unset, the APK asks for a server on first launch.
         env:
           APP_VERSION: ${{ steps.version.outputs.tag }}
           BUILD_NUMBER: ${{ steps.version.outputs.build }}
+          DEFAULT_SERVER_URL: ${{ vars.DEFAULT_SERVER_URL }}
         run: |
           flutter build apk --release \
             --build-name="$APP_VERSION" \
             --build-number="$BUILD_NUMBER" \
-            --dart-define=APP_VERSION="$APP_VERSION"
+            --dart-define=APP_VERSION="$APP_VERSION" \
+            --dart-define=API_BASE_URL="$DEFAULT_SERVER_URL"
       - uses: actions/upload-artifact@v4
         with:
           name: frontend-build

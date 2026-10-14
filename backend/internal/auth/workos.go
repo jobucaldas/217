@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	neturl "net/url"
 	"strings"
 	"time"
 
@@ -82,11 +83,20 @@ func (w *WorkOSOAuth) AuthCodeURL(state, codeChallenge, nonce string) string {
 		CodeChallenge:       &codeChallenge,
 		CodeChallengeMethod: &method,
 	}
-	url, err := w.client.GetAuthKitAuthorizationURL(params)
+	authURL, err := w.client.GetAuthKitAuthorizationURL(params)
 	if err != nil {
 		return ""
 	}
-	return url
+	// The helper has no max_age field. Without it AuthKit reuses its own
+	// browser session after sign-out and signs the user straight back in.
+	parsed, err := neturl.Parse(authURL)
+	if err != nil {
+		return ""
+	}
+	q := parsed.Query()
+	q.Set("max_age", "0")
+	parsed.RawQuery = q.Encode()
+	return parsed.String()
 }
 
 // Exchange swaps an authorization code for the verified WorkOS user identity.

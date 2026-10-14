@@ -32,6 +32,9 @@ func TestWorkOSOAuthExactCallbackAndPKCE(t *testing.T) {
 	if q.Get("state") != "state" || q.Get("code_challenge") != "challenge" || q.Get("code_challenge_method") != "S256" {
 		t.Fatalf("missing PKCE/state parameters: %s", parsed.RawQuery)
 	}
+	if q.Get("max_age") != "0" {
+		t.Fatalf("sign-in must force re-authentication: %s", parsed.RawQuery)
+	}
 }
 
 func TestWorkOSDeleteUserCallsUserManagementAPI(t *testing.T) {
