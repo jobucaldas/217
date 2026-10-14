@@ -197,6 +197,9 @@ func TestSwappedNoteSealsDoNotOpen(t *testing.T) {
 	if _, err := s.SetRole(owner.ID, model.RoleOwner); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s.RecordConsent(owner.ID, model.ConsentVersion); err != nil {
+		t.Fatal(err)
+	}
 	share, _ := s.EnableShare(owner.ID)
 	if _, err := s.AcceptShare(partner.ID, share.InviteCode); err != nil {
 		t.Fatal(err)
@@ -227,6 +230,9 @@ func TestKeyRotationReseals(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := s.UpsertEntry(owner.ID, "2026-09-01", model.UpsertRequest{Notes: "kept"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RecordConsent(owner.ID, model.ConsentVersion); err != nil {
 		t.Fatal(err)
 	}
 	share, err := s.EnableShare(owner.ID)
