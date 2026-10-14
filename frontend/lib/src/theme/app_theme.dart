@@ -84,7 +84,13 @@ ThemeData buildApp217Theme({
   final c = PaletteColors.resolve(palette, brightness);
 
   final display = GoogleFonts.frauncesTextTheme();
-  final body = GoogleFonts.sourceSans3TextTheme();
+  // GoogleFonts' defaults carry the light-theme ink color; recolor every style
+  // so framework-built text (dialog titles, pickers, menus) stays readable on
+  // dark surfaces.
+  final body = GoogleFonts.sourceSans3TextTheme().apply(
+    displayColor: scheme.onSurface,
+    bodyColor: scheme.onSurfaceVariant,
+  );
   final textTheme = body.copyWith(
     displayLarge: display.displayLarge?.copyWith(
       color: scheme.onSurface,
@@ -203,6 +209,15 @@ ThemeData buildApp217Theme({
     ),
     textButtonTheme: TextButtonThemeData(
       style: TextButton.styleFrom(foregroundColor: scheme.primary),
+    ),
+    dialogTheme: DialogThemeData(
+      backgroundColor: scheme.surface,
+      surfaceTintColor: Colors.transparent,
+      titleTextStyle: textTheme.headlineSmall?.copyWith(
+        color: scheme.onSurface,
+        fontWeight: FontWeight.w700,
+      ),
+      contentTextStyle: textTheme.bodyLarge,
     ),
     cardTheme: CardThemeData(
       color: scheme.surface,
