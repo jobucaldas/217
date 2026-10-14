@@ -200,7 +200,10 @@ class _CalendarScreenState extends State<CalendarScreen>
         }
       }
       if (!mounted || generation != _loadGeneration) return;
-      if (_pendingWrites > 0) return;
+      if (_pendingWrites > 0) {
+        _reloadAfterWrites = true;
+        return;
+      }
       setState(() {
         _monthCache[_monthKey(_prevMonth)] = prevMap;
         _monthCache[_monthKey(_month)] = map;
