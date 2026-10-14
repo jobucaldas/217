@@ -71,6 +71,26 @@ class _CalendarScreenState extends State<CalendarScreen>
   Map<String, Entry> _entries = {};
   Map<String, Entry> _prevEntries = {};
   Map<String, Entry> _nextEntries = {};
+
+  /// Entries per month ("yyyy-M"), kept across month swipes so a month shows
+  /// at once while the refresh runs, and edits land on it before the server
+  /// answers.
+  final Map<String, Map<String, Entry>> _monthCache = {};
+
+  /// Day edits sent but not yet answered. A refresh that lands meanwhile
+  /// would put pre-edit data back, so it is dropped; a fresh one follows.
+  int _pendingWrites = 0;
+  bool _reloadAfterWrites = false;
+
+  /// Moves on every edit and every finished write; a refresh that started
+  /// under an older value may carry pre-edit data and is not applied.
+  int _writeEpoch = 0;
+
+  /// What the server last confirmed for days being edited, and the newest
+  /// edit per day, so a failed write puts the day back without a fetch.
+  final Map<String, Entry?> _confirmed = {};
+  final Map<String, int> _editSeq = {};
+  Future<void> _writeChain = Future.value();
   Entry? _todayEntry;
   String? _error;
 
@@ -147,6 +167,7 @@ class _CalendarScreenState extends State<CalendarScreen>
 
   Future<void> _load() async {
     final generation = ++_loadGeneration;
+    final epoch = _writeEpoch;
     // Silent reload: never insert a progress bar into the Column — that
     // reflows/shrinks the month carousel during swipe/chevron month changes.
     setState(() => _error = null);
@@ -189,10 +210,21 @@ class _CalendarScreenState extends State<CalendarScreen>
         }
       }
       if (!mounted || generation != _loadGeneration) return;
+      if (_pendingWrites > 0) {
+        _reloadAfterWrites = true;
+        return;
+      }
+      if (epoch != _writeEpoch) {
+        // An edit came and went while this was on its way: ask again.
+        unawaited(_load());
+        return;
+      }
+      _confirmed.clear();
       setState(() {
-        _entries = map;
-        _prevEntries = prevMap;
-        _nextEntries = nextMap;
+        _monthCache[_monthKey(_prevMonth)] = prevMap;
+        _monthCache[_monthKey(_month)] = map;
+        _monthCache[_monthKey(_nextMonth)] = nextMap;
+        _showCachedMonths();
         _todayEntry = todayEntry;
       });
     } catch (err) {
@@ -232,6 +264,8 @@ class _CalendarScreenState extends State<CalendarScreen>
         unawaited(_cancelPartnerAlerts());
       }
     }
+    _monthCache.clear();
+    _confirmed.clear();
     setState(() {
       _entries = {};
       _prevEntries = {};
@@ -363,6 +397,7 @@ class _CalendarScreenState extends State<CalendarScreen>
       setState(() {
         _month = DateTime(_month.year, _month.month + delta);
         _dragPx = 0;
+        _showCachedMonths();
       });
       _load();
       return;
@@ -464,6 +499,7 @@ class _CalendarScreenState extends State<CalendarScreen>
           _month = DateTime(_month.year, _month.month + commitDelta);
           _dragPx = 0;
           _monthSnapAnim = null;
+          _showCachedMonths();
         });
         _load();
       } else {
@@ -475,19 +511,106 @@ class _CalendarScreenState extends State<CalendarScreen>
     });
   }
 
-  Future<void> _persistDay(String key, DayEditResult result) async {
-    if (result.clear) {
-      await widget.api.deleteEntry(key);
+  static String _monthKey(DateTime month) => '${month.year}-${month.month}';
+
+  /// Points the three visible grids at the cached months (empty when a month
+  /// was never fetched).
+  void _showCachedMonths() {
+    _prevEntries = _monthCache[_monthKey(_prevMonth)] ?? const {};
+    _entries = _monthCache[_monthKey(_month)] ?? const {};
+    _nextEntries = _monthCache[_monthKey(_nextMonth)] ?? const {};
+  }
+
+  Entry? _visibleEntry(String key) {
+    final cached = _monthCache[_monthKey(DateTime.parse(key))]?[key];
+    return cached ?? (key == _todayKey ? _todayEntry : null);
+  }
+
+  void _setLocal(String key, Entry? entry) {
+    final month = DateTime.parse(key);
+    final cached = _monthCache[_monthKey(month)];
+    setState(() {
+      if (cached != null || entry != null) {
+        final next = Map<String, Entry>.of(cached ?? const {});
+        if (entry == null) {
+          next.remove(key);
+        } else {
+          next[key] = entry;
+        }
+        _monthCache[_monthKey(month)] = next;
+      }
+      _showCachedMonths();
+      if (key == _todayKey) _todayEntry = entry;
+    });
+  }
+
+  Future<void> _persistDay(String key, DayEditResult result) {
+    // On screen before the server has seen it.
+    _writeEpoch++;
+    _confirmed.putIfAbsent(key, () => _visibleEntry(key));
+    final seq = _editSeq[key] = (_editSeq[key] ?? 0) + 1;
+    _setLocal(
+      key,
+      result.clear
+          ? null
+          : Entry(
+              date: key,
+              taken: result.taken,
+              notes: result.notes,
+              heart: result.heart,
+              period: result.period,
+            ),
+    );
+    _pendingWrites++;
+    // A write still queued when the user signs out must not run as the next
+    // account, which shares this client and reads the token per request.
+    final isCurrent = widget.isSessionCurrent;
+    final userId = widget.user.id;
+    final session = widget.sessionGeneration?.call() ?? 0;
+    // One write at a time so rapid edits reach the server in order.
+    final write = _writeChain.then((_) async {
+      try {
+        if (isCurrent != null && !isCurrent(session, userId)) return;
+        final Entry? saved;
+        if (result.clear) {
+          await widget.api.deleteEntry(key);
+          saved = null;
+        } else {
+          saved = await widget.api.upsertEntry(
+            key,
+            taken: result.taken,
+            notes: result.notes,
+            heart: result.heart,
+            period: result.period,
+          );
+        }
+        _confirmed[key] = saved;
+      } catch (_) {
+        // Back to what the server holds, unless a newer edit of the day is
+        // queued (it decides). Then a refresh once the queue drains.
+        if (mounted && _editSeq[key] == seq) _setLocal(key, _confirmed[key]);
+        _reloadAfterWrites = true;
+        rethrow;
+      } finally {
+        _writeEpoch++;
+        _pendingWrites--;
+        _afterWrite();
+      }
+    });
+    _writeChain = write.catchError((Object _) {});
+    return write;
+  }
+
+  /// Entries are already right on screen; once the queue drains, refresh
+  /// predictions (or everything, after a failed write).
+  void _afterWrite() {
+    if (!mounted || _pendingWrites > 0) return;
+    if (_reloadAfterWrites) {
+      _reloadAfterWrites = false;
+      unawaited(_load());
     } else {
-      await widget.api.upsertEntry(
-        key,
-        taken: result.taken,
-        notes: result.notes,
-        heart: result.heart,
-        period: result.period,
-      );
+      unawaited(_loadCycle());
     }
-    await _load();
   }
 
   Future<void> _openDay(DateTime day) async {
