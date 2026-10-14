@@ -64,6 +64,7 @@ services:
       APP_BASE_URL: ${APP_BASE_URL:?set APP_BASE_URL in .env}
       WORKOS_CLIENT_ID: ${WORKOS_CLIENT_ID:?set WORKOS_CLIENT_ID in .env}
       WORKOS_API_KEY: ${WORKOS_API_KEY:-}
+      PRIVACY_CONTACT: ${PRIVACY_CONTACT:-}
     volumes:
       - certs:/certs:ro
     depends_on:
@@ -105,7 +106,8 @@ POSTGRES_PASSWORD=
 DATA_ENCRYPTION_KEY=
 APP_BASE_URL=https://217.example.com   # or http://localhost:8787 to try it
 WORKOS_CLIENT_ID=client_...
-WORKOS_API_KEY=sk_...                  # recommended: "Delete account" needs it
+WORKOS_API_KEY=sk_...                  # optional: also deletes the WorkOS sign-in identity during account erasure
+# PRIVACY_CONTACT=privacy@example.com  # who answers privacy requests (shown in the app)
 # SITE_ADDRESS=217.example.com         # see the comment in compose.yaml
 ```
 
@@ -131,7 +133,7 @@ docker compose up -d
 
 If any command fails, stop and resolve the error before continuing. Keep `217.dump` until you have verified the restored data in the app, then delete it and any older plaintext backups. Do not rerun the dump command over your existing backup after removing the old volume.
 
-Optional server variables for the `backend` service: `SESSION_TTL` (e.g. `720h`), `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` (web push).
+Optional server variables for the `backend` service: `PRIVACY_CONTACT` (email or URL for privacy requests, shown in the app's privacy notice), `SESSION_TTL` (e.g. `720h`), `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` (web push).
 
 Owners can record cycling, perimenopause, or menopause; menopause suppresses PMS predictions while perimenopause keeps PMS when periods are logged.
 
@@ -172,6 +174,21 @@ The `certs` service writes a private CA and the `postgres` / `backend` certifica
 - Never commit `WORKOS_API_KEY`, `DATA_ENCRYPTION_KEY` or other secrets; the apps only get the public client ID
 - The API answers with `Cache-Control: no-store`, and both API and web send `nosniff`, `no-referrer` and anti-framing headers
 - Request bodies are capped at 64 KiB; sign-in endpoints are rate limited per address
+
+## Privacy (LGPD)
+
+217 handles health and sex-life data, sensitive under Brazil's LGPD (Law 13.709/2018, art. 11). Whoever runs a server is its controller; the software gives them and their users:
+
+| | How |
+|---|---|
+| Specific consent | After sign-in, a highlighted notice says what is stored, why, where and who sees it. Nothing is processed until the user agrees; the agreed version and time are stored. Changing the notice (`model.ConsentVersion`) asks everyone again |
+| Contact | `PRIVACY_CONTACT` (the controller or its DPO) appears in the notice |
+| Access and portability | Settings → **Download my data**: everything held about the account as JSON (`GET /api/account/export`) |
+| Correction | Any day can be edited or cleared |
+| Erasure, withdrawing consent | Settings → **Delete account** removes the account and all its data (also without `WORKOS_API_KEY`, which only decides whether the WorkOS sign-in identity goes too). A departing partner leaves the owner's share revoked |
+| Minimization and retention | No IP addresses or user agents are stored. Expired sessions and sign-in attempts, reminder deliveries older than 30 days and shares revoked over 30 days ago are purged hourly |
+| No third parties | Fonts ship with the app; the web engine's fallback fonts are fetched by the server (`/gstatic/`), so browsers never contact Google. Sign-in goes through WorkOS, named in the notice |
+| Security | See [Security](#security) |
 
 ## Development
 

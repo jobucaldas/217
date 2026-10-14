@@ -32,7 +32,7 @@ Future<LocalReminderSyncResult> syncLocalDailyReminder({
   }
 
   try {
-    final ready = await _ensureReady();
+    final ready = await _ensureReady(requestPermission: enabled);
     if (!ready) {
       return const LocalReminderSyncResult(
         LocalReminderSyncStatus.permissionDenied,

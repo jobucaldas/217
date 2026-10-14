@@ -33,6 +33,9 @@ func reminderStore(t *testing.T, reminderTime string) *store.MemoryStore {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s.RecordConsent(user.ID, model.ConsentVersion); err != nil {
+		t.Fatal(err)
+	}
 	request := model.PushSubscriptionRequest{Endpoint: "https://push.example/one"}
 	request.Keys.P256DH = "p256dh"
 	request.Keys.Auth = "auth"

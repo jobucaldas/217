@@ -158,6 +158,9 @@ func TestSealExistingRowsDropsPlaintext(t *testing.T) {
 	if err != nil || len(notes) != 1 || notes[0].Body != "love note body" || notes[0].FromEmail != "bf@example.com" {
 		t.Fatalf("notes after sealing: %+v %v", notes, err)
 	}
+	if _, err := s.RecordConsent(owner, model.ConsentVersion); err != nil {
+		t.Fatal(err)
+	}
 	targets, err := s.UpsertReminderPreference(owner, model.ReminderPreference{Enabled: true, Time: "08:00", Timezone: "UTC"})
 	if err != nil || targets.SubscriptionCount != 1 {
 		t.Fatalf("subscription after sealing: %+v %v", targets, err)
@@ -194,6 +197,9 @@ func TestSwappedNoteSealsDoNotOpen(t *testing.T) {
 	if _, err := s.SetRole(owner.ID, model.RoleOwner); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s.RecordConsent(owner.ID, model.ConsentVersion); err != nil {
+		t.Fatal(err)
+	}
 	share, _ := s.EnableShare(owner.ID)
 	if _, err := s.AcceptShare(partner.ID, share.InviteCode); err != nil {
 		t.Fatal(err)
@@ -224,6 +230,9 @@ func TestKeyRotationReseals(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := s.UpsertEntry(owner.ID, "2026-09-01", model.UpsertRequest{Notes: "kept"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RecordConsent(owner.ID, model.ConsentVersion); err != nil {
 		t.Fatal(err)
 	}
 	share, err := s.EnableShare(owner.ID)

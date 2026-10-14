@@ -126,6 +126,9 @@ func testRolesCycleAlerts(t *testing.T, s Store) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s.RecordConsent(owner.ID, model.ConsentVersion); err != nil {
+		t.Fatal(err)
+	}
 	share, err := s.EnableShare(owner.ID)
 	if err != nil {
 		t.Fatal(err)

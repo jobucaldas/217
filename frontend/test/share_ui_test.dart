@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
 
 import 'package:a217/src/api/client.dart';
 import 'package:a217/src/config.dart';
@@ -69,13 +70,23 @@ void main() {
       await tester.pumpAndSettle();
       expect(
         find.text(
-          'This permanently deletes your data and login account. This cannot be undone.',
+          'This permanently deletes your data on this server and withdraws your consent. Your WorkOS login identity remains. This cannot be undone.',
         ),
         findsOneWidget,
       );
       expect(find.text('Delete permanently'), findsOneWidget);
     });
   }
+
+  test('joining an unconsented owner explains why', () {
+    const strings = Strings(AppLanguage.en);
+    final err = ApiException(
+      'accept share',
+      http.Response('{"error":"calendar owner consent required"}', 403),
+    );
+    expect(joinErrorText(strings, err),
+        strings.sharedCalendarOwnerConsentRequired);
+  });
 
   test('share state defaults owner editable', () {
     const share = ShareState(status: 'none');

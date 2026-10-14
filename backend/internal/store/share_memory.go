@@ -88,8 +88,15 @@ func (s *MemoryStore) DeleteUser(userID string) error {
 		}
 	}
 	for id, share := range s.shares {
-		if share.OwnerID == userID || share.PartnerID == userID {
+		switch {
+		case share.OwnerID == userID:
 			delete(s.shares, id)
+		case share.PartnerID == userID:
+			share.PartnerID = ""
+			if share.Status == model.ShareOpen || share.Status == model.ShareActive {
+				share.Status = model.ShareRevoked
+				share.UpdatedAt = time.Now().UTC()
+			}
 		}
 	}
 	for id, note := range s.partnerNotes {
@@ -98,6 +105,57 @@ func (s *MemoryStore) DeleteUser(userID string) error {
 		}
 	}
 	return nil
+}
+
+func (s *MemoryStore) RecordConsent(userID string, version int) (*model.User, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	u := s.findUserLocked(userID)
+	if u == nil {
+		return nil, fmt.Errorf("user not found")
+	}
+	now := time.Now().UTC()
+	u.ConsentVersion, u.ConsentedAt, u.UpdatedAt = version, &now, now
+	return sanitizeUser(u), nil
+}
+
+func (s *MemoryStore) PurgeExpired(now time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for k, sess := range s.sessions {
+		if !now.Before(sess.ExpiresAt) {
+			delete(s.sessions, k)
+		}
+	}
+	for k, a := range s.oauthAttempts {
+		if !now.Before(a.ExpiresAt) {
+			delete(s.oauthAttempts, k)
+		}
+	}
+	for key, delivery := range s.deliveries {
+		if delivery.reminderDate.Before(now.AddDate(0, 0, -30)) {
+			delete(s.deliveries, key)
+		}
+	}
+	for id, share := range s.shares {
+		if share.Status == model.ShareRevoked && !share.UpdatedAt.After(now.Add(-model.RetentionAfterRevoke)) {
+			delete(s.shares, id)
+		}
+	}
+	return nil
+}
+
+func (s *MemoryStore) ListSentPartnerNotes(partnerID string) ([]*model.PartnerNote, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]*model.PartnerNote, 0)
+	for _, n := range s.partnerNotes {
+		if n.PartnerID == partnerID {
+			c := *n
+			out = append(out, &c)
+		}
+	}
+	return out, nil
 }
 
 func (s *MemoryStore) findUserLocked(userID string) *model.User {
@@ -292,6 +350,9 @@ func (s *MemoryStore) AcceptShare(partnerID, inviteCode string) (*model.ShareSta
 	if target.OwnerID == partnerID {
 		return nil, fmt.Errorf("cannot accept your own invite")
 	}
+	if !s.findUserLocked(target.OwnerID).HasConsent() {
+		return nil, fmt.Errorf("calendar owner consent required")
+	}
 	partner.Role = model.RolePartner
 	partner.UpdatedAt = time.Now().UTC()
 	target.PartnerID = partnerID
@@ -326,9 +387,6 @@ func (s *MemoryStore) ListInboxNotes(ownerID string) ([]*model.PartnerNote, erro
 	user := s.findUserLocked(ownerID)
 	if user == nil {
 		return nil, fmt.Errorf("user not found")
-	}
-	if model.NormalizeRole(user.Role) != model.RoleOwner {
-		return nil, fmt.Errorf("only owners have an inbox")
 	}
 	out := make([]*model.PartnerNote, 0)
 	for _, note := range s.partnerNotes {
@@ -373,6 +431,9 @@ func (s *MemoryStore) CreatePartnerNote(partnerID, body string) (*model.PartnerN
 	live := s.liveShareForPartnerLocked(partnerID)
 	if live == nil || live.Status != model.ShareActive {
 		return nil, fmt.Errorf("share inactive")
+	}
+	if !s.findUserLocked(live.OwnerID).HasConsent() {
+		return nil, fmt.Errorf("calendar owner consent required")
 	}
 	now := time.Now().UTC()
 	note := &model.PartnerNote{
@@ -425,6 +486,44 @@ func (s *MemoryStore) SetRole(userID, role string) (*model.User, error) {
 		user.UpdatedAt = time.Now().UTC()
 	}
 	return sanitizeUser(user), nil
+}
+
+func (s *MemoryStore) ListAccountShares(userID string) ([]*model.CalendarShare, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := []*model.CalendarShare{}
+	for _, sh := range s.shares {
+		if sh.OwnerID == userID || sh.PartnerID == userID {
+			c := *sh
+			c.InviteCode = ""
+			out = append(out, &c)
+		}
+	}
+	return out, nil
+}
+func (s *MemoryStore) ListAccountSubscriptions(userID string) ([]model.ExportPushSubscription, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := []model.ExportPushSubscription{}
+	for _, sub := range s.subscriptions {
+		if sub.UserID == userID {
+			out = append(out, model.ExportPushSubscription{Endpoint: sub.Endpoint})
+		}
+	}
+	return out, nil
+}
+
+func (s *MemoryStore) ListReceivedPartnerNotes(userID string) ([]*model.PartnerNote, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := []*model.PartnerNote{}
+	for _, n := range s.partnerNotes {
+		if n.OwnerID == userID {
+			c := *n
+			out = append(out, &c)
+		}
+	}
+	return out, nil
 }
 
 func (s *MemoryStore) SetStage(userID, stage string) (*model.User, error) {

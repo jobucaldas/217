@@ -145,7 +145,9 @@ class _ShareSettingsSectionState extends State<ShareSettingsSection> {
                       onPressed: _send,
                       icon: Icon(canShareNatively ? Icons.share : Icons.link),
                       label: Text(
-                        canShareNatively ? strings.shareSend : strings.shareCopyLink,
+                        canShareNatively
+                            ? strings.shareSend
+                            : strings.shareCopyLink,
                       ),
                     ),
                   ),
@@ -236,11 +238,13 @@ class DeleteAccountSection extends StatefulWidget {
     required this.api,
     required this.strings,
     required this.onAccountDeleted,
+    this.onAccountDeleting,
   });
 
   final ApiClient api;
   final Strings strings;
   final VoidCallback onAccountDeleted;
+  final VoidCallback? onAccountDeleting;
 
   @override
   State<DeleteAccountSection> createState() => _DeleteAccountSectionState();
@@ -254,7 +258,8 @@ class _DeleteAccountSectionState extends State<DeleteAccountSection> {
       context: context,
       builder: (context) => AlertDialog(
         title: Text(widget.strings.deleteAccount),
-        content: Text(widget.strings.deleteAccountWarn),
+        content: Text(
+            widget.strings.deleteAccountWarn(widget.api.workosUserDeletion)),
         actions: [
           DialogActionRow(
             secondary: DialogLinkButton(
@@ -277,6 +282,7 @@ class _DeleteAccountSectionState extends State<DeleteAccountSection> {
     if (ok != true) return;
     setState(() => _busy = true);
     try {
+      widget.onAccountDeleting?.call();
       await widget.api.deleteAccount();
       widget.onAccountDeleted();
     } catch (err) {
@@ -325,6 +331,7 @@ class PartnerJoinScreen extends StatefulWidget {
     required this.strings,
     required this.onJoined,
     required this.onAccountDeleted,
+    this.onAccountDeleting,
     required this.onOpenSettings,
     this.revoked = false,
     this.onSwitchToOwner,
@@ -334,6 +341,7 @@ class PartnerJoinScreen extends StatefulWidget {
   final Strings strings;
   final ValueChanged<ShareState> onJoined;
   final VoidCallback onAccountDeleted;
+  final VoidCallback? onAccountDeleting;
   final VoidCallback onOpenSettings;
 
   /// Access was revoked (vs. never joined).
@@ -377,7 +385,8 @@ class _PartnerJoinScreenState extends State<PartnerJoinScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: Text(widget.strings.deleteAccount),
-        content: Text(widget.strings.deleteAccountWarn),
+        content: Text(
+            widget.strings.deleteAccountWarn(widget.api.workosUserDeletion)),
         actions: [
           DialogActionRow(
             secondary: DialogLinkButton(
@@ -400,6 +409,7 @@ class _PartnerJoinScreenState extends State<PartnerJoinScreen> {
     if (ok != true) return;
     setState(() => _busy = true);
     try {
+      widget.onAccountDeleting?.call();
       await widget.api.deleteAccount();
       widget.onAccountDeleted();
     } catch (err) {
@@ -429,51 +439,51 @@ class _PartnerJoinScreenState extends State<PartnerJoinScreen> {
       ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(24, 32, 24, 24),
-          children: [
-            Text(
-              widget.revoked
-                  ? widget.strings.partnerRevokedTitle
-                  : widget.strings.partnerJoinTitle,
-              style: text.headlineMedium?.copyWith(color: scheme.onSurface),
+        children: [
+          Text(
+            widget.revoked
+                ? widget.strings.partnerRevokedTitle
+                : widget.strings.partnerJoinTitle,
+            style: text.headlineMedium?.copyWith(color: scheme.onSurface),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            widget.revoked
+                ? widget.strings.partnerRevokedBody
+                : widget.strings.partnerJoinBody,
+            style: text.bodyLarge?.copyWith(color: scheme.onSurfaceVariant),
+          ),
+          const SizedBox(height: 28),
+          TextField(
+            key: const ValueKey('partner-join-code'),
+            controller: _code,
+            textCapitalization: TextCapitalization.characters,
+            decoration: InputDecoration(
+              labelText: widget.strings.enterInviteCode,
             ),
-            const SizedBox(height: 12),
-            Text(
-              widget.revoked
-                  ? widget.strings.partnerRevokedBody
-                  : widget.strings.partnerJoinBody,
-              style: text.bodyLarge?.copyWith(color: scheme.onSurfaceVariant),
-            ),
-            const SizedBox(height: 28),
-            TextField(
-              key: const ValueKey('partner-join-code'),
-              controller: _code,
-              textCapitalization: TextCapitalization.characters,
-              decoration: InputDecoration(
-                labelText: widget.strings.enterInviteCode,
-              ),
-              enabled: !_busy,
-            ),
-            const SizedBox(height: 12),
-            FilledButton(
-              onPressed: _busy ? null : _join,
-              child: Text(widget.strings.joinCalendar),
-            ),
+            enabled: !_busy,
+          ),
+          const SizedBox(height: 12),
+          FilledButton(
+            onPressed: _busy ? null : _join,
+            child: Text(widget.strings.joinCalendar),
+          ),
+          const SizedBox(height: 8),
+          if (widget.onSwitchToOwner != null) ...[
             const SizedBox(height: 8),
-            if (widget.onSwitchToOwner != null) ...[
-              const SizedBox(height: 8),
-              TextButton(
-                key: const ValueKey('switch-to-owner'),
-                onPressed: _busy ? null : widget.onSwitchToOwner,
-                child: Text(widget.strings.switchToOwner),
-              ),
-            ],
-            const SizedBox(height: 24),
-            OutlinedButton(
-              onPressed: _busy ? null : _delete,
-              style: OutlinedButton.styleFrom(foregroundColor: scheme.error),
-              child: Text(widget.strings.deleteAccount),
+            TextButton(
+              key: const ValueKey('switch-to-owner'),
+              onPressed: _busy ? null : widget.onSwitchToOwner,
+              child: Text(widget.strings.switchToOwner),
             ),
           ],
+          const SizedBox(height: 24),
+          OutlinedButton(
+            onPressed: _busy ? null : _delete,
+            style: OutlinedButton.styleFrom(foregroundColor: scheme.error),
+            child: Text(widget.strings.deleteAccount),
+          ),
+        ],
       ),
     );
   }

@@ -23,7 +23,10 @@ import (
 
 type contextKey string
 
-const userIDKey contextKey = "userID"
+const (
+	userIDKey  contextKey = "userID"
+	consentKey contextKey = "consent"
+)
 
 const oauthBindingCookie = "217_oauth_binding"
 
@@ -45,6 +48,7 @@ type Handler struct {
 	appBaseURL      string
 	authLimiter     *ipRateLimiter
 	inviteLimiter   *ipRateLimiter
+	privacyContact  string
 }
 
 func New(s store.Store) *Handler {
@@ -81,7 +85,11 @@ func (h *Handler) SetRateLimit(limit int) {
 	h.authLimiter = newIPRateLimiter(limit, time.Minute)
 }
 func (h *Handler) SetOAuthProvider(p auth.OAuthProvider) { h.oauthProvider = p }
-func (h *Handler) SetAppBaseURL(u string)                { h.appBaseURL = u }
+
+// SetPrivacyContact sets who answers privacy requests for this server
+// (the controller or its data protection officer): an email or a URL.
+func (h *Handler) SetPrivacyContact(contact string) { h.privacyContact = strings.TrimSpace(contact) }
+func (h *Handler) SetAppBaseURL(u string)           { h.appBaseURL = u }
 
 func (h *Handler) authkitEnabled() bool { return h.oauthProvider != nil }
 
@@ -94,6 +102,15 @@ func (h *Handler) AuthConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	if reporter, ok := h.oauthProvider.(auth.ClientIDReporter); ok {
 		body["workos_client_id"] = reporter.ClientID()
+	}
+	body["consent_version"] = model.ConsentVersion
+	if cfg, ok := h.oauthProvider.(auth.UserDeleteConfigurer); ok {
+		body["workos_user_deletion"] = cfg.CanDeleteUsers()
+	} else {
+		body["workos_user_deletion"] = false
+	}
+	if h.privacyContact != "" {
+		body["privacy_contact"] = h.privacyContact
 	}
 	writeJSON(w, http.StatusOK, body)
 }
@@ -217,8 +234,22 @@ func (h *Handler) AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		ctx := context.WithValue(r.Context(), userIDKey, user.ID)
+		ctx = context.WithValue(ctx, consentKey, user.HasConsent())
 		next(w, r.WithContext(ctx))
 	}
+}
+
+// ConsentMiddleware is AuthMiddleware for endpoints that process personal
+// data: they wait until the user agreed to the current privacy notice.
+// Account deletion, export and consent itself stay reachable without it.
+func (h *Handler) ConsentMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return h.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		if ok, _ := r.Context().Value(consentKey).(bool); !ok {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "consent required"})
+			return
+		}
+		next(w, r)
+	})
 }
 
 func getUserID(r *http.Request) string {
@@ -446,6 +477,9 @@ func (h *Handler) ListEntries(w http.ResponseWriter, r *http.Request) {
 		now := time.Now().UTC()
 		year, month = now.Year(), int(now.Month())
 	}
+	if err := h.requireSubjectConsent(w, userID, subjectID); err != nil {
+		return
+	}
 
 	entries, err := h.store.ListEntries(subjectID, year, month)
 	if err != nil {
@@ -477,6 +511,9 @@ func (h *Handler) GetEntry(w http.ResponseWriter, r *http.Request) {
 
 	if _, err := time.Parse("2006-01-02", date); err != nil {
 		http.Error(w, `{"error":"invalid date format, use YYYY-MM-DD"}`, http.StatusBadRequest)
+		return
+	}
+	if err := h.requireSubjectConsent(w, userID, subjectID); err != nil {
 		return
 	}
 
@@ -554,6 +591,9 @@ func (h *Handler) GetStats(w http.ResponseWriter, r *http.Request) {
 		writeCalendarSubjectError(w, err)
 		return
 	}
+	if err := h.requireSubjectConsent(w, userID, subjectID); err != nil {
+		return
+	}
 	year, month := parseYearMonth(r)
 	if year == 0 {
 		now := time.Now().UTC()
@@ -567,6 +607,24 @@ func (h *Handler) GetStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, stats)
+}
+
+// requireSubjectConsent protects a shared owner's calendar when the caller
+// has consented but the owner has not agreed to the current notice.
+func (h *Handler) requireSubjectConsent(w http.ResponseWriter, callerID, subjectID string) error {
+	if callerID == subjectID {
+		return nil
+	}
+	subject, err := h.store.GetUserByID(subjectID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return err
+	}
+	if !subject.HasConsent() {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "calendar owner consent required"})
+		return fmt.Errorf("calendar owner consent required")
+	}
+	return nil
 }
 
 // --- Reminder handlers ---

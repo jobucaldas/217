@@ -3,11 +3,14 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
 
 import 'package:a217/src/api/client.dart';
 import 'package:a217/src/config.dart';
 import 'package:a217/src/i18n.dart';
 import 'package:a217/src/models.dart';
+import 'package:a217/src/notifications/local_reminders.dart';
+import 'package:a217/src/notifications/partner_alert_sync_queue.dart';
 import 'package:a217/src/screens/calendar_screen.dart';
 import 'package:a217/src/theme/app_theme.dart';
 
@@ -66,6 +69,68 @@ class _GatedCalendarApi extends _FakeCalendarApi {
   }
 }
 
+class _CalendarOwnerConsentApi extends _FakeCalendarApi {
+  _CalendarOwnerConsentApi(super.entries);
+
+  int _calls = 0;
+
+  @override
+  Future<List<Entry>> listEntries(int year, int month) async {
+    _calls++;
+    if (_calls > 3) {
+      throw ApiException(
+        'list entries',
+        http.Response('{"error":"calendar owner consent required"}', 403),
+      );
+    }
+    return entries;
+  }
+}
+
+class _RacingCalendarApi extends _FakeCalendarApi {
+  _RacingCalendarApi(super.entries);
+
+  final firstLoadGate = Completer<void>();
+  int _calls = 0;
+
+  @override
+  Future<List<Entry>> listEntries(int year, int month) async {
+    _calls++;
+    if (_calls <= 3) {
+      await firstLoadGate.future;
+      return entries;
+    }
+    throw ApiException(
+      'list entries',
+      http.Response('{"error":"calendar owner consent required"}', 403),
+    );
+  }
+}
+
+class _CycleOwnerConsentApi extends _FakeCalendarApi {
+  _CycleOwnerConsentApi(super.entries);
+
+  @override
+  Future<CycleInfo> getCycle(String today) async => throw ApiException(
+        'get cycle',
+        http.Response('{"error":"calendar owner consent required"}', 403),
+      );
+}
+
+class _GatedPartnerCycleApi extends _FakeCalendarApi {
+  final cycleGate = Completer<void>();
+
+  @override
+  Future<CycleInfo> getCycle(String today) async {
+    await cycleGate.future;
+    return CycleInfo.empty;
+  }
+
+  @override
+  Future<PartnerAlertPreference> getPartnerAlerts() async =>
+      const PartnerAlertPreference(pillEnabled: true);
+}
+
 /// Representative monitor / window sizes where the month grid used to crop.
 const _viewports = <(String, Size)>[
   ('phone', Size(390, 844)),
@@ -79,6 +144,177 @@ const _viewports = <(String, Size)>[
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   GoogleFonts.config.allowRuntimeFetching = false;
+
+  testWidgets(
+      'delayed partner cycle cannot schedule after session invalidation',
+      (tester) async {
+    final api = _GatedPartnerCycleApi();
+    final scheduled = <List<PlannedAlert>>[];
+    var sessionGeneration = 1;
+    final queue = PartnerAlertSyncQueue(
+      scheduler: (alerts) async {
+        scheduled.add(alerts);
+        return LocalReminderSyncStatus.scheduled;
+      },
+      canceller: () async {},
+    );
+    await tester.pumpWidget(MaterialApp(
+      theme: buildApp217Theme(
+        brightness: Brightness.light,
+        palette: AppPalette.blue,
+      ),
+      home: CalendarScreen(
+        api: api,
+        user: const User(
+          id: 'partner',
+          email: 'p@example.invalid',
+          name: 'P',
+          role: 'partner',
+        ),
+        strings: const Strings(AppLanguage.en),
+        onOpenSettings: () {},
+        share: const ShareState(status: 'active'),
+        partnerAlertSyncQueue: queue,
+        sessionGeneration: () => sessionGeneration,
+        isSessionCurrent: (generation, _) => generation == sessionGeneration,
+      ),
+    ));
+    await tester.pump();
+
+    sessionGeneration++;
+    await queue.cancel();
+    api.cycleGate.complete();
+    await tester.pumpAndSettle();
+
+    expect(scheduled, isEmpty);
+  });
+
+  testWidgets('owner consent block clears previously visible calendar data',
+      (tester) async {
+    final today = DateTime.now();
+    final entryDate =
+        '${today.year.toString().padLeft(4, '0')}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
+    final periodMarker = ValueKey('period-${today.month}-${today.day}');
+    final api = _CalendarOwnerConsentApi([
+      Entry(
+        date: entryDate,
+        taken: true,
+        notes: 'cached private note',
+        heart: true,
+        period: true,
+      ),
+    ]);
+    await tester.pumpWidget(MaterialApp(
+      theme: buildApp217Theme(
+        brightness: Brightness.light,
+        palette: AppPalette.blue,
+      ),
+      home: CalendarScreen(
+        api: api,
+        user: const User(
+            id: 'partner',
+            email: 'p@example.invalid',
+            name: 'P',
+            role: 'partner'),
+        strings: const Strings(AppLanguage.en),
+        onOpenSettings: () {},
+        share: const ShareState(status: 'active'),
+        palette: AppPalette.blue,
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.byKey(periodMarker), findsOneWidget);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(periodMarker), findsNothing);
+    expect(find.byKey(const ValueKey('calendar-error')), findsOneWidget);
+  });
+
+  testWidgets('owner consent block invalidates an older pending calendar load',
+      (tester) async {
+    final today = DateTime.now();
+    final entryDate =
+        '${today.year.toString().padLeft(4, '0')}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
+    final periodMarker = ValueKey('period-${today.month}-${today.day}');
+    final api = _RacingCalendarApi([
+      Entry(date: entryDate, taken: true, notes: '', period: true),
+    ]);
+    await tester.pumpWidget(MaterialApp(
+      theme: buildApp217Theme(
+        brightness: Brightness.light,
+        palette: AppPalette.blue,
+      ),
+      home: CalendarScreen(
+        api: api,
+        user: const User(
+            id: 'partner',
+            email: 'p@example.invalid',
+            name: 'P',
+            role: 'partner'),
+        strings: const Strings(AppLanguage.en),
+        onOpenSettings: () {},
+        share: const ShareState(status: 'active'),
+        palette: AppPalette.blue,
+      ),
+    ));
+    await tester.pump();
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('calendar-error')), findsOneWidget);
+
+    api.firstLoadGate.complete();
+    await tester.pumpAndSettle();
+    expect(find.byKey(periodMarker), findsNothing);
+    expect(find.byKey(const ValueKey('calendar-error')), findsOneWidget);
+  });
+
+  testWidgets('owner consent block from cycle request clears the calendar',
+      (tester) async {
+    final today = DateTime.now();
+    final entryDate =
+        '${today.year.toString().padLeft(4, '0')}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
+    final periodMarker = ValueKey('period-${today.month}-${today.day}');
+    final scheduled = <List<PlannedAlert>>[];
+    await tester.pumpWidget(MaterialApp(
+      theme: buildApp217Theme(
+        brightness: Brightness.light,
+        palette: AppPalette.blue,
+      ),
+      home: CalendarScreen(
+        api: _CycleOwnerConsentApi([
+          Entry(date: entryDate, taken: true, notes: '', period: true),
+        ]),
+        user: const User(
+            id: 'partner',
+            email: 'p@example.invalid',
+            name: 'P',
+            role: 'partner'),
+        strings: const Strings(AppLanguage.en),
+        onOpenSettings: () {},
+        share: const ShareState(status: 'active'),
+        partnerAlertScheduler: (alerts) async {
+          scheduled.add(alerts);
+          return LocalReminderSyncStatus.cancelled;
+        },
+        palette: AppPalette.blue,
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(periodMarker), findsNothing);
+    expect(find.byKey(const ValueKey('calendar-error')), findsOneWidget);
+    expect(scheduled, hasLength(1));
+    expect(scheduled.single, isEmpty);
+    expect(
+      find.text(
+        'The calendar owner must agree to the current privacy notice before you can view their calendar.',
+      ),
+      findsOneWidget,
+    );
+  });
 
   for (final (name, size) in _viewports) {
     for (final brightness in Brightness.values) {
@@ -123,8 +359,7 @@ void main() {
           expect(find.text('217'), findsOneWidget);
           // Last day of a 31-day month must be on screen (no crop).
           final now = DateTime.now();
-          final lastDay =
-              DateTime(now.year, now.month + 1, 0).day.toString();
+          final lastDay = DateTime(now.year, now.month + 1, 0).day.toString();
           expect(find.text(lastDay), findsWidgets);
 
           final overflow = errors.where(
@@ -196,7 +431,8 @@ void main() {
     },
   );
 
-  testWidgets('horizontal carousel swipe changes month with snap', (tester) async {
+  testWidgets('horizontal carousel swipe changes month with snap',
+      (tester) async {
     const size = Size(390, 844);
     await tester.binding.setSurfaceSize(size);
     addTearDown(() => tester.binding.setSurfaceSize(null));

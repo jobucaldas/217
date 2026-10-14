@@ -35,7 +35,25 @@ func (s *PGStore) WorkOSSubject(userID string) (string, error) {
 }
 
 func (s *PGStore) DeleteUser(userID string) error {
-	res, err := s.db.Exec(`DELETE FROM users WHERE id = $1`, userID)
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("deleting user: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	var lockedID string
+	if err := tx.QueryRow(`SELECT id FROM users WHERE id = $1 FOR UPDATE`, userID).Scan(&lockedID); err != nil {
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("user not found")
+		}
+		return fmt.Errorf("locking user for deletion: %w", err)
+	}
+	// A departing partner leaves the owner's share revoked, not "active"
+	// with nobody on the other end (partner_id is set NULL below).
+	if _, err := tx.Exec(`UPDATE calendar_shares SET status = 'revoked', updated_at = NOW()
+		WHERE partner_id = $1 AND status IN ('open', 'active')`, userID); err != nil {
+		return fmt.Errorf("revoking shares: %w", err)
+	}
+	res, err := tx.Exec(`DELETE FROM users WHERE id = $1`, userID)
 	if err != nil {
 		return fmt.Errorf("deleting user: %w", err)
 	}
@@ -43,7 +61,7 @@ func (s *PGStore) DeleteUser(userID string) error {
 	if n == 0 {
 		return fmt.Errorf("user not found")
 	}
-	return nil
+	return tx.Commit()
 }
 
 func (s *PGStore) buildShareState(user *model.User) (*model.ShareState, error) {
@@ -217,11 +235,13 @@ func (s *PGStore) AcceptShare(partnerID, inviteCode string) (*model.ShareState, 
 		return nil, fmt.Errorf("already linked to a calendar")
 	}
 
-	var shareID, ownerID string
+	// Lock the owner before the share, the same order account deletion uses,
+	// so a concurrent deletion cannot deadlock with this join.
+	var ownerID string
 	err = tx.QueryRow(
-		`SELECT id, owner_id FROM calendar_shares
-		 WHERE invite_index = $1 AND status = 'open' FOR UPDATE`, inviteIndex(s.kr, code),
-	).Scan(&shareID, &ownerID)
+		`SELECT owner_id FROM calendar_shares
+		 WHERE invite_index = $1 AND status = 'open'`, inviteIndex(s.kr, code),
+	).Scan(&ownerID)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("invalid or expired invite code")
 	}
@@ -230,6 +250,33 @@ func (s *PGStore) AcceptShare(partnerID, inviteCode string) (*model.ShareState, 
 	}
 	if ownerID == partnerID {
 		return nil, fmt.Errorf("cannot accept your own invite")
+	}
+	// Invites outlive notice changes: both sides must have agreed to the
+	// current one before the calendar is linked.
+	var ownerConsent int
+	err = tx.QueryRow(
+		`SELECT consent_version FROM users WHERE id = $1 FOR SHARE`, ownerID,
+	).Scan(&ownerConsent)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("invalid or expired invite code")
+	}
+	if err != nil {
+		return nil, err
+	}
+	if ownerConsent < model.ConsentVersion {
+		return nil, fmt.Errorf("calendar owner consent required")
+	}
+	var shareID string
+	err = tx.QueryRow(
+		`SELECT id FROM calendar_shares
+		 WHERE invite_index = $1 AND owner_id = $2 AND status = 'open' FOR UPDATE`,
+		inviteIndex(s.kr, code), ownerID,
+	).Scan(&shareID)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("invalid or expired invite code")
+	}
+	if err != nil {
+		return nil, err
 	}
 	if _, err := tx.Exec(`UPDATE users SET role = 'partner', updated_at = NOW() WHERE id = $1`, partnerID); err != nil {
 		return nil, err
@@ -274,13 +321,6 @@ func (s *PGStore) CalendarSubjectID(userID string) (string, error) {
 }
 
 func (s *PGStore) ListInboxNotes(ownerID string) ([]*model.PartnerNote, error) {
-	user, err := s.GetUserByID(ownerID)
-	if err != nil {
-		return nil, err
-	}
-	if model.NormalizeRole(user.Role) != model.RoleOwner {
-		return nil, fmt.Errorf("only owners have an inbox")
-	}
 	rows, err := s.db.Query(
 		`SELECT n.id, n.owner_id, n.partner_id, n.body_sealed, n.created_at, n.read_at
 		 FROM partner_notes n
@@ -341,15 +381,20 @@ func (s *PGStore) CreatePartnerNote(partnerID, body string) (*model.PartnerNote,
 		return nil, fmt.Errorf("only partners can leave inbox notes")
 	}
 	var ownerID string
+	var ownerConsent int
 	err = s.db.QueryRow(
-		`SELECT owner_id FROM calendar_shares
-		 WHERE partner_id = $1 AND status = 'active' LIMIT 1`, partnerID,
-	).Scan(&ownerID)
+		`SELECT s.owner_id, u.consent_version FROM calendar_shares s
+		 JOIN users u ON u.id = s.owner_id
+		 WHERE s.partner_id = $1 AND s.status = 'active' LIMIT 1`, partnerID,
+	).Scan(&ownerID, &ownerConsent)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("share inactive")
 	}
 	if err != nil {
 		return nil, err
+	}
+	if ownerConsent < model.ConsentVersion {
+		return nil, fmt.Errorf("calendar owner consent required")
 	}
 	note := &model.PartnerNote{}
 	id := uuid.NewString() // chosen here: the seal is bound to it
@@ -366,6 +411,34 @@ func (s *PGStore) CreatePartnerNote(partnerID, body string) (*model.PartnerNote,
 	note.FromName = user.Name
 	note.FromEmail = user.Email
 	return note, nil
+}
+
+func (s *PGStore) ListSentPartnerNotes(partnerID string) ([]*model.PartnerNote, error) {
+	rows, err := s.db.Query(
+		`SELECT id, owner_id, partner_id, body_sealed, created_at, read_at
+		 FROM partner_notes WHERE partner_id = $1 ORDER BY created_at DESC`, partnerID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("listing sent notes: %w", err)
+	}
+	defer rows.Close()
+	out := make([]*model.PartnerNote, 0)
+	for rows.Next() {
+		note := &model.PartnerNote{}
+		var readAt sql.NullTime
+		var body []byte
+		if err := rows.Scan(&note.ID, &note.OwnerID, &note.PartnerID, &body, &note.CreatedAt, &readAt); err != nil {
+			return nil, err
+		}
+		if note.Body, err = s.kr.OpenString(body, noteCtx(note.ID, note.OwnerID, note.PartnerID)); err != nil {
+			return nil, fmt.Errorf("opening partner note %s: %w", note.ID, err)
+		}
+		if readAt.Valid {
+			note.ReadAt = &readAt.Time
+		}
+		out = append(out, note)
+	}
+	return out, rows.Err()
 }
 
 func (s *PGStore) MarkInboxNoteRead(ownerID, noteID string) error {
@@ -421,6 +494,69 @@ func (s *PGStore) SetRole(userID, role string) (*model.User, error) {
 		return nil, err
 	}
 	return s.GetUserByID(userID)
+}
+
+func (s *PGStore) ListAccountShares(userID string) ([]*model.CalendarShare, error) {
+	rows, err := s.db.Query(`SELECT id,owner_id,COALESCE(partner_id::text,''),status,created_at,updated_at FROM calendar_shares WHERE owner_id=$1 OR partner_id=$1 ORDER BY created_at`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []*model.CalendarShare{}
+	for rows.Next() {
+		v := &model.CalendarShare{}
+		if err := rows.Scan(&v.ID, &v.OwnerID, &v.PartnerID, &v.Status, &v.CreatedAt, &v.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+func (s *PGStore) ListAccountSubscriptions(userID string) ([]model.ExportPushSubscription, error) {
+	rows, err := s.db.Query(`SELECT id,sealed FROM push_subscriptions WHERE user_id=$1`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []model.ExportPushSubscription{}
+	for rows.Next() {
+		var id string
+		var sealed []byte
+		if err := rows.Scan(&id, &sealed); err != nil {
+			return nil, err
+		}
+		var payload pushPayload
+		if err := openJSON(s.kr, sealed, pushCtx(id, userID), &payload); err != nil {
+			return nil, err
+		}
+		out = append(out, model.ExportPushSubscription{Endpoint: payload.Endpoint})
+	}
+	return out, rows.Err()
+}
+
+func (s *PGStore) ListReceivedPartnerNotes(userID string) ([]*model.PartnerNote, error) {
+	rows, err := s.db.Query(`SELECT n.id,n.owner_id,n.partner_id,n.body_sealed,n.created_at,n.read_at FROM partner_notes n WHERE n.owner_id=$1 ORDER BY n.created_at DESC`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []*model.PartnerNote{}
+	for rows.Next() {
+		n := &model.PartnerNote{}
+		var sealed []byte
+		var read sql.NullTime
+		if err := rows.Scan(&n.ID, &n.OwnerID, &n.PartnerID, &sealed, &n.CreatedAt, &read); err != nil {
+			return nil, err
+		}
+		if n.Body, err = s.kr.OpenString(sealed, noteCtx(n.ID, n.OwnerID, n.PartnerID)); err != nil {
+			return nil, err
+		}
+		if read.Valid {
+			n.ReadAt = &read.Time
+		}
+		out = append(out, n)
+	}
+	return out, rows.Err()
 }
 
 func (s *PGStore) SetStage(userID, stage string) (*model.User, error) {

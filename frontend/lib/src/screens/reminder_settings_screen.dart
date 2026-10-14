@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../api/client.dart';
 import '../errors.dart';
 import '../i18n.dart';
+import '../notifications/daily_reminder_sync_queue.dart';
 import '../notifications/local_reminders.dart';
 
 /// Reminder schedule: on/off + time + honest local/push status.
@@ -12,11 +13,13 @@ class ReminderSettingsScreen extends StatefulWidget {
     super.key,
     required this.api,
     required this.strings,
+    this.dailyReminderSyncQueue,
     this.onToggled,
   });
 
   final ApiClient api;
   final Strings strings;
+  final DailyReminderSyncQueue? dailyReminderSyncQueue;
 
   /// Called after the on/off switch was saved, with its new value.
   final ValueChanged<bool>? onToggled;
@@ -75,6 +78,8 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen> {
   }
 
   Future<void> _load() async {
+    final queue = widget.dailyReminderSyncQueue;
+    final reminderRevision = queue?.beginIntent();
     setState(() {
       _loading = true;
       _error = null;
@@ -85,13 +90,22 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen> {
       LocalReminderSyncResult? local;
       if (pref != null && pref.enabled && supportsLocalReminders) {
         // Re-assert OS schedule after reboot / reinstall of the app process.
-        local = await syncLocalDailyReminder(
-          enabled: true,
-          timeHhMm: pref.time,
-          title: '217',
-          body: widget.strings.recordToday,
-        );
+        local = queue == null
+            ? await syncLocalDailyReminder(
+                enabled: true,
+                timeHhMm: pref.time,
+                title: '217',
+                body: widget.strings.recordToday,
+              )
+            : await queue.scheduleIfCurrent(
+                revision: reminderRevision!,
+                enabled: true,
+                timeHhMm: pref.time,
+                title: '217',
+                body: widget.strings.recordToday,
+              );
       }
+      if (queue != null && !queue.isCurrent(reminderRevision!)) return;
       if (!mounted) return;
       setState(() {
         _enabled = pref?.enabled ?? false;
@@ -134,28 +148,38 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen> {
 
   Future<void> _save({bool? enabled}) async {
     final nextEnabled = enabled ?? _enabled;
+    final queue = widget.dailyReminderSyncQueue;
+    final reminderRevision = queue?.beginIntent();
     setState(() {
       _saving = true;
       _error = null;
       _status = null;
     });
     try {
-      LocalReminderSyncResult? local;
-      if (supportsLocalReminders) {
-        local = await syncLocalDailyReminder(
-          enabled: nextEnabled,
-          timeHhMm: _time,
-          title: '217',
-          body: widget.strings.recordToday,
-        );
-      }
-
       final tz = _timezone.isEmpty ? 'UTC' : _timezone;
       final saved = await widget.api.upsertReminderPreference(
         enabled: nextEnabled,
         time: _time,
         timezone: tz,
       );
+      LocalReminderSyncResult? local;
+      if (supportsLocalReminders) {
+        local = queue == null
+            ? await syncLocalDailyReminder(
+                enabled: saved.enabled,
+                timeHhMm: saved.time,
+                title: '217',
+                body: widget.strings.recordToday,
+              )
+            : await queue.scheduleIfCurrent(
+                revision: reminderRevision!,
+                enabled: saved.enabled,
+                timeHhMm: saved.time,
+                title: '217',
+                body: widget.strings.recordToday,
+              );
+      }
+      if (queue != null && !queue.isCurrent(reminderRevision!)) return;
       if (!mounted) return;
       setState(() {
         _enabled = saved.enabled;

@@ -48,6 +48,7 @@ services:
       DATABASE_URL: "postgres://217:${POSTGRES_PASSWORD}@postgres:5432/217?sslmode=verify-full&sslrootcert=/certs/ca.crt"
       DATA_ENCRYPTION_KEY: "${DATA_ENCRYPTION_KEY:?create a key and set DATA_ENCRYPTION_KEY in .env}"
       DATA_ENCRYPTION_KEY_PREVIOUS: "${DATA_ENCRYPTION_KEY_PREVIOUS:-}"
+      PRIVACY_CONTACT: "${PRIVACY_CONTACT:-}"
       TLS_CERT_FILE: /certs/backend/tls.crt
       TLS_KEY_FILE: /certs/backend/tls.key
       WORKOS_API_KEY: "${WORKOS_API_KEY:-}"

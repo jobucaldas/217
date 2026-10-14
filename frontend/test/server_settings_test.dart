@@ -121,6 +121,28 @@ void main() {
       expect(reloaded.config.apiBaseUrl, 'https://self.example.com');
     });
 
+    test('auth config follows the active server, including first setup',
+        () async {
+      final api = ApiClient(
+        _config(),
+        httpClient: MockClient((request) async {
+          if (request.url.host == 'default.example.com') {
+            return http.Response('{"workos_user_deletion":true}', 200);
+          }
+          return http.Response('{"workos_user_deletion":false}', 200);
+        }),
+      );
+
+      // The first connected server can enable WorkOS identity deletion.
+      await api.loadAuthConfig();
+      expect(api.workosUserDeletion, isTrue);
+
+      // Switching servers reloads its setting and clears the previous value.
+      await api.setApiBaseUrl('https://self.example.com');
+      await api.loadAuthConfig();
+      expect(api.workosUserDeletion, isFalse);
+    });
+
     test('empty URL resets to the build default, not to no server', () async {
       final api = ApiClient(_config());
       await api.setApiBaseUrl('https://self.example.com');

@@ -175,7 +175,8 @@ void main() {
 
     expect(find.byType(ServerSetupScreen), findsNothing);
     expect(find.text('Server: self.example.com'), findsOneWidget);
-    expect(servers.requests.single.path, '/api/auth/session');
+    expect(servers.requests.map((uri) => uri.path), contains('/api/auth/session'));
+    expect(servers.requests.map((uri) => uri.path), contains('/api/auth/config'));
   });
 
   for (final mode in [ThemeMode.light, ThemeMode.dark]) {

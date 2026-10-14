@@ -19,6 +19,29 @@ class ApiClient {
   final AppConfig config;
   final http.Client _http;
   final FlutterSecureStorage _storage;
+  bool workosUserDeletion = false;
+
+  /// Called whenever the server answers `403 consent required` (the privacy
+  /// notice changed while the app was open), so any screen can recover.
+  void Function()? onConsentRequired;
+
+  Future<void> loadAuthConfig() async {
+    // A failed or unavailable config response must never retain another
+    // server's WorkOS deletion capability.
+    workosUserDeletion = false;
+    try {
+      final response =
+          await _send('GET', _uri('/api/auth/config'), auth: false);
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map) {
+          workosUserDeletion = decoded['workos_user_deletion'] == true;
+        }
+      }
+    } catch (_) {
+      workosUserDeletion = false;
+    }
+  }
 
   static const _sessionKey = 'session_token';
   static const _apiBaseKey = 'api_base_url';
@@ -118,7 +141,13 @@ class ApiClient {
     }
     final streamed =
         await _http.send(request).timeout(const Duration(seconds: 20));
-    return http.Response.fromStream(streamed);
+    final response = await http.Response.fromStream(streamed);
+    if (auth &&
+        response.statusCode == 403 &&
+        ApiException._errorField(response.body) == 'consent required') {
+      onConsentRequired?.call();
+    }
+    return response;
   }
 
   /// Whether [baseUrl] (default: the current server) is a 217 API that
@@ -246,6 +275,45 @@ class ApiClient {
     }
   }
 
+  /// Records agreement to privacy notice [version] (LGPD art. 11).
+  Future<SessionSnapshot> acceptConsent(int version) async {
+    final response = await _send(
+      'PUT',
+      _uri('/api/account/consent'),
+      body: {'version': version},
+    );
+    if (response.statusCode != 200) {
+      throw ApiException('consent', response);
+    }
+    return SessionSnapshot.fromJson(
+      jsonDecode(response.body) as Map<String, dynamic>,
+    );
+  }
+
+  /// Everything the server holds about this account, as JSON text.
+  Future<String> exportData() async {
+    final response = await _send('GET', _uri('/api/account/export'));
+    if (response.statusCode != 200) {
+      throw ApiException('export', response);
+    }
+    return response.body;
+  }
+
+  /// Who answers privacy requests for this server (email or URL), if set.
+  Future<String?> privacyContact() async {
+    try {
+      final response =
+          await _send('GET', _uri('/api/auth/config'), auth: false);
+      final decoded = jsonDecode(response.body);
+      final contact = decoded is Map ? decoded['privacy_contact'] : null;
+      return contact is String && contact.trim().isNotEmpty
+          ? contact.trim()
+          : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> deleteAccount() async {
     final response = await _send('DELETE', _uri('/api/account'));
     if (response.statusCode != 204 && response.statusCode != 200) {
@@ -343,9 +411,11 @@ class ApiClient {
   }
 
   Future<SessionSnapshot> setStage(String stage) async {
-    final response = await _send('PUT', _uri('/api/account/stage'), body: {'stage': stage});
+    final response =
+        await _send('PUT', _uri('/api/account/stage'), body: {'stage': stage});
     if (response.statusCode != 200) throw ApiException('set stage', response);
-    return SessionSnapshot.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+    return SessionSnapshot.fromJson(
+        jsonDecode(response.body) as Map<String, dynamic>);
   }
 
   /// Period history and predictions for the visible calendar. [today] is the
@@ -483,11 +553,23 @@ enum ServerCheck { ok, unreachable, notA217Server, signInNotConfigured }
 class ApiException implements Exception {
   ApiException(this.action, http.Response response)
       : statusCode = response.statusCode,
-        message = _errorField(response.body);
+        message = _errorField(response.body),
+        consentVersion = _consentVersionField(response.body);
 
   final String action;
   final int statusCode;
   final String message;
+  final int? consentVersion;
+
+  static int? _consentVersionField(String body) {
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map && decoded['consent_version'] is num) {
+        return (decoded['consent_version'] as num).toInt();
+      }
+    } catch (_) {}
+    return null;
+  }
 
   static String _errorField(String body) {
     try {

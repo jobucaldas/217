@@ -55,6 +55,9 @@ func (h *Handler) GetCycle(w http.ResponseWriter, r *http.Request) {
 		writeCalendarSubjectError(w, err)
 		return
 	}
+	if err := h.requireSubjectConsent(w, getUserID(r), subjectID); err != nil {
+		return
+	}
 	owner, err := h.store.GetUserByID(subjectID)
 	if err != nil {
 		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)

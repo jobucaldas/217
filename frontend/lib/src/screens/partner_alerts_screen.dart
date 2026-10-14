@@ -8,6 +8,7 @@ import '../i18n.dart';
 import '../models.dart';
 import '../notifications/local_reminders.dart';
 import '../notifications/partner_alert_sync.dart';
+import '../notifications/partner_alert_sync_queue.dart';
 
 /// Partner notifications: PMS heads-up and pill-not-logged, each with its own
 /// toggle and time.
@@ -18,6 +19,9 @@ class PartnerAlertsScreen extends StatefulWidget {
     required this.strings,
     required this.share,
     this.reschedule,
+    this.partnerAlertScheduler,
+    this.cancelPartnerAlerts,
+    this.syncQueue,
   });
 
   final ApiClient api;
@@ -27,6 +31,10 @@ class PartnerAlertsScreen extends StatefulWidget {
   /// Replaces OS scheduling (tests); defaults to planning from her calendar.
   final Future<LocalReminderSyncStatus> Function(PartnerAlertPreference)?
       reschedule;
+  final Future<LocalReminderSyncStatus> Function(List<PlannedAlert>)?
+      partnerAlertScheduler;
+  final Future<LocalReminderSyncStatus> Function()? cancelPartnerAlerts;
+  final PartnerAlertSyncQueue? syncQueue;
 
   @override
   State<PartnerAlertsScreen> createState() => _PartnerAlertsScreenState();
@@ -36,6 +44,7 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
   bool _loading = true;
   bool _saving = false;
   String? _error;
+  String? _calendarDataError;
   bool _pmsSuppressed = false;
   PartnerAlertPreference _pref = const PartnerAlertPreference();
 
@@ -49,6 +58,7 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
     setState(() {
       _loading = true;
       _error = null;
+      _calendarDataError = null;
       _pmsSuppressed = false;
     });
     try {
@@ -59,6 +69,9 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
         _loading = false;
       });
     } catch (err) {
+      if (err is! ApiException || err.message != 'consent required') {
+        await _cancelPartnerAlerts();
+      }
       if (!mounted) return;
       setState(() {
         _loading = false;
@@ -71,13 +84,26 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
       final cycle = await widget.api.getCycle(today);
       if (!mounted) return;
       setState(() => _pmsSuppressed = cycle.note == 'pms_suppressed_menopause');
-    } catch (_) {
-      // Keep the controls usable and the menopause explanation hidden.
+    } catch (err) {
+      // Never leave or create reminders based on calendar data that could not
+      // be read. The saved preferences remain available for later recovery.
+      await _cancelPartnerAlerts();
+      if (!mounted) return;
+      setState(() {
+        _calendarDataError = err is ApiException &&
+                err.statusCode == 403 &&
+                err.message == 'calendar owner consent required'
+            ? widget.strings.sharedCalendarOwnerConsentRequired
+            : widget.strings.genericError;
+        _error = _calendarDataError;
+      });
     }
   }
 
   Future<void> _save(PartnerAlertPreference next) async {
     final previous = _pref;
+    final syncQueue = widget.syncQueue;
+    final revision = syncQueue?.beginIntent();
     setState(() {
       _pref = next;
       _saving = true;
@@ -85,11 +111,14 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
     });
     try {
       final saved = await widget.api.savePartnerAlerts(next);
-      final status = await (widget.reschedule ?? _reschedule)(saved);
+      final status = widget.reschedule != null
+          ? await widget.reschedule!(saved)
+          : await _reschedule(saved, revision: revision);
       if (!mounted) return;
       setState(() {
         _pref = saved;
         _saving = false;
+        _error = _calendarDataError;
         if (status == LocalReminderSyncStatus.permissionDenied) {
           _error = widget.strings.reminderPermissionDenied;
         }
@@ -104,14 +133,21 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
         _saving = false;
         _error = friendlyError(widget.strings, err);
       });
+    } finally {
+      if (revision != null) syncQueue?.finishIntent(revision);
     }
   }
 
   /// Replans OS notifications from her latest calendar.
   Future<LocalReminderSyncStatus> _reschedule(
-    PartnerAlertPreference pref,
-  ) async {
-    if (!supportsLocalReminders) return LocalReminderSyncStatus.unsupported;
+    PartnerAlertPreference pref, {
+    int? revision,
+  }) async {
+    if (!supportsLocalReminders &&
+        widget.partnerAlertScheduler == null &&
+        widget.syncQueue == null) {
+      return LocalReminderSyncStatus.unsupported;
+    }
     final linked = widget.share.isActive;
     var cycle = CycleInfo.empty;
     var todayLogged = false;
@@ -122,10 +158,31 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
         cycle = await widget.api.getCycle(today);
         final entries = await widget.api.listEntries(now.year, now.month);
         todayLogged = entries.any((e) => e.date == today && e.taken == true);
-      } catch (_) {
-        // Schedule what we can (pill alerts don't need the cycle).
+      } catch (err) {
+        if (err is! ApiException || err.message != 'consent required') {
+          await _cancelPartnerAlerts();
+        }
+        _calendarDataError = err is ApiException &&
+                err.statusCode == 403 &&
+                err.message == 'calendar owner consent required'
+            ? widget.strings.sharedCalendarOwnerConsentRequired
+            : widget.strings.genericError;
+        return LocalReminderSyncStatus.cancelled;
       }
     }
+    final queue = widget.syncQueue;
+    if (queue != null && (revision == null || !queue.isCurrent(revision))) {
+      return LocalReminderSyncStatus.cancelled;
+    }
+    final Future<LocalReminderSyncStatus> Function(List<PlannedAlert>)?
+        scheduler = queue == null
+            ? widget.partnerAlertScheduler
+            : (alerts) async =>
+                await queue.scheduleIfCurrent(
+                  revision: revision!,
+                  alerts: alerts,
+                ) ??
+                LocalReminderSyncStatus.cancelled;
     return syncPartnerAlertsFrom(
       strings: widget.strings,
       pref: pref,
@@ -133,7 +190,16 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
       linked: linked,
       todayLogged: todayLogged,
       ownerName: widget.share.ownerName,
+      scheduler: scheduler,
     );
+  }
+
+  Future<LocalReminderSyncStatus> _cancelPartnerAlerts() async {
+    final queue = widget.syncQueue;
+    if (queue != null) {
+      return await queue.cancel() ?? LocalReminderSyncStatus.cancelled;
+    }
+    return (widget.cancelPartnerAlerts ?? () => syncPartnerAlerts(const []))();
   }
 
   Future<String?> _pickTime(String current) async {
@@ -224,7 +290,9 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
                 if (_pmsSuppressed)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 12),
-                    child: Text(strings.pmsNotCounted, style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
+                    child: Text(strings.pmsNotCounted,
+                        style: text.bodySmall
+                            ?.copyWith(color: scheme.onSurfaceVariant)),
                   ),
                 const SizedBox(height: 16),
                 _alertCard(

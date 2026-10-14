@@ -2,11 +2,14 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
 
 import 'package:a217/src/api/client.dart';
 import 'package:a217/src/config.dart';
 import 'package:a217/src/i18n.dart';
 import 'package:a217/src/models.dart';
+import 'package:a217/src/notifications/daily_reminder_sync_queue.dart';
+import 'package:a217/src/notifications/local_reminders.dart';
 import 'package:a217/src/screens/reminder_settings_screen.dart';
 import 'package:a217/src/theme/app_theme.dart';
 
@@ -19,6 +22,7 @@ class _FakeReminderApi extends ApiClient {
     timezone: 'UTC',
     deliverable: false,
   );
+  Object? saveError;
 
   @override
   Future<ReminderPreference?> getReminderPreference() async => pref;
@@ -29,6 +33,7 @@ class _FakeReminderApi extends ApiClient {
     required String time,
     required String timezone,
   }) async {
+    if (saveError != null) throw saveError!;
     pref = ReminderPreference(
       enabled: enabled,
       time: time,
@@ -104,5 +109,46 @@ void main() {
     await tester.pumpAndSettle();
     debugDefaultTargetPlatformOverride = null;
     expect(toggled, [true, false]);
+  });
+
+  testWidgets('403 while saving does not schedule locally', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    final api = _FakeReminderApi()
+      ..saveError = ApiException(
+        'save reminder',
+        http.Response('{"consent_version":2}', 403),
+      );
+    final operations = <bool>[];
+    final queue = DailyReminderSyncQueue(({
+      required enabled,
+      required timeHhMm,
+      required title,
+      required body,
+    }) async {
+      operations.add(enabled);
+      return LocalReminderSyncResult(
+        enabled
+            ? LocalReminderSyncStatus.scheduled
+            : LocalReminderSyncStatus.cancelled,
+      );
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildApp217Theme(brightness: Brightness.light),
+        home: ReminderSettingsScreen(
+          api: api,
+          strings: const Strings(AppLanguage.en),
+          dailyReminderSyncQueue: queue,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    operations.clear();
+    await tester.tap(find.byType(Switch));
+    await tester.pumpAndSettle();
+    debugDefaultTargetPlatformOverride = null;
+
+    expect(operations, isEmpty);
+    expect(queue.revision, 2);
   });
 }

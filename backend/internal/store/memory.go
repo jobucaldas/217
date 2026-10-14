@@ -2,6 +2,7 @@ package store
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -11,10 +12,11 @@ import (
 )
 
 type memoryDelivery struct {
-	sent        bool
-	claimedAt   time.Time
-	nextAttempt time.Time
-	attempts    int
+	reminderDate time.Time
+	sent         bool
+	claimedAt    time.Time
+	nextAttempt  time.Time
+	attempts     int
 }
 
 type memorySession struct {
@@ -144,6 +146,19 @@ func (s *MemoryStore) GetEntry(userID, date string) (*model.Entry, error) {
 		return nil, fmt.Errorf("entry not found")
 	}
 	return e, nil
+}
+
+func (s *MemoryStore) ListAllEntries(userID string) ([]*model.Entry, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := []*model.Entry{}
+	for k, e := range s.entries {
+		if strings.HasPrefix(k, userID+":") {
+			result = append(result, e)
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Date < result[j].Date })
+	return result, nil
 }
 
 func (s *MemoryStore) ListEntries(userID string, year, month int) ([]*model.Entry, error) {
@@ -454,7 +469,7 @@ func (s *MemoryStore) ListReminderTargets() ([]model.ReminderTarget, error) {
 			continue
 		}
 		user := s.findUserLocked(subscription.UserID)
-		if user == nil || model.NormalizeRole(user.Role) == model.RolePartner {
+		if user == nil || !user.HasConsent() || model.NormalizeRole(user.Role) == model.RolePartner {
 			// Pill reminders are for the person taking it.
 			continue
 		}
@@ -483,6 +498,7 @@ func (s *MemoryStore) ClaimReminderDelivery(subscriptionID string, reminderDate,
 		}
 	}
 	delivery.claimedAt = now
+	delivery.reminderDate = reminderDate
 	delivery.attempts++
 	s.deliveries[key] = delivery
 	return true, nil

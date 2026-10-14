@@ -58,6 +58,8 @@ type Config struct {
 	WorkOS      WorkOSConfig
 	// Keyring seals personal data at rest; required with a database.
 	Keyring *fieldcrypt.Keyring
+	// PrivacyContact (email or URL) is shown in the app's privacy notice.
+	PrivacyContact string
 	// TLSCertFile and TLSKeyFile make the API serve HTTPS (e.g. to its proxy).
 	TLSCertFile string
 	TLSKeyFile  string
@@ -115,6 +117,11 @@ func Run(cfg Config) error {
 
 	h := handler.NewWithVAPID(s, push.PublicKey)
 	h.SetAppBaseURL(appBaseURL)
+	h.SetPrivacyContact(cfg.PrivacyContact)
+
+	stopJanitor := make(chan struct{})
+	defer close(stopJanitor)
+	go purgeExpired(s, stopJanitor)
 	if ttl := parseSessionTTL(); ttl > 0 {
 		h.SetSessionDuration(ttl)
 	}
@@ -165,31 +172,34 @@ func Run(cfg Config) error {
 	mux.HandleFunc("GET /api/auth/workos/callback", h.WorkOSOAuthCallback)
 	mux.HandleFunc("POST /api/auth/workos/exchange", h.ExchangeWorkOS)
 
-	mux.HandleFunc("GET /api/entries", h.AuthMiddleware(h.ListEntries))
-	mux.HandleFunc("GET /api/entries/{date}", h.AuthMiddleware(h.GetEntry))
-	mux.HandleFunc("POST /api/entries/{date}", h.AuthMiddleware(h.UpsertEntry))
-	mux.HandleFunc("DELETE /api/entries/{date}", h.AuthMiddleware(h.DeleteEntry))
-	mux.HandleFunc("GET /api/stats", h.AuthMiddleware(h.GetStats))
+	mux.HandleFunc("GET /api/entries", h.ConsentMiddleware(h.ListEntries))
+	mux.HandleFunc("GET /api/entries/{date}", h.ConsentMiddleware(h.GetEntry))
+	mux.HandleFunc("POST /api/entries/{date}", h.ConsentMiddleware(h.UpsertEntry))
+	mux.HandleFunc("DELETE /api/entries/{date}", h.ConsentMiddleware(h.DeleteEntry))
+	mux.HandleFunc("GET /api/stats", h.ConsentMiddleware(h.GetStats))
 
+	// Rights that stay reachable before (or instead of) consenting.
 	mux.HandleFunc("DELETE /api/account", h.AuthMiddleware(h.DeleteAccount))
-	mux.HandleFunc("PUT /api/account/role", h.AuthMiddleware(h.SetRole))
-	mux.HandleFunc("PUT /api/account/stage", h.AuthMiddleware(h.SetStage))
-	mux.HandleFunc("GET /api/cycle", h.AuthMiddleware(h.GetCycle))
-	mux.HandleFunc("GET /api/partner-alerts", h.AuthMiddleware(h.GetPartnerAlerts))
-	mux.HandleFunc("PUT /api/partner-alerts", h.AuthMiddleware(h.UpsertPartnerAlerts))
-	mux.HandleFunc("GET /api/share", h.AuthMiddleware(h.GetShare))
-	mux.HandleFunc("POST /api/share/enable", h.AuthMiddleware(h.EnableShare))
-	mux.HandleFunc("POST /api/share/revoke", h.AuthMiddleware(h.RevokeShare))
-	mux.HandleFunc("POST /api/share/accept", h.AuthMiddleware(h.AcceptShare))
-	mux.HandleFunc("GET /api/inbox", h.AuthMiddleware(h.ListInbox))
-	mux.HandleFunc("POST /api/inbox/{id}/read", h.AuthMiddleware(h.MarkInboxNoteRead))
-	mux.HandleFunc("POST /api/partner-notes", h.AuthMiddleware(h.CreatePartnerNote))
+	mux.HandleFunc("PUT /api/account/consent", h.AuthMiddleware(h.RecordConsent))
+	mux.HandleFunc("GET /api/account/export", h.AuthMiddleware(h.ExportAccount))
+	mux.HandleFunc("PUT /api/account/role", h.ConsentMiddleware(h.SetRole))
+	mux.HandleFunc("PUT /api/account/stage", h.ConsentMiddleware(h.SetStage))
+	mux.HandleFunc("GET /api/cycle", h.ConsentMiddleware(h.GetCycle))
+	mux.HandleFunc("GET /api/partner-alerts", h.ConsentMiddleware(h.GetPartnerAlerts))
+	mux.HandleFunc("PUT /api/partner-alerts", h.ConsentMiddleware(h.UpsertPartnerAlerts))
+	mux.HandleFunc("GET /api/share", h.ConsentMiddleware(h.GetShare))
+	mux.HandleFunc("POST /api/share/enable", h.ConsentMiddleware(h.EnableShare))
+	mux.HandleFunc("POST /api/share/revoke", h.ConsentMiddleware(h.RevokeShare))
+	mux.HandleFunc("POST /api/share/accept", h.ConsentMiddleware(h.AcceptShare))
+	mux.HandleFunc("GET /api/inbox", h.ConsentMiddleware(h.ListInbox))
+	mux.HandleFunc("POST /api/inbox/{id}/read", h.ConsentMiddleware(h.MarkInboxNoteRead))
+	mux.HandleFunc("POST /api/partner-notes", h.ConsentMiddleware(h.CreatePartnerNote))
 
-	mux.HandleFunc("GET /api/reminders/preferences", h.AuthMiddleware(h.GetReminderPreference))
-	mux.HandleFunc("PUT /api/reminders/preferences", h.AuthMiddleware(h.UpsertReminderPreference))
-	mux.HandleFunc("GET /api/reminders/vapid-public-key", h.AuthMiddleware(h.VAPIDPublicKey))
-	mux.HandleFunc("POST /api/reminders/subscriptions", h.AuthMiddleware(h.SavePushSubscription))
-	mux.HandleFunc("DELETE /api/reminders/subscriptions", h.AuthMiddleware(h.DeletePushSubscription))
+	mux.HandleFunc("GET /api/reminders/preferences", h.ConsentMiddleware(h.GetReminderPreference))
+	mux.HandleFunc("PUT /api/reminders/preferences", h.ConsentMiddleware(h.UpsertReminderPreference))
+	mux.HandleFunc("GET /api/reminders/vapid-public-key", h.ConsentMiddleware(h.VAPIDPublicKey))
+	mux.HandleFunc("POST /api/reminders/subscriptions", h.ConsentMiddleware(h.SavePushSubscription))
+	mux.HandleFunc("DELETE /api/reminders/subscriptions", h.ConsentMiddleware(h.DeletePushSubscription))
 
 	srv := &http.Server{
 		Addr:              cfg.Addr,
@@ -207,6 +217,22 @@ func Run(cfg Config) error {
 	}
 	log.Printf("server starting on %s", cfg.Addr)
 	return srv.ListenAndServe()
+}
+
+// purgeExpired applies the retention rules hourly (see Store.PurgeExpired).
+func purgeExpired(s store.Store, stop <-chan struct{}) {
+	ticker := time.NewTicker(time.Hour)
+	defer ticker.Stop()
+	for {
+		if err := s.PurgeExpired(time.Now()); err != nil {
+			log.Printf("retention purge: %v", err)
+		}
+		select {
+		case <-ticker.C:
+		case <-stop:
+			return
+		}
+	}
 }
 
 // maxBodyBytes bounds request bodies; the largest legitimate one is a day note.

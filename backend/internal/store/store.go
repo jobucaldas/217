@@ -12,10 +12,19 @@ type Store interface {
 	GetUserByID(userID string) (*model.User, error)
 	LinkWorkOSIdentity(subject, verifiedEmail, name string, authoritative bool) (*model.User, error)
 	WorkOSSubject(userID string) (string, error)
+	// DeleteUser removes the account and everything it owns; a share it
+	// followed as partner is revoked so the owner can invite someone else.
 	DeleteUser(userID string) error
+	// RecordConsent stores that the user agreed to privacy notice version.
+	RecordConsent(userID string, version int) (*model.User, error)
+	// PurgeExpired drops data past its retention: expired sessions and
+	// sign-in attempts, old reminder deliveries and long-revoked shares.
+	PurgeExpired(now time.Time) error
 
 	GetEntry(userID, date string) (*model.Entry, error)
 	ListEntries(userID string, year, month int) ([]*model.Entry, error)
+	// ListAllEntries returns every entry of the user, oldest first (export).
+	ListAllEntries(userID string) ([]*model.Entry, error)
 	UpsertEntry(userID, date string, req model.UpsertRequest) (*model.Entry, error)
 	DeleteEntry(userID, date string) error
 	GetStats(userID string, year, month int) (*model.Stats, error)
@@ -57,7 +66,12 @@ type Store interface {
 
 	// Partner → owner inbox notes
 	ListInboxNotes(ownerID string) ([]*model.PartnerNote, error)
+	ListReceivedPartnerNotes(userID string) ([]*model.PartnerNote, error)
 	CreatePartnerNote(partnerID, body string) (*model.PartnerNote, error)
+	// ListSentPartnerNotes returns the notes a partner wrote (export).
+	ListSentPartnerNotes(partnerID string) ([]*model.PartnerNote, error)
+	ListAccountShares(userID string) ([]*model.CalendarShare, error)
+	ListAccountSubscriptions(userID string) ([]model.ExportPushSubscription, error)
 	MarkInboxNoteRead(ownerID, noteID string) error
 
 	Close() error
