@@ -26,13 +26,15 @@ class _SlowApi extends ApiClient {
   @override
   Future<List<Entry>> listEntries(int year, int month) async {
     listCalls++;
-    final gate = listGate;
-    if (gate != null) await gate.future;
+    // Snapshot first: a held answer carries what the server had at the start.
     final prefix = '$year-${month.toString().padLeft(2, '0')}';
-    return [
+    final snapshot = [
       for (final e in stored.values)
         if (e.date.startsWith(prefix)) e,
     ];
+    final gate = listGate;
+    if (gate != null) await gate.future;
+    return snapshot;
   }
 
   @override
@@ -157,5 +159,27 @@ void main() {
     expect(find.text('Open'), findsOneWidget);
     api.listGate!.complete();
     await tester.pumpAndSettle();
+  });
+
+  testWidgets('a refresh started before an edit cannot undo it',
+      (tester) async {
+    final api = _SlowApi();
+    await _pumpCalendar(tester, api);
+
+    // App resumes: the refresh is on its way, holding the pre-edit state.
+    api.listGate = Completer<void>();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+
+    await _tapTakenOnToday(tester);
+    await tester.pumpAndSettle();
+    expect(api.stored.values.single.taken, isTrue);
+
+    final gate = api.listGate!;
+    api.listGate = null;
+    gate.complete();
+    await tester.pumpAndSettle();
+
+    expect(find.text('Open'), findsOneWidget);
   });
 }

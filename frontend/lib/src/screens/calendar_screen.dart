@@ -81,6 +81,7 @@ class _CalendarScreenState extends State<CalendarScreen>
   /// would put pre-edit data back, so it is dropped; a fresh one follows.
   int _pendingWrites = 0;
   bool _reloadAfterWrites = false;
+  bool _loadInFlight = false;
   Future<void> _writeChain = Future.value();
   Entry? _todayEntry;
   String? _error;
@@ -158,6 +159,15 @@ class _CalendarScreenState extends State<CalendarScreen>
 
   Future<void> _load() async {
     final generation = ++_loadGeneration;
+    _loadInFlight = true;
+    try {
+      await _loadBody(generation);
+    } finally {
+      if (generation == _loadGeneration) _loadInFlight = false;
+    }
+  }
+
+  Future<void> _loadBody(int generation) async {
     // Silent reload: never insert a progress bar into the Column — that
     // reflows/shrinks the month carousel during swipe/chevron month changes.
     setState(() => _error = null);
@@ -506,6 +516,13 @@ class _CalendarScreenState extends State<CalendarScreen>
 
   /// Puts the edit on screen before the server has seen it.
   void _applyLocal(String key, DayEditResult result) {
+    // A refresh already on its way holds pre-edit data: drop it and fetch
+    // again once the writes are done.
+    if (_loadInFlight) {
+      _loadGeneration++;
+      _loadInFlight = false;
+      _reloadAfterWrites = true;
+    }
     final month = DateTime.parse(key);
     final cached = _monthCache[_monthKey(month)];
     final entry = result.clear
@@ -568,6 +585,13 @@ class _CalendarScreenState extends State<CalendarScreen>
     if (!mounted || _pendingWrites > 0) return;
     if (_reloadAfterWrites) {
       _reloadAfterWrites = false;
+      // Months out of sight may hold the failed edit; refetch them on demand.
+      final visible = {
+        _monthKey(_prevMonth),
+        _monthKey(_month),
+        _monthKey(_nextMonth),
+      };
+      _monthCache.removeWhere((key, _) => !visible.contains(key));
       unawaited(_load());
     } else {
       unawaited(_loadCycle());
