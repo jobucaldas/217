@@ -48,6 +48,9 @@ android {
             // Uses the release key only when all four ANDROID_* variables are set; otherwise
             // (local builds, pull requests) it stays debug-signed, as tryout builds always were.
             signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
+            // Flutter already shrinks release builds; this adds the Gson rules the
+            // notifications plugin needs (see proguard-rules.pro).
+            proguardFiles("proguard-rules.pro")
         }
     }
 }
