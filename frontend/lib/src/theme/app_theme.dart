@@ -210,15 +210,6 @@ ThemeData buildApp217Theme({
     textButtonTheme: TextButtonThemeData(
       style: TextButton.styleFrom(foregroundColor: scheme.primary),
     ),
-    dialogTheme: DialogThemeData(
-      backgroundColor: scheme.surface,
-      surfaceTintColor: Colors.transparent,
-      titleTextStyle: textTheme.headlineSmall?.copyWith(
-        color: scheme.onSurface,
-        fontWeight: FontWeight.w700,
-      ),
-      contentTextStyle: textTheme.bodyLarge,
-    ),
     cardTheme: CardThemeData(
       color: scheme.surface,
       elevation: 0,
