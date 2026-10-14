@@ -60,14 +60,15 @@ jobs:
           git config --global --add safe.directory /sdks/flutter || true
           flutter pub get
       - name: Compute version
-        # Same tag format as the publish job. The APK's versionName is the tag and its
+        # The release tag is computed once here and reused by publish. The APK's versionName is the tag and its
         # versionCode is the commit time in epoch seconds, so each newer commit updates older installs.
         id: version
         env:
           COMMIT_TIMESTAMP: ${{ github.event.head_commit.timestamp }}
         run: |
           DT="$(date -u -d "${COMMIT_TIMESTAMP:-now}" +%Y%m%d%H%M%S)"
-          echo "tag=${DT}_${GITHUB_SHA:0:7}" >> "$GITHUB_OUTPUT"
+          SHORT_SHA="$(printf '%s' "$GITHUB_SHA" | cut -c1-7)"
+          echo "tag=${DT}_${SHORT_SHA}" >> "$GITHUB_OUTPUT"
           echo "build=$(date -u -d "${COMMIT_TIMESTAMP:-now}" +%s)" >> "$GITHUB_OUTPUT"
       - run: flutter analyze
       - run: flutter test
@@ -84,12 +85,12 @@ jobs:
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          if [ -z "$KEYSTORE_BASE64" ]; then
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
             if [ "$GITHUB_EVENT_NAME" = push ]; then
-              echo "::error::ANDROID_KEYSTORE_BASE64 is not set. Refusing to publish a debug-signed APK from main: Android will not update installs over it."
+              echo "::error::All four ANDROID_KEYSTORE_*/ANDROID_KEY_* secrets are required. Refusing to publish a debug-signed APK from main: Android will not update installs over it."
               exit 1
             fi
-            echo "No release keystore secret; this build is debug-signed."
+            echo "Release signing secrets missing or incomplete; this build is debug-signed."
             exit 0
           fi
           echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"

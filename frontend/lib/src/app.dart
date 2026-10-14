@@ -35,6 +35,7 @@ class App217 extends StatefulWidget {
     this.partnerAlertCanceller,
     this.partnerAlertScheduler,
     this.updateClient,
+    this.installedVersion,
   });
 
   final AppConfig config;
@@ -47,6 +48,9 @@ class App217 extends StatefulWidget {
 
   /// Injected HTTP client for the update check; tests pass a mock.
   final http.Client? updateClient;
+
+  /// Installed release tag; tests pass an older one. Defaults to [appVersion].
+  final String? installedVersion;
 
   @override
   State<App217> createState() => _App217State();
@@ -186,8 +190,12 @@ class _App217State extends State<App217> {
     if (!_autoUpdate || _user == null || !isAndroidPlatform) return;
     if (_updateChecked && !force) return;
     _updateChecked = true;
-    final update = await checkForUpdate(client: _updateHttp);
-    if (update == null || !mounted) return;
+    final update = await checkForUpdate(
+      client: _updateHttp,
+      installed: widget.installedVersion ?? appVersion,
+    );
+    // The user may have opted out or signed out while the request was pending.
+    if (update == null || !mounted || !_autoUpdate || _user == null) return;
     _messengerKey.currentState?.showSnackBar(
       SnackBar(
         duration: const Duration(seconds: 15),
