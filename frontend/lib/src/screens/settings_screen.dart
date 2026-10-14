@@ -394,8 +394,9 @@ class _SettingsPageState extends State<SettingsPage> {
                         role: 'partner',
                       );
                       if (session == null || !context.mounted) return;
+                      // The app pops back to home itself; a second pop here
+                      // would remove home too and leave a black screen.
                       widget.onRoleChanged!(session);
-                      Navigator.of(context).pop();
                     },
                   ),
                 ],
