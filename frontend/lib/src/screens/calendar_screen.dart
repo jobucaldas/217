@@ -81,7 +81,15 @@ class _CalendarScreenState extends State<CalendarScreen>
   /// would put pre-edit data back, so it is dropped; a fresh one follows.
   int _pendingWrites = 0;
   bool _reloadAfterWrites = false;
-  bool _loadInFlight = false;
+
+  /// Moves on every edit and every finished write; a refresh that started
+  /// under an older value may carry pre-edit data and is not applied.
+  int _writeEpoch = 0;
+
+  /// What the server last confirmed for days being edited, and the newest
+  /// edit per day, so a failed write puts the day back without a fetch.
+  final Map<String, Entry?> _confirmed = {};
+  final Map<String, int> _editSeq = {};
   Future<void> _writeChain = Future.value();
   Entry? _todayEntry;
   String? _error;
@@ -159,15 +167,7 @@ class _CalendarScreenState extends State<CalendarScreen>
 
   Future<void> _load() async {
     final generation = ++_loadGeneration;
-    _loadInFlight = true;
-    try {
-      await _loadBody(generation);
-    } finally {
-      if (generation == _loadGeneration) _loadInFlight = false;
-    }
-  }
-
-  Future<void> _loadBody(int generation) async {
+    final epoch = _writeEpoch;
     // Silent reload: never insert a progress bar into the Column — that
     // reflows/shrinks the month carousel during swipe/chevron month changes.
     setState(() => _error = null);
@@ -214,6 +214,12 @@ class _CalendarScreenState extends State<CalendarScreen>
         _reloadAfterWrites = true;
         return;
       }
+      if (epoch != _writeEpoch) {
+        // An edit came and went while this was on its way: ask again.
+        unawaited(_load());
+        return;
+      }
+      _confirmed.clear();
       setState(() {
         _monthCache[_monthKey(_prevMonth)] = prevMap;
         _monthCache[_monthKey(_month)] = map;
@@ -259,6 +265,7 @@ class _CalendarScreenState extends State<CalendarScreen>
       }
     }
     _monthCache.clear();
+    _confirmed.clear();
     setState(() {
       _entries = {};
       _prevEntries = {};
@@ -514,26 +521,14 @@ class _CalendarScreenState extends State<CalendarScreen>
     _nextEntries = _monthCache[_monthKey(_nextMonth)] ?? const {};
   }
 
-  /// Puts the edit on screen before the server has seen it.
-  void _applyLocal(String key, DayEditResult result) {
-    // A refresh already on its way holds pre-edit data: drop it and fetch
-    // again once the writes are done.
-    if (_loadInFlight) {
-      _loadGeneration++;
-      _loadInFlight = false;
-      _reloadAfterWrites = true;
-    }
+  Entry? _visibleEntry(String key) {
+    final cached = _monthCache[_monthKey(DateTime.parse(key))]?[key];
+    return cached ?? (key == _todayKey ? _todayEntry : null);
+  }
+
+  void _setLocal(String key, Entry? entry) {
     final month = DateTime.parse(key);
     final cached = _monthCache[_monthKey(month)];
-    final entry = result.clear
-        ? null
-        : Entry(
-            date: key,
-            taken: result.taken,
-            notes: result.notes,
-            heart: result.heart,
-            period: result.period,
-          );
     setState(() {
       if (cached != null || entry != null) {
         final next = Map<String, Entry>.of(cached ?? const {});
@@ -550,15 +545,38 @@ class _CalendarScreenState extends State<CalendarScreen>
   }
 
   Future<void> _persistDay(String key, DayEditResult result) {
-    _applyLocal(key, result);
+    // On screen before the server has seen it.
+    _writeEpoch++;
+    _confirmed.putIfAbsent(key, () => _visibleEntry(key));
+    final seq = _editSeq[key] = (_editSeq[key] ?? 0) + 1;
+    _setLocal(
+      key,
+      result.clear
+          ? null
+          : Entry(
+              date: key,
+              taken: result.taken,
+              notes: result.notes,
+              heart: result.heart,
+              period: result.period,
+            ),
+    );
     _pendingWrites++;
+    // A write still queued when the user signs out must not run as the next
+    // account, which shares this client and reads the token per request.
+    final isCurrent = widget.isSessionCurrent;
+    final userId = widget.user.id;
+    final session = widget.sessionGeneration?.call() ?? 0;
     // One write at a time so rapid edits reach the server in order.
     final write = _writeChain.then((_) async {
       try {
+        if (isCurrent != null && !isCurrent(session, userId)) return;
+        final Entry? saved;
         if (result.clear) {
           await widget.api.deleteEntry(key);
+          saved = null;
         } else {
-          await widget.api.upsertEntry(
+          saved = await widget.api.upsertEntry(
             key,
             taken: result.taken,
             notes: result.notes,
@@ -566,11 +584,15 @@ class _CalendarScreenState extends State<CalendarScreen>
             period: result.period,
           );
         }
+        _confirmed[key] = saved;
       } catch (_) {
-        // Roll back to what the server holds once the queue drains.
+        // Back to what the server holds, unless a newer edit of the day is
+        // queued (it decides). Then a refresh once the queue drains.
+        if (mounted && _editSeq[key] == seq) _setLocal(key, _confirmed[key]);
         _reloadAfterWrites = true;
         rethrow;
       } finally {
+        _writeEpoch++;
         _pendingWrites--;
         _afterWrite();
       }
@@ -585,13 +607,6 @@ class _CalendarScreenState extends State<CalendarScreen>
     if (!mounted || _pendingWrites > 0) return;
     if (_reloadAfterWrites) {
       _reloadAfterWrites = false;
-      // Months out of sight may hold the failed edit; refetch them on demand.
-      final visible = {
-        _monthKey(_prevMonth),
-        _monthKey(_month),
-        _monthKey(_nextMonth),
-      };
-      _monthCache.removeWhere((key, _) => !visible.contains(key));
       unawaited(_load());
     } else {
       unawaited(_loadCycle());

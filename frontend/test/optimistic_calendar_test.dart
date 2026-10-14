@@ -20,6 +20,7 @@ class _SlowApi extends ApiClient {
   Completer<void>? writeGate;
   Object? writeError;
   Completer<void>? listGate;
+  Object? listError;
   int listCalls = 0;
   int cycleCalls = 0;
 
@@ -34,6 +35,7 @@ class _SlowApi extends ApiClient {
     ];
     final gate = listGate;
     if (gate != null) await gate.future;
+    if (listError != null) throw listError!;
     return snapshot;
   }
 
@@ -72,7 +74,12 @@ class _SlowApi extends ApiClient {
   }
 }
 
-Future<void> _pumpCalendar(WidgetTester tester, _SlowApi api) async {
+Future<void> _pumpCalendar(
+  WidgetTester tester,
+  _SlowApi api, {
+  int Function()? sessionGeneration,
+  bool Function(int, String)? isSessionCurrent,
+}) async {
   await tester.pumpWidget(MaterialApp(
     theme: buildApp217Theme(
       brightness: Brightness.dark,
@@ -83,6 +90,8 @@ Future<void> _pumpCalendar(WidgetTester tester, _SlowApi api) async {
       user: const User(id: 'u1', email: 'o@example.invalid', name: 'O'),
       strings: const Strings(AppLanguage.en),
       onOpenSettings: () {},
+      sessionGeneration: sessionGeneration,
+      isSessionCurrent: isSessionCurrent,
     ),
   ));
   await tester.pumpAndSettle();
@@ -181,5 +190,85 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Open'), findsOneWidget);
+  });
+
+  testWidgets('a refresh started during a save cannot undo it afterwards',
+      (tester) async {
+    final api = _SlowApi();
+    await _pumpCalendar(tester, api);
+
+    api.writeGate = Completer<void>();
+    await _tapTakenOnToday(tester);
+    await tester.pumpAndSettle();
+
+    // The refresh starts while the save is pending, so it reads old data.
+    api.listGate = Completer<void>();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+
+    api.writeGate!.complete();
+    await tester.pumpAndSettle();
+    expect(api.stored.values.single.taken, isTrue);
+
+    final gate = api.listGate!;
+    api.listGate = null;
+    gate.complete();
+    await tester.pumpAndSettle();
+
+    expect(find.text('Open'), findsOneWidget);
+  });
+
+  testWidgets('a failed save is undone even when the refetch fails too',
+      (tester) async {
+    final api = _SlowApi();
+    await _pumpCalendar(tester, api);
+
+    api.writeGate = Completer<void>();
+    api.writeError = ApiException(
+      'upsert entry',
+      http.Response('{"error":"boom"}', 500),
+    );
+    api.listError = TimeoutException('offline');
+    await _tapTakenOnToday(tester);
+    await tester.pumpAndSettle();
+    expect(find.text('Open'), findsOneWidget);
+
+    api.writeGate!.complete();
+    await tester.pumpAndSettle();
+
+    expect(find.text('Open'), findsNWidgets(2));
+    expect(find.byKey(const ValueKey('calendar-error')), findsOneWidget);
+  });
+
+  testWidgets('a queued edit does not reach the next account',
+      (tester) async {
+    final api = _SlowApi();
+    var session = 1;
+    await _pumpCalendar(
+      tester,
+      api,
+      sessionGeneration: () => session,
+      isSessionCurrent: (generation, _) => generation == session,
+    );
+
+    api.writeGate = Completer<void>();
+    await _tapTakenOnToday(tester);
+    await tester.pumpAndSettle();
+    // Second edit waits behind the first.
+    final now = DateTime.now();
+    await tester.tap(find.descendant(
+      of: find.byKey(ValueKey('${now.year}-${now.month}')),
+      matching: find.text('${now.day}'),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Missed').last);
+    await tester.pumpAndSettle();
+
+    session++;
+    api.writeGate!.complete();
+    await tester.pumpAndSettle();
+
+    // The first was already on the wire; the queued one never was sent.
+    expect(api.stored.values.single.taken, isTrue);
   });
 }
