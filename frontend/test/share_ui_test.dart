@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
 
 import 'package:a217/src/api/client.dart';
 import 'package:a217/src/config.dart';
@@ -76,6 +77,16 @@ void main() {
       expect(find.text('Delete permanently'), findsOneWidget);
     });
   }
+
+  test('joining an unconsented owner explains why', () {
+    const strings = Strings(AppLanguage.en);
+    final err = ApiException(
+      'accept share',
+      http.Response('{"error":"calendar owner consent required"}', 403),
+    );
+    expect(joinErrorText(strings, err),
+        strings.sharedCalendarOwnerConsentRequired);
+  });
 
   test('share state defaults owner editable', () {
     const share = ShareState(status: 'none');

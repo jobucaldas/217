@@ -235,11 +235,13 @@ func (s *PGStore) AcceptShare(partnerID, inviteCode string) (*model.ShareState, 
 		return nil, fmt.Errorf("already linked to a calendar")
 	}
 
-	var shareID, ownerID string
+	// Lock the owner before the share, the same order account deletion uses,
+	// so a concurrent deletion cannot deadlock with this join.
+	var ownerID string
 	err = tx.QueryRow(
-		`SELECT id, owner_id FROM calendar_shares
-		 WHERE invite_index = $1 AND status = 'open' FOR UPDATE`, inviteIndex(s.kr, code),
-	).Scan(&shareID, &ownerID)
+		`SELECT owner_id FROM calendar_shares
+		 WHERE invite_index = $1 AND status = 'open'`, inviteIndex(s.kr, code),
+	).Scan(&ownerID)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("invalid or expired invite code")
 	}
@@ -252,13 +254,29 @@ func (s *PGStore) AcceptShare(partnerID, inviteCode string) (*model.ShareState, 
 	// Invites outlive notice changes: both sides must have agreed to the
 	// current one before the calendar is linked.
 	var ownerConsent int
-	if err := tx.QueryRow(
+	err = tx.QueryRow(
 		`SELECT consent_version FROM users WHERE id = $1 FOR SHARE`, ownerID,
-	).Scan(&ownerConsent); err != nil {
+	).Scan(&ownerConsent)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("invalid or expired invite code")
+	}
+	if err != nil {
 		return nil, err
 	}
 	if ownerConsent < model.ConsentVersion {
 		return nil, fmt.Errorf("calendar owner consent required")
+	}
+	var shareID string
+	err = tx.QueryRow(
+		`SELECT id FROM calendar_shares
+		 WHERE invite_index = $1 AND owner_id = $2 AND status = 'open' FOR UPDATE`,
+		inviteIndex(s.kr, code), ownerID,
+	).Scan(&shareID)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("invalid or expired invite code")
+	}
+	if err != nil {
+		return nil, err
 	}
 	if _, err := tx.Exec(`UPDATE users SET role = 'partner', updated_at = NOW() WHERE id = $1`, partnerID); err != nil {
 		return nil, err
