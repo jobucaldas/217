@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../api/client.dart';
+import '../config.dart';
 import '../errors.dart';
 import '../i18n.dart';
 import '../models.dart';
@@ -41,6 +42,8 @@ class SettingsPage extends StatefulWidget {
     this.dailyReminderSyncQueue,
     this.partnerAlertSyncQueue,
     this.consentPending = false,
+    this.autoUpdate = false,
+    this.onAutoUpdateChanged,
     this.expandServer = false,
   });
 
@@ -72,6 +75,10 @@ class SettingsPage extends StatefulWidget {
   /// Signed in but the privacy notice is not agreed yet: the server refuses
   /// the data behind reminders, alerts, sharing, role and stage until then.
   final bool consentPending;
+
+  /// Android only: whether the app looks for a newer APK when it opens.
+  final bool autoUpdate;
+  final ValueChanged<bool>? onAutoUpdateChanged;
 
   /// Open with the self-hosted server field already expanded.
   final bool expandServer;
@@ -238,6 +245,18 @@ class _SettingsPageState extends State<SettingsPage> {
                       );
                     },
                   ),
+                // Android only, and only acts once signed in (the check needs a
+                // session), so it sits with the other signed-in preferences.
+                if (isAndroidPlatform) ...[
+                  const Divider(height: 1, indent: 16, endIndent: 16),
+                  SwitchListTile(
+                    key: const ValueKey('settings-auto-update'),
+                    title: Text(widget.strings.autoUpdateTitle),
+                    subtitle: Text(widget.strings.autoUpdateSubtitle),
+                    value: widget.autoUpdate,
+                    onChanged: widget.onAutoUpdateChanged,
+                  ),
+                ],
               ],
             ),
             const SizedBox(height: 20),
