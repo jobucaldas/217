@@ -272,3 +272,37 @@ func TestPartnerAlertPreferences(t *testing.T) {
 		t.Fatalf("saved: %+v", pref)
 	}
 }
+
+func TestPartnerAlertPillRepeatValidation(t *testing.T) {
+	h, s := newTestHandler(t)
+	partner := newUser(t, s, "bf-repeat@example.com", "partner")
+	cookie := sessionCookie(t, s, partner.ID)
+	put := func(body string) int {
+		return call(t, h, h.UpsertPartnerAlerts, http.MethodPut, "/api/partner-alerts", cookie, body).Code
+	}
+	base := `"pms_enabled":false,"pms_time":"09:00","pill_enabled":true,"pill_time":"21:00"`
+
+	for _, bad := range []string{`-1`, `121`, `"15"`, `15.5`} {
+		if code := put(`{` + base + `,"pill_repeat_minutes":` + bad + `}`); code != http.StatusBadRequest {
+			t.Fatalf("repeat %s accepted: %d", bad, code)
+		}
+	}
+	for _, good := range []string{`0`, `1`, `120`} {
+		if code := put(`{` + base + `,"pill_repeat_minutes":` + good + `}`); code != http.StatusOK {
+			t.Fatalf("repeat %s rejected: %d", good, code)
+		}
+	}
+	if code := put(`{` + base + `,"pill_repeat_minutes":120}`); code != http.StatusOK {
+		t.Fatalf("save 120: %d", code)
+	}
+	if pref, _ := s.GetPartnerAlerts(partner.ID); pref.PillRepeatMinutes != 120 {
+		t.Fatalf("saved repeat: %+v", pref)
+	}
+	// Clients that predate the field omit it and get repeats off.
+	if code := put(`{` + base + `}`); code != http.StatusOK {
+		t.Fatalf("missing repeat: %d", code)
+	}
+	if pref, _ := s.GetPartnerAlerts(partner.ID); pref.PillRepeatMinutes != model.PillRepeatOff {
+		t.Fatalf("missing field must mean off: %+v", pref)
+	}
+}

@@ -646,10 +646,12 @@ void main() {
       expect(find.text('21:00'), findsOneWidget);
       expect(find.text(_en.pmsNotCounted), findsNothing);
 
-      await tester.tap(find.descendant(
-        of: find.byKey(const ValueKey('alert-pill')),
-        matching: find.byType(Switch),
-      ));
+      await tester.tap(find
+          .descendant(
+            of: find.byKey(const ValueKey('alert-pill')),
+            matching: find.byType(Switch),
+          )
+          .first);
       await tester.pumpAndSettle();
       expect(api.saves.last.pillEnabled, isTrue);
       expect(api.saves.last.pmsEnabled, isFalse);
@@ -715,19 +717,23 @@ void main() {
       );
       expect(
         tester
-            .widget<Switch>(find.descendant(
-              of: find.byKey(const ValueKey('alert-pill')),
-              matching: find.byType(Switch),
-            ))
+            .widget<Switch>(find
+                .descendant(
+                  of: find.byKey(const ValueKey('alert-pill')),
+                  matching: find.byType(Switch),
+                )
+                .first)
             .value,
         isFalse,
       );
       expect(find.text(_en.sharedCalendarOwnerConsentRequired), findsOneWidget);
 
-      await tester.tap(find.descendant(
-        of: find.byKey(const ValueKey('alert-pill')),
-        matching: find.byType(Switch),
-      ));
+      await tester.tap(find
+          .descendant(
+            of: find.byKey(const ValueKey('alert-pill')),
+            matching: find.byType(Switch),
+          )
+          .first);
       await tester.pumpAndSettle();
 
       expect(api.saves.last.pmsEnabled, isTrue);

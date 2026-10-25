@@ -165,6 +165,10 @@ func (h *Handler) UpsertPartnerAlerts(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "times must use HH:MM in 24-hour format"})
 		return
 	}
+	if !model.ValidPillRepeat(pref.PillRepeatMinutes) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "pill_repeat_minutes must be 0 (off) or 1 to 120"})
+		return
+	}
 	saved, err := h.store.UpsertPartnerAlerts(userID, pref)
 	if err != nil {
 		log.Printf("upsert partner alerts: %v", err)

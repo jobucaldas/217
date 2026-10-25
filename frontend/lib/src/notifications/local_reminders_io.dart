@@ -171,10 +171,15 @@ Future<LocalReminderSyncStatus> syncPartnerAlerts(
     if (!await _ensureReady(requestPermission: alerts.isNotEmpty)) {
       return LocalReminderSyncStatus.permissionDenied;
     }
+    // Cancel every reserved partner id, repeats included, so a replan never
+    // leaves a stale repeat behind.
     for (final base in [partnerPmsIdBase, partnerPillIdBase]) {
       for (var i = 0; i < partnerAlertIdCount; i++) {
         await _plugin.cancel(base + i);
       }
+    }
+    for (var i = 0; i < partnerPillRepeatIdCount; i++) {
+      await _plugin.cancel(partnerPillRepeatIdBase + i);
     }
     if (alerts.isEmpty) return LocalReminderSyncStatus.cancelled;
     final exact = await _canUseExactAlarms();

@@ -82,7 +82,7 @@ Android deep-link PKCE:
 - `PUT /api/account/role` — `{role: owner|partner}`; 409 while shared
 - `PUT /api/account/stage` — `{stage: cycling|perimenopause|menopause}` (owner only)
 - `POST /api/share/enable|revoke` (owner), `POST /api/share/accept` (unset role or partner)
-- `GET|PUT /api/partner-alerts` (partner) — `{pms_enabled, pms_time, pill_enabled, pill_time}`
+- `GET|PUT /api/partner-alerts` (partner) — `{pms_enabled, pms_time, pill_enabled, pill_time, pill_repeat_minutes}`; `pill_repeat_minutes` is 0 (off, the default when omitted) or 1–120
 
 ## Testing expectations
 - Backend: `docker compose run --rm test-backend` (store tests also hit PostgreSQL when `TEST_DATABASE_URL` is set; CI sets it)
@@ -95,3 +95,4 @@ Android deep-link PKCE:
 - Live WorkOS sign-in / authenticated calendar not verified in CI
 - Reminder delivery on native Android (previous Web Push/PWA path) not ported
 - Partner alerts are local Android notifications planned from the last sync (app open/resume); no server push, so a pill logged after his last sync can still trigger that day's alert. Web shows the toggles but cannot deliver.
+- Pill repeats (`pill_repeat_minutes`) queue alerts every N min from the pill time until 23:59, for today and tomorrow only, at most 48 per day (ids 21730–21829). Repeats use the same exact-if-allowed scheduling as other partner alerts; Android Doze can delay them (exact alarms are best-effort and not a new permission), and a pill logged after the last sync does not stop the already-queued repeats until the next sync.

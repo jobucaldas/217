@@ -245,7 +245,9 @@ class CycleInfo {
   CycleDayKind kindOf(DateTime day) {
     final d = DateTime(day.year, day.month, day.day);
     for (final w in predictions) {
-      if (w.pmsStart.year > 1 && _within(d, w.pmsStart, w.pmsEnd)) return CycleDayKind.pms;
+      if (w.pmsStart.year > 1 && _within(d, w.pmsStart, w.pmsEnd)) {
+        return CycleDayKind.pms;
+      }
       if (_within(d, w.periodStart, w.periodEnd)) {
         return CycleDayKind.predictedPeriod;
       }
@@ -277,6 +279,12 @@ class CycleInfo {
       );
 }
 
+/// Pill repeat interval bounds (minutes). 0 means repeats are off.
+const pillRepeatOff = 0;
+const pillRepeatMinMinutes = 1;
+const pillRepeatMaxMinutes = 120;
+const pillRepeatDefaultMinutes = 15;
+
 /// Partner notification choices; each alert has its own time (HH:MM).
 class PartnerAlertPreference {
   const PartnerAlertPreference({
@@ -284,6 +292,7 @@ class PartnerAlertPreference {
     this.pmsTime = '09:00',
     this.pillEnabled = false,
     this.pillTime = '21:00',
+    this.pillRepeatMinutes = pillRepeatOff,
   });
 
   final bool pmsEnabled;
@@ -291,17 +300,27 @@ class PartnerAlertPreference {
   final bool pillEnabled;
   final String pillTime;
 
+  /// [pillRepeatOff] or an interval from 1 to [pillRepeatMaxMinutes].
+  final int pillRepeatMinutes;
+
+  /// Repeats run only for an in-range interval; anything else is treated as off.
+  bool get pillRepeatOn =>
+      pillRepeatMinutes >= pillRepeatMinMinutes &&
+      pillRepeatMinutes <= pillRepeatMaxMinutes;
+
   PartnerAlertPreference copyWith({
     bool? pmsEnabled,
     String? pmsTime,
     bool? pillEnabled,
     String? pillTime,
+    int? pillRepeatMinutes,
   }) =>
       PartnerAlertPreference(
         pmsEnabled: pmsEnabled ?? this.pmsEnabled,
         pmsTime: pmsTime ?? this.pmsTime,
         pillEnabled: pillEnabled ?? this.pillEnabled,
         pillTime: pillTime ?? this.pillTime,
+        pillRepeatMinutes: pillRepeatMinutes ?? this.pillRepeatMinutes,
       );
 
   Map<String, dynamic> toJson() => {
@@ -309,14 +328,18 @@ class PartnerAlertPreference {
         'pms_time': pmsTime,
         'pill_enabled': pillEnabled,
         'pill_time': pillTime,
+        'pill_repeat_minutes': pillRepeatMinutes,
       };
 
+  /// A missing `pill_repeat_minutes` (older servers) means repeats are off.
   factory PartnerAlertPreference.fromJson(Map<String, dynamic> json) =>
       PartnerAlertPreference(
         pmsEnabled: json['pms_enabled'] as bool? ?? false,
         pmsTime: (json['pms_time'] as String?) ?? '09:00',
         pillEnabled: json['pill_enabled'] as bool? ?? false,
         pillTime: (json['pill_time'] as String?) ?? '21:00',
+        pillRepeatMinutes:
+            (json['pill_repeat_minutes'] as num?)?.toInt() ?? pillRepeatOff,
       );
 }
 

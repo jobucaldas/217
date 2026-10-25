@@ -557,6 +557,32 @@ class Strings {
         'Se a pílula de hoje não estiver registrada até esse horário',
         'Si la píldora de hoy no está registrada a esta hora',
       );
+  String get pillRepeatTitle => _t('Repeat', 'Repetir', 'Repetir');
+  String get pillRepeatBody => _t(
+        'Repeat until she logs today’s pill',
+        'Repetir até ela registrar a pílula de hoje',
+        'Repetir hasta que registre la píldora de hoy',
+      );
+  String pillRepeatEvery(int minutes) => _t(
+        'Every $minutes min',
+        'A cada $minutes min',
+        'Cada $minutes min',
+      );
+  String get pillRepeatIntervalTitle => _t(
+        'Repeat interval',
+        'Intervalo de repetição',
+        'Intervalo de repetición',
+      );
+  String get pillRepeatIntervalLabel => _t(
+        'Interval (minutes)',
+        'Intervalo (minutos)',
+        'Intervalo (minutos)',
+      );
+  String get pillRepeatIntervalInvalid => _t(
+        'Use a value between 1 and 120',
+        'Use um valor entre 1 e 120',
+        'Usa un valor entre 1 y 120',
+      );
   String get partnerAlertsNote => _t(
         'Alerts are scheduled on this phone from her latest calendar each time 217 syncs, so open it now and then.',
         'Os avisos são agendados neste celular com o calendário mais recente dela sempre que o 217 sincroniza, então abra o app de vez em quando.',

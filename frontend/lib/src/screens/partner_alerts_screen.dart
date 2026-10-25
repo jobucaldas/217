@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
 import '../api/client.dart';
@@ -9,6 +10,7 @@ import '../models.dart';
 import '../notifications/local_reminders.dart';
 import '../notifications/partner_alert_sync.dart';
 import '../notifications/partner_alert_sync_queue.dart';
+import 'dialog_actions.dart';
 
 /// Partner notifications: PMS heads-up and pill-not-logged, each with its own
 /// toggle and time.
@@ -221,6 +223,7 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
     required String time,
     required ValueChanged<bool> onToggle,
     required VoidCallback onPickTime,
+    List<Widget> extraRows = const [],
   }) {
     final scheme = Theme.of(context).colorScheme;
     final text = Theme.of(context).textTheme;
@@ -252,10 +255,22 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
             ),
             onTap: onPickTime,
           ),
+          for (final row in extraRows) ...[
+            const Divider(height: 1, indent: 16, endIndent: 16),
+            row,
+          ],
         ],
       ),
     );
   }
+
+  Future<int?> _pickRepeatMinutes(int current) => showDialog<int>(
+        context: context,
+        builder: (_) => _RepeatIntervalDialog(
+          initial: current,
+          strings: widget.strings,
+        ),
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -319,6 +334,36 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
                     final t = await _pickTime(_pref.pillTime);
                     if (t != null) await _save(_pref.copyWith(pillTime: t));
                   },
+                  extraRows: [
+                    SwitchListTile(
+                      key: const ValueKey('alert-pill-repeat'),
+                      title: Text(strings.pillRepeatTitle),
+                      subtitle: Text(strings.pillRepeatBody),
+                      value: _pref.pillRepeatOn,
+                      onChanged: _pref.pillEnabled && !_saving
+                          ? (v) => _save(_pref.copyWith(
+                                pillRepeatMinutes: v
+                                    ? pillRepeatDefaultMinutes
+                                    : pillRepeatOff,
+                              ))
+                          : null,
+                    ),
+                    if (_pref.pillRepeatOn)
+                      ListTile(
+                        key: const ValueKey('alert-pill-repeat-interval'),
+                        enabled: _pref.pillEnabled && !_saving,
+                        title: Text(
+                          strings.pillRepeatEvery(_pref.pillRepeatMinutes),
+                        ),
+                        onTap: () async {
+                          final m =
+                              await _pickRepeatMinutes(_pref.pillRepeatMinutes);
+                          if (m != null && m != _pref.pillRepeatMinutes) {
+                            await _save(_pref.copyWith(pillRepeatMinutes: m));
+                          }
+                        },
+                      ),
+                  ],
                 ),
                 if (_error != null) ...[
                   const SizedBox(height: 12),
@@ -329,6 +374,96 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
                 ],
               ],
             ),
+    );
+  }
+}
+
+/// Asks for a repeat interval in minutes; only 1 to 120 can be saved.
+class _RepeatIntervalDialog extends StatefulWidget {
+  const _RepeatIntervalDialog({required this.initial, required this.strings});
+
+  final int initial;
+  final Strings strings;
+
+  @override
+  State<_RepeatIntervalDialog> createState() => _RepeatIntervalDialogState();
+}
+
+class _RepeatIntervalDialogState extends State<_RepeatIntervalDialog> {
+  static const _presets = [5, 10, 15, 30, 60];
+
+  late final TextEditingController _controller =
+      TextEditingController(text: '${widget.initial}');
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  int? get _minutes => int.tryParse(_controller.text);
+
+  bool get _valid {
+    final m = _minutes;
+    return m != null && m >= pillRepeatMinMinutes && m <= pillRepeatMaxMinutes;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final strings = widget.strings;
+    return AlertDialog(
+      title: Text(strings.pillRepeatIntervalTitle),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TextField(
+            controller: _controller,
+            autofocus: true,
+            keyboardType: TextInputType.number,
+            inputFormatters: [
+              FilteringTextInputFormatter.digitsOnly,
+              LengthLimitingTextInputFormatter(3),
+            ],
+            decoration: InputDecoration(
+              labelText: strings.pillRepeatIntervalLabel,
+              errorText: _valid ? null : strings.pillRepeatIntervalInvalid,
+            ),
+            onChanged: (_) => setState(() {}),
+            onSubmitted: (_) {
+              if (_valid) Navigator.pop(context, _minutes);
+            },
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final m in _presets)
+                ChoiceChip(
+                  label: Text('$m'),
+                  selected: _minutes == m,
+                  onSelected: (_) {
+                    _controller.text = '$m';
+                    setState(() {});
+                  },
+                ),
+            ],
+          ),
+        ],
+      ),
+      actions: [
+        DialogActionRow(
+          secondary: DialogLinkButton(
+            onPressed: () => Navigator.pop(context),
+            label: strings.cancel,
+          ),
+          primary: FilledButton(
+            onPressed: _valid ? () => Navigator.pop(context, _minutes) : null,
+            child: Text(strings.save),
+          ),
+        ),
+      ],
     );
   }
 }
