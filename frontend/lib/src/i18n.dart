@@ -566,7 +566,6 @@ class Strings {
   String get pillRepeatEveryLabel => _t('Every', 'A cada', 'Cada');
   String get pillRepeatMinutesUnit =>
       _t('minutes', 'minutos', 'minutos');
-  String get pillRepeatFieldSuffix => _t('min', 'min', 'min');
   String get pillRepeatRangeError => _t(
         'Enter 1 to 120 minutes',
         'Informe de 1 a 120 minutos',

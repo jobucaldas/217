@@ -303,6 +303,7 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
     final scheme = Theme.of(context).colorScheme;
     final text = Theme.of(context).textTheme;
     final enabled = _pref.pillEnabled && !_saving;
+    final hasError = _repeatError != null;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -338,8 +339,19 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
                     ],
                     decoration: InputDecoration(
                       isDense: true,
-                      suffixText: strings.pillRepeatFieldSuffix,
-                      errorText: _repeatError,
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(
+                          color: hasError ? scheme.error : scheme.outline,
+                        ),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(
+                          color: hasError ? scheme.error : scheme.primary,
+                          width: 1.6,
+                        ),
+                      ),
                     ),
                     onChanged: _onRepeatMinutesChanged,
                   ),
@@ -361,8 +373,12 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
             child: Text(
-              strings.pillRepeatHelper(_pref.pillRepeatMinutes),
-              style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+              hasError
+                  ? _repeatError!
+                  : strings.pillRepeatHelper(_pref.pillRepeatMinutes),
+              style: text.bodySmall?.copyWith(
+                color: hasError ? scheme.error : scheme.onSurfaceVariant,
+              ),
             ),
           ),
       ],

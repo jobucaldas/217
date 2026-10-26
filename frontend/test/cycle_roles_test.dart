@@ -822,18 +822,30 @@ void main() {
       expect(api.saves.last.pillRepeatMinutes, 15);
       expect(minutesField, findsOneWidget);
       expect(find.text(_en.pillRepeatRangeError), findsNothing);
+      expect(find.text(_en.pillRepeatHelper(15)), findsOneWidget);
 
       for (final invalid in ['0', '121', '']) {
         final savesBefore = api.saves.length;
         await tester.enterText(minutesField, invalid);
         await tester.pumpAndSettle();
+        // Error renders as its own full-width line, not clipped inside the
+        // narrow minutes field, and replaces the helper line while invalid.
         expect(find.text(_en.pillRepeatRangeError), findsOneWidget);
+        expect(
+          find.descendant(
+            of: minutesField,
+            matching: find.text(_en.pillRepeatRangeError),
+          ),
+          findsNothing,
+        );
+        expect(find.text(_en.pillRepeatHelper(15)), findsNothing);
         expect(api.saves.length, savesBefore, reason: 'invalid: $invalid');
       }
 
       await tester.enterText(minutesField, '45');
       await tester.pumpAndSettle();
       expect(find.text(_en.pillRepeatRangeError), findsNothing);
+      expect(find.text(_en.pillRepeatHelper(45)), findsOneWidget);
       expect(api.saves.last.pillRepeatMinutes, 45);
       expect(api.saves.last.pillRepeatEnabled, isTrue);
 
