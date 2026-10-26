@@ -315,6 +315,32 @@ void main() {
         expect(repeatsForDay(alerts, 0).length, maxPillRepeatsPerDay);
       });
 
+      test('not queued beyond the repeat horizon even at a 1-minute interval',
+          () {
+        final alerts = planPartnerAlerts(
+          now: DateTime(2026, 10, 3),
+          pref: const PartnerAlertPreference(
+            pillEnabled: true,
+            pillTime: '00:00',
+            pillRepeatEnabled: true,
+            pillRepeatMinutes: 1,
+          ),
+          cycle: CycleInfo.empty,
+          todayLogged: false,
+          pmsTitle: (_) => 'pms',
+          pmsBody: (_) => 'pms',
+          pillTitle: 'pill',
+          pillBody: 'pill',
+        );
+        final totalRepeats =
+            alerts.where((a) => a.id >= partnerPillRepeatIdBase).length;
+        expect(totalRepeats, lessThanOrEqualTo(96));
+        expect(totalRepeats, pillRepeatHorizonDays * maxPillRepeatsPerDay);
+        for (var d = pillRepeatHorizonDays; d < pillAlertHorizonDays; d++) {
+          expect(repeatsForDay(alerts, d), isEmpty, reason: 'day $d');
+        }
+      });
+
       test('ids are unique and stay within their reserved ranges', () {
         const pref = PartnerAlertPreference(
           pmsEnabled: true,
