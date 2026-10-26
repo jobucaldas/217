@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -42,24 +44,35 @@ class PartnerAlertsScreen extends StatefulWidget {
 }
 
 class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
+  static const _repeatMinutesSaveDebounce = Duration(milliseconds: 700);
+
   bool _loading = true;
   bool _saving = false;
+  int _inFlightSaves = 0;
+  Future<void> _saveChain = Future.value();
   String? _error;
   String? _calendarDataError;
   bool _pmsSuppressed = false;
   PartnerAlertPreference _pref = const PartnerAlertPreference();
   final _repeatMinutesController = TextEditingController();
+  final _repeatMinutesFocusNode = FocusNode();
+  Timer? _repeatMinutesSaveTimer;
+  int? _pendingRepeatMinutes;
   String? _repeatError;
 
   @override
   void initState() {
     super.initState();
     _repeatMinutesController.text = _pref.pillRepeatMinutes.toString();
+    _repeatMinutesFocusNode.addListener(_onRepeatMinutesFocusChange);
     _load();
   }
 
   @override
   void dispose() {
+    _repeatMinutesSaveTimer?.cancel();
+    _repeatMinutesFocusNode.removeListener(_onRepeatMinutesFocusChange);
+    _repeatMinutesFocusNode.dispose();
     _repeatMinutesController.dispose();
     super.dispose();
   }
@@ -112,15 +125,27 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
     }
   }
 
-  Future<void> _save(PartnerAlertPreference next) async {
+  /// Queues the request behind any save already in flight so two writes can
+  /// never race on the server or on rolling back `_pref`.
+  Future<void> _save(PartnerAlertPreference next) {
     final previous = _pref;
-    final syncQueue = widget.syncQueue;
-    final revision = syncQueue?.beginIntent();
+    _inFlightSaves++;
     setState(() {
       _pref = next;
       _saving = true;
       _error = null;
     });
+    final run = _saveChain.then((_) => _performSave(next, previous));
+    _saveChain = run;
+    return run;
+  }
+
+  Future<void> _performSave(
+    PartnerAlertPreference next,
+    PartnerAlertPreference previous,
+  ) async {
+    final syncQueue = widget.syncQueue;
+    final revision = syncQueue?.beginIntent();
     try {
       final saved = await widget.api.savePartnerAlerts(next);
       final status = widget.reschedule != null
@@ -128,8 +153,9 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
           : await _reschedule(saved, revision: revision);
       if (!mounted) return;
       setState(() {
-        _pref = saved;
-        _saving = false;
+        // A newer edit may have landed in `_pref` while this request was in
+        // flight; only replace it with the server echo if nothing has.
+        if (identical(_pref, next)) _pref = saved;
         _error = _calendarDataError;
         if (status == LocalReminderSyncStatus.permissionDenied) {
           _error = widget.strings.reminderPermissionDenied;
@@ -141,12 +167,17 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
     } catch (err) {
       if (!mounted) return;
       setState(() {
-        _pref = previous;
-        _saving = false;
+        if (identical(_pref, next)) {
+          _pref = previous;
+          _repeatMinutesController.text = previous.pillRepeatMinutes.toString();
+          _repeatError = null;
+        }
         _error = friendlyError(widget.strings, err);
       });
     } finally {
       if (revision != null) syncQueue?.finishIntent(revision);
+      _inFlightSaves--;
+      if (mounted) setState(() => _saving = _inFlightSaves > 0);
     }
   }
 
@@ -273,6 +304,8 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
 
   /// Turns the pill repeat on/off; a fresh enable seeds the default minutes.
   Future<void> _onToggleRepeat(bool enabled) async {
+    _repeatMinutesSaveTimer?.cancel();
+    _pendingRepeatMinutes = null;
     setState(() => _repeatError = null);
     if (!enabled) {
       await _save(_pref.copyWith(pillRepeatEnabled: false));
@@ -287,14 +320,36 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
     );
   }
 
-  /// Validates the typed interval; only ever saves a value within 1-120.
+  /// Validates the typed interval; only ever queues a value within 1-120.
+  /// Saving is debounced so digits typed in quick succession (e.g. "45")
+  /// never get locked out by a save of an earlier, partial digit.
   void _onRepeatMinutesChanged(String value) {
     final minutes = int.tryParse(value);
     if (minutes == null || minutes < 1 || minutes > 120) {
+      _repeatMinutesSaveTimer?.cancel();
+      _pendingRepeatMinutes = null;
       setState(() => _repeatError = widget.strings.pillRepeatRangeError);
       return;
     }
     setState(() => _repeatError = null);
+    _pendingRepeatMinutes = minutes;
+    _repeatMinutesSaveTimer?.cancel();
+    _repeatMinutesSaveTimer =
+        Timer(_repeatMinutesSaveDebounce, _flushRepeatMinutes);
+  }
+
+  void _onRepeatMinutesFocusChange() {
+    if (!_repeatMinutesFocusNode.hasFocus) _flushRepeatMinutes();
+  }
+
+  /// Sends the latest valid minutes value immediately, cancelling any
+  /// pending debounce. A no-op if there is nothing new to save.
+  void _flushRepeatMinutes() {
+    _repeatMinutesSaveTimer?.cancel();
+    _repeatMinutesSaveTimer = null;
+    final minutes = _pendingRepeatMinutes;
+    _pendingRepeatMinutes = null;
+    if (minutes == null || minutes == _pref.pillRepeatMinutes) return;
     _save(_pref.copyWith(pillRepeatMinutes: minutes));
   }
 
@@ -331,7 +386,10 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
                   child: TextField(
                     key: const ValueKey('pill-repeat-minutes-field'),
                     controller: _repeatMinutesController,
-                    enabled: enabled,
+                    focusNode: _repeatMinutesFocusNode,
+                    // Never gated on `_saving`: a save triggered by this
+                    // field (or any other control) must not lock out typing.
+                    enabled: _pref.pillEnabled,
                     keyboardType: TextInputType.number,
                     inputFormatters: [
                       FilteringTextInputFormatter.digitsOnly,
@@ -354,6 +412,7 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
                       ),
                     ),
                     onChanged: _onRepeatMinutesChanged,
+                    onSubmitted: (_) => _flushRepeatMinutes(),
                   ),
                 ),
                 const SizedBox(width: 8),
