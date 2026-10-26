@@ -147,12 +147,22 @@ func testRolesCycleAlerts(t *testing.T, s Store) {
 	}
 
 	pref, err := s.GetPartnerAlerts(partner.ID)
-	if err != nil || pref.PMSTime != model.DefaultPMSTime || pref.PillTime != model.DefaultPillTime || pref.PMSEnabled {
+	if err != nil || pref.PMSTime != model.DefaultPMSTime || pref.PillTime != model.DefaultPillTime || pref.PMSEnabled ||
+		pref.PillRepeatEnabled || pref.PillRepeatMinutes != model.DefaultPillRepeatMinutes {
 		t.Fatalf("default alerts: %+v %v", pref, err)
 	}
-	saved, err := s.UpsertPartnerAlerts(partner.ID, model.PartnerAlertPreference{PMSEnabled: true, PMSTime: "07:45", PillTime: "22:00"})
-	if err != nil || !saved.PMSEnabled || saved.PMSTime != "07:45" || saved.PillEnabled {
+	saved, err := s.UpsertPartnerAlerts(partner.ID, model.PartnerAlertPreference{
+		PMSEnabled: true, PMSTime: "07:45", PillTime: "22:00",
+		PillRepeatEnabled: true, PillRepeatMinutes: 30,
+	})
+	if err != nil || !saved.PMSEnabled || saved.PMSTime != "07:45" || saved.PillEnabled ||
+		!saved.PillRepeatEnabled || saved.PillRepeatMinutes != 30 {
 		t.Fatalf("saved alerts: %+v %v", saved, err)
+	}
+	// Round trip through a fresh read: the repeat setting persisted.
+	reloaded, err := s.GetPartnerAlerts(partner.ID)
+	if err != nil || !reloaded.PillRepeatEnabled || reloaded.PillRepeatMinutes != 30 {
+		t.Fatalf("reloaded alerts: %+v %v", reloaded, err)
 	}
 }
 
