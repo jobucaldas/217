@@ -284,6 +284,8 @@ class PartnerAlertPreference {
     this.pmsTime = '09:00',
     this.pillEnabled = false,
     this.pillTime = '21:00',
+    this.pillRepeatEnabled = false,
+    this.pillRepeatMinutes = 15,
   });
 
   final bool pmsEnabled;
@@ -291,17 +293,26 @@ class PartnerAlertPreference {
   final bool pillEnabled;
   final String pillTime;
 
+  /// Repeats the pill-not-logged alert every [pillRepeatMinutes] (1-120)
+  /// until the pill is logged or the day ends.
+  final bool pillRepeatEnabled;
+  final int pillRepeatMinutes;
+
   PartnerAlertPreference copyWith({
     bool? pmsEnabled,
     String? pmsTime,
     bool? pillEnabled,
     String? pillTime,
+    bool? pillRepeatEnabled,
+    int? pillRepeatMinutes,
   }) =>
       PartnerAlertPreference(
         pmsEnabled: pmsEnabled ?? this.pmsEnabled,
         pmsTime: pmsTime ?? this.pmsTime,
         pillEnabled: pillEnabled ?? this.pillEnabled,
         pillTime: pillTime ?? this.pillTime,
+        pillRepeatEnabled: pillRepeatEnabled ?? this.pillRepeatEnabled,
+        pillRepeatMinutes: pillRepeatMinutes ?? this.pillRepeatMinutes,
       );
 
   Map<String, dynamic> toJson() => {
@@ -309,6 +320,8 @@ class PartnerAlertPreference {
         'pms_time': pmsTime,
         'pill_enabled': pillEnabled,
         'pill_time': pillTime,
+        'pill_repeat_enabled': pillRepeatEnabled,
+        'pill_repeat_minutes': pillRepeatMinutes,
       };
 
   factory PartnerAlertPreference.fromJson(Map<String, dynamic> json) =>
@@ -317,6 +330,9 @@ class PartnerAlertPreference {
         pmsTime: (json['pms_time'] as String?) ?? '09:00',
         pillEnabled: json['pill_enabled'] as bool? ?? false,
         pillTime: (json['pill_time'] as String?) ?? '21:00',
+        // Older servers do not send these: default to off/15.
+        pillRepeatEnabled: json['pill_repeat_enabled'] as bool? ?? false,
+        pillRepeatMinutes: (json['pill_repeat_minutes'] as num?)?.toInt() ?? 15,
       );
 }
 

@@ -24,12 +24,30 @@ const partnerAlertIdCount = 10;
 /// How many days ahead pill alerts are queued between syncs.
 const pillAlertHorizonDays = 7;
 
+/// Notification ids reserved for the pill repeat (does not overlap 21710-21729
+/// above). One block of [maxPillRepeatsPerDay] ids per horizon day:
+/// id = partnerPillRepeatIdBase + day * maxPillRepeatsPerDay + occurrence.
+const partnerPillRepeatIdBase = 21800;
+
+/// Bounds how many repeats a single day can schedule, so a very short
+/// interval cannot tile an entire day with hundreds of alarms (stays well
+/// within Android's pending-alarm budget together with the other partner
+/// alert ranges above).
+const maxPillRepeatsPerDay = 48;
+
+const partnerPillRepeatIdCount = pillAlertHorizonDays * maxPillRepeatsPerDay;
+
 /// Plans partner alerts from the latest calendar data.
 ///
 /// PMS: one alert on each predicted PMS start day at [PartnerAlertPreference.pmsTime].
 /// Pill: one alert per day for [pillAlertHorizonDays] at the pill time, minus
 /// today when today's pill is already logged. Each app sync replans, so a
-/// logged pill cancels that day's alert.
+/// logged pill cancels that day's alert (and its repeats, below).
+///
+/// Pill repeat: when [PartnerAlertPreference.pillRepeatEnabled], each horizon
+/// day also gets up to [maxPillRepeatsPerDay] extra alerts every
+/// [PartnerAlertPreference.pillRepeatMinutes] after that day's pill time,
+/// capped at 23:59 local (never rolls into the next day).
 List<PlannedAlert> planPartnerAlerts({
   required DateTime now,
   required PartnerAlertPreference pref,
@@ -69,13 +87,31 @@ List<PlannedAlert> planPartnerAlerts({
     for (var d = 0; d < pillAlertHorizonDays; d++) {
       if (d == 0 && todayLogged) continue;
       final when = DateTime(now.year, now.month, now.day + d, t.hour, t.minute);
-      if (!when.isAfter(now)) continue;
-      out.add(PlannedAlert(
-        id: partnerPillIdBase + d,
-        when: when,
-        title: pillTitle,
-        body: pillBody,
-      ));
+      if (when.isAfter(now)) {
+        out.add(PlannedAlert(
+          id: partnerPillIdBase + d,
+          when: when,
+          title: pillTitle,
+          body: pillBody,
+        ));
+      }
+      if (pref.pillRepeatEnabled && pref.pillRepeatMinutes >= 1) {
+        // Never roll into the next day: 23:59 local is the hard cutoff.
+        final endOfDay =
+            DateTime(now.year, now.month, now.day + d, 23, 59);
+        for (var r = 0; r < maxPillRepeatsPerDay; r++) {
+          final repeatWhen =
+              when.add(Duration(minutes: pref.pillRepeatMinutes * (r + 1)));
+          if (repeatWhen.isAfter(endOfDay)) break;
+          if (!repeatWhen.isAfter(now)) continue;
+          out.add(PlannedAlert(
+            id: partnerPillRepeatIdBase + d * maxPillRepeatsPerDay + r,
+            when: repeatWhen,
+            title: pillTitle,
+            body: pillBody,
+          ));
+        }
+      }
     }
   }
   return out;

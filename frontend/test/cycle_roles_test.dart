@@ -252,6 +252,103 @@ void main() {
       ));
       expect(early.first.when, DateTime(2026, 10, 4, 9));
     });
+
+    group('pill repeat', () {
+      List<PlannedAlert> repeatsForDay(List<PlannedAlert> alerts, int day) {
+        final base = partnerPillRepeatIdBase + day * maxPillRepeatsPerDay;
+        return alerts.where((a) => a.id >= base && a.id < base + maxPillRepeatsPerDay).toList()
+          ..sort((a, b) => a.when.compareTo(b.when));
+      }
+
+      test('disabled by default even with the base alert on', () {
+        final alerts = plan(const PartnerAlertPreference(pillEnabled: true));
+        expect(alerts.every((a) => a.id < partnerPillRepeatIdBase), isTrue);
+      });
+
+      test('fires every X minutes after the pill time, capped at 23:59', () {
+        const pref = PartnerAlertPreference(
+          pillEnabled: true,
+          pillTime: '21:00',
+          pillRepeatEnabled: true,
+          pillRepeatMinutes: 30,
+        );
+        final day0 = repeatsForDay(plan(pref), 0);
+        expect(day0.map((a) => a.when), [
+          DateTime(2026, 10, 3, 21, 30),
+          DateTime(2026, 10, 3, 22, 0),
+          DateTime(2026, 10, 3, 22, 30),
+          DateTime(2026, 10, 3, 23, 0),
+          DateTime(2026, 10, 3, 23, 30),
+        ]);
+        // Never rolls into the next day (24:00 would be the 6th occurrence).
+        expect(day0.every((a) => a.when.day == 3), isTrue);
+      });
+
+      test('stops once today is logged, future days stay scheduled', () {
+        const pref = PartnerAlertPreference(
+          pillEnabled: true,
+          pillTime: '21:00',
+          pillRepeatEnabled: true,
+          pillRepeatMinutes: 30,
+        );
+        final alerts = plan(pref, logged: true);
+        expect(repeatsForDay(alerts, 0), isEmpty);
+        expect(repeatsForDay(alerts, 1), isNotEmpty);
+      });
+
+      test('per-day count is bounded even at a 1-minute interval', () {
+        final alerts = planPartnerAlerts(
+          now: DateTime(2026, 10, 3),
+          pref: const PartnerAlertPreference(
+            pillEnabled: true,
+            pillTime: '00:00',
+            pillRepeatEnabled: true,
+            pillRepeatMinutes: 1,
+          ),
+          cycle: CycleInfo.empty,
+          todayLogged: false,
+          pmsTitle: (_) => 'pms',
+          pmsBody: (_) => 'pms',
+          pillTitle: 'pill',
+          pillBody: 'pill',
+        );
+        expect(repeatsForDay(alerts, 0).length, maxPillRepeatsPerDay);
+      });
+
+      test('ids are unique and stay within their reserved ranges', () {
+        const pref = PartnerAlertPreference(
+          pmsEnabled: true,
+          pillEnabled: true,
+          pillTime: '21:00',
+          pillRepeatEnabled: true,
+          pillRepeatMinutes: 15,
+        );
+        final ids = plan(pref).map((a) => a.id).toList();
+        expect(ids.toSet().length, ids.length);
+        for (final id in ids) {
+          final inPms =
+              id >= partnerPmsIdBase && id < partnerPmsIdBase + partnerAlertIdCount;
+          final inPill =
+              id >= partnerPillIdBase && id < partnerPillIdBase + partnerAlertIdCount;
+          final inRepeat = id >= partnerPillRepeatIdBase &&
+              id < partnerPillRepeatIdBase + partnerPillRepeatIdCount;
+          expect(inPms || inPill || inRepeat, isTrue, reason: 'id $id');
+        }
+      });
+
+      test('replanning the same inputs twice is idempotent', () {
+        const pref = PartnerAlertPreference(
+          pillEnabled: true,
+          pillTime: '21:00',
+          pillRepeatEnabled: true,
+          pillRepeatMinutes: 15,
+        );
+        final first = plan(pref);
+        final second = plan(pref);
+        expect(first.map((a) => a.id), second.map((a) => a.id));
+        expect(first.map((a) => a.when), second.map((a) => a.when));
+      });
+    });
   });
 
   for (final brightness in Brightness.values) {
@@ -649,7 +746,7 @@ void main() {
       await tester.tap(find.descendant(
         of: find.byKey(const ValueKey('alert-pill')),
         matching: find.byType(Switch),
-      ));
+      ).first);
       await tester.pumpAndSettle();
       expect(api.saves.last.pillEnabled, isTrue);
       expect(api.saves.last.pmsEnabled, isFalse);
@@ -667,6 +764,60 @@ void main() {
           Theme.of(tester.element(find.text('PMS heads-up'))).colorScheme;
       final time = tester.widget<Text>(find.text('09:00'));
       expect(meetsBodyContrast(time.style!.color!, scheme.surface), isTrue);
+    });
+
+    testWidgets('pill repeat: toggling shows the field, validates, saves '
+        '($brightness)', (tester) async {
+      final api = _CycleApi()
+        ..alerts = const PartnerAlertPreference(pillEnabled: true);
+      await tester.pumpWidget(_app(
+        brightness,
+        PartnerAlertsScreen(
+          api: api,
+          strings: _en,
+          share: const ShareState(status: 'active', ownerName: 'Her'),
+          reschedule: (_) async => LocalReminderSyncStatus.scheduled,
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      final repeatToggle = find.byKey(const ValueKey('pill-repeat-toggle'));
+      final minutesField =
+          find.byKey(const ValueKey('pill-repeat-minutes-field'));
+      expect(repeatToggle, findsOneWidget);
+      expect(minutesField, findsNothing);
+
+      await tester.tap(find.descendant(
+        of: repeatToggle,
+        matching: find.byType(Switch),
+      ));
+      await tester.pumpAndSettle();
+      expect(api.saves.last.pillRepeatEnabled, isTrue);
+      expect(api.saves.last.pillRepeatMinutes, 15);
+      expect(minutesField, findsOneWidget);
+      expect(find.text(_en.pillRepeatRangeError), findsNothing);
+
+      for (final invalid in ['0', '121', '']) {
+        final savesBefore = api.saves.length;
+        await tester.enterText(minutesField, invalid);
+        await tester.pumpAndSettle();
+        expect(find.text(_en.pillRepeatRangeError), findsOneWidget);
+        expect(api.saves.length, savesBefore, reason: 'invalid: $invalid');
+      }
+
+      await tester.enterText(minutesField, '45');
+      await tester.pumpAndSettle();
+      expect(find.text(_en.pillRepeatRangeError), findsNothing);
+      expect(api.saves.last.pillRepeatMinutes, 45);
+      expect(api.saves.last.pillRepeatEnabled, isTrue);
+
+      await tester.tap(find.descendant(
+        of: repeatToggle,
+        matching: find.byType(Switch),
+      ));
+      await tester.pumpAndSettle();
+      expect(api.saves.last.pillRepeatEnabled, isFalse);
+      expect(minutesField, findsNothing);
     });
 
     testWidgets(
@@ -718,7 +869,7 @@ void main() {
             .widget<Switch>(find.descendant(
               of: find.byKey(const ValueKey('alert-pill')),
               matching: find.byType(Switch),
-            ))
+            ).first)
             .value,
         isFalse,
       );
@@ -727,7 +878,7 @@ void main() {
       await tester.tap(find.descendant(
         of: find.byKey(const ValueKey('alert-pill')),
         matching: find.byType(Switch),
-      ));
+      ).first);
       await tester.pumpAndSettle();
 
       expect(api.saves.last.pmsEnabled, isTrue);

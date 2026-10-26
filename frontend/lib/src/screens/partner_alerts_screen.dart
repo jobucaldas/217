@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
 import '../api/client.dart';
@@ -47,11 +48,20 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
   String? _calendarDataError;
   bool _pmsSuppressed = false;
   PartnerAlertPreference _pref = const PartnerAlertPreference();
+  final _repeatMinutesController = TextEditingController();
+  String? _repeatError;
 
   @override
   void initState() {
     super.initState();
+    _repeatMinutesController.text = _pref.pillRepeatMinutes.toString();
     _load();
+  }
+
+  @override
+  void dispose() {
+    _repeatMinutesController.dispose();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -67,6 +77,8 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
       setState(() {
         _pref = pref;
         _loading = false;
+        _repeatError = null;
+        _repeatMinutesController.text = pref.pillRepeatMinutes.toString();
       });
     } catch (err) {
       if (err is! ApiException || err.message != 'consent required') {
@@ -221,6 +233,7 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
     required String time,
     required ValueChanged<bool> onToggle,
     required VoidCallback onPickTime,
+    Widget? extra,
   }) {
     final scheme = Theme.of(context).colorScheme;
     final text = Theme.of(context).textTheme;
@@ -252,8 +265,107 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
             ),
             onTap: onPickTime,
           ),
+          if (extra != null) extra,
         ],
       ),
+    );
+  }
+
+  /// Turns the pill repeat on/off; a fresh enable seeds the default minutes.
+  Future<void> _onToggleRepeat(bool enabled) async {
+    setState(() => _repeatError = null);
+    if (!enabled) {
+      await _save(_pref.copyWith(pillRepeatEnabled: false));
+      return;
+    }
+    final minutes = _pref.pillRepeatMinutes >= 1 && _pref.pillRepeatMinutes <= 120
+        ? _pref.pillRepeatMinutes
+        : 15;
+    _repeatMinutesController.text = minutes.toString();
+    await _save(
+      _pref.copyWith(pillRepeatEnabled: true, pillRepeatMinutes: minutes),
+    );
+  }
+
+  /// Validates the typed interval; only ever saves a value within 1-120.
+  void _onRepeatMinutesChanged(String value) {
+    final minutes = int.tryParse(value);
+    if (minutes == null || minutes < 1 || minutes > 120) {
+      setState(() => _repeatError = widget.strings.pillRepeatRangeError);
+      return;
+    }
+    setState(() => _repeatError = null);
+    _save(_pref.copyWith(pillRepeatMinutes: minutes));
+  }
+
+  Widget _pillRepeatSection() {
+    final strings = widget.strings;
+    final scheme = Theme.of(context).colorScheme;
+    final text = Theme.of(context).textTheme;
+    final enabled = _pref.pillEnabled && !_saving;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Divider(height: 1, indent: 16, endIndent: 16),
+        SwitchListTile(
+          key: const ValueKey('pill-repeat-toggle'),
+          title: Text(strings.pillRepeatTitle),
+          subtitle: Text(strings.pillRepeatSubtitle),
+          value: _pref.pillRepeatEnabled,
+          onChanged: enabled ? _onToggleRepeat : null,
+        ),
+        if (_pref.pillRepeatEnabled)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 14),
+                  child: Text(strings.pillRepeatEveryLabel),
+                ),
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 80,
+                  child: TextField(
+                    key: const ValueKey('pill-repeat-minutes-field'),
+                    controller: _repeatMinutesController,
+                    enabled: enabled,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.digitsOnly,
+                      LengthLimitingTextInputFormatter(3),
+                    ],
+                    decoration: InputDecoration(
+                      isDense: true,
+                      suffixText: strings.pillRepeatFieldSuffix,
+                      errorText: _repeatError,
+                    ),
+                    onChanged: _onRepeatMinutesChanged,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Padding(
+                  padding: const EdgeInsets.only(top: 14),
+                  child: Text(
+                    strings.pillRepeatMinutesUnit,
+                    style: text.bodyMedium?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        if (_pref.pillRepeatEnabled)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: Text(
+              strings.pillRepeatHelper(_pref.pillRepeatMinutes),
+              style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+            ),
+          ),
+      ],
     );
   }
 
@@ -319,6 +431,7 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
                     final t = await _pickTime(_pref.pillTime);
                     if (t != null) await _save(_pref.copyWith(pillTime: t));
                   },
+                  extra: _pillRepeatSection(),
                 ),
                 if (_error != null) ...[
                   const SizedBox(height: 12),

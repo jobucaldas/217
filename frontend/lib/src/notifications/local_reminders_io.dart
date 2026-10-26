@@ -176,8 +176,20 @@ Future<LocalReminderSyncStatus> syncPartnerAlerts(
         await _plugin.cancel(base + i);
       }
     }
+    // Pill-repeat range: cleared in full on every sync (idempotent replan),
+    // so a logged pill or a disabled repeat drops any pending occurrence.
+    for (var i = 0; i < partnerPillRepeatIdCount; i++) {
+      await _plugin.cancel(partnerPillRepeatIdBase + i);
+    }
     if (alerts.isEmpty) return LocalReminderSyncStatus.cancelled;
     final exact = await _canUseExactAlarms();
+    // Same high-importance, sound-on channel as the other partner alerts
+    // makes the pill repeat alarm-like. Exact alarms (already requested via
+    // SCHEDULE_EXACT_ALARM elsewhere) fire on time but need that
+    // permission; when it is denied we fall back to inexact-while-idle,
+    // which Doze can delay by several minutes per occurrence instead of
+    // adding a new sensitive permission (USE_EXACT_ALARM / full-screen
+    // intent) just for this feature.
     const details = NotificationDetails(
       android: AndroidNotificationDetails(
         _partnerChannelId,
