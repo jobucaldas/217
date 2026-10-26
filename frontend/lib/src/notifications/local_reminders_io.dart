@@ -184,12 +184,11 @@ Future<LocalReminderSyncStatus> syncPartnerAlerts(
     if (alerts.isEmpty) return LocalReminderSyncStatus.cancelled;
     final exact = await _canUseExactAlarms();
     // Same high-importance, sound-on channel as the other partner alerts
-    // makes the pill repeat alarm-like. Exact alarms (already requested via
-    // SCHEDULE_EXACT_ALARM elsewhere) fire on time but need that
-    // permission; when it is denied we fall back to inexact-while-idle,
-    // which Doze can delay by several minutes per occurrence instead of
-    // adding a new sensitive permission (USE_EXACT_ALARM / full-screen
-    // intent) just for this feature.
+    // makes the pill repeat alarm-like. Exact alarms fire on time but need
+    // USE_EXACT_ALARM (Android 13+, auto-granted) or SCHEDULE_EXACT_ALARM
+    // (Android 12 and below, user-granted); when neither is held we fall
+    // back to inexact-while-idle, which Doze can delay by several minutes
+    // per occurrence.
     const details = NotificationDetails(
       android: AndroidNotificationDetails(
         _partnerChannelId,
