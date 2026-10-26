@@ -68,9 +68,14 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
     _load();
   }
 
+  void _cancelRepeatMinutesTimer() {
+    _repeatMinutesSaveTimer?.cancel();
+    _repeatMinutesSaveTimer = null;
+  }
+
   @override
   void dispose() {
-    _repeatMinutesSaveTimer?.cancel();
+    _cancelRepeatMinutesTimer();
     _repeatMinutesFocusNode.removeListener(_onRepeatMinutesFocusChange);
     _repeatMinutesFocusNode.dispose();
     _repeatMinutesController.dispose();
@@ -172,12 +177,12 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
           // A debounced edit newer than this failed save must win: rewriting
           // the controller here would show text for a value that was never
           // sent and drop the pending save that would have fixed it.
-          final hasNewerUnflushedEdit = _repeatMinutesSaveTimer != null ||
-              (_pendingRepeatMinutes != null &&
-                  _pendingRepeatMinutes != next.pillRepeatMinutes);
+          final hasNewerUnflushedEdit =
+              _repeatMinutesSaveTimer?.isActive == true ||
+                  (_pendingRepeatMinutes != null &&
+                      _pendingRepeatMinutes != next.pillRepeatMinutes);
           if (!hasNewerUnflushedEdit) {
-            _repeatMinutesSaveTimer?.cancel();
-            _repeatMinutesSaveTimer = null;
+            _cancelRepeatMinutesTimer();
             _pendingRepeatMinutes = null;
             _repeatMinutesController.text =
                 previous.pillRepeatMinutes.toString();
@@ -316,16 +321,17 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
 
   /// Turns the pill repeat on/off; a fresh enable seeds the default minutes.
   Future<void> _onToggleRepeat(bool enabled) async {
-    _repeatMinutesSaveTimer?.cancel();
+    _cancelRepeatMinutesTimer();
     _pendingRepeatMinutes = null;
     setState(() => _repeatError = null);
     if (!enabled) {
       await _save(_pref.copyWith(pillRepeatEnabled: false));
       return;
     }
-    final minutes = _pref.pillRepeatMinutes >= 1 && _pref.pillRepeatMinutes <= 120
-        ? _pref.pillRepeatMinutes
-        : 15;
+    final minutes =
+        _pref.pillRepeatMinutes >= 1 && _pref.pillRepeatMinutes <= 120
+            ? _pref.pillRepeatMinutes
+            : 15;
     _repeatMinutesController.text = minutes.toString();
     await _save(
       _pref.copyWith(pillRepeatEnabled: true, pillRepeatMinutes: minutes),
@@ -338,14 +344,14 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
   void _onRepeatMinutesChanged(String value) {
     final minutes = int.tryParse(value);
     if (minutes == null || minutes < 1 || minutes > 120) {
-      _repeatMinutesSaveTimer?.cancel();
+      _cancelRepeatMinutesTimer();
       _pendingRepeatMinutes = null;
       setState(() => _repeatError = widget.strings.pillRepeatRangeError);
       return;
     }
     setState(() => _repeatError = null);
     _pendingRepeatMinutes = minutes;
-    _repeatMinutesSaveTimer?.cancel();
+    _cancelRepeatMinutesTimer();
     _repeatMinutesSaveTimer =
         Timer(_repeatMinutesSaveDebounce, _flushRepeatMinutes);
   }
@@ -357,8 +363,7 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
   /// Sends the latest valid minutes value immediately, cancelling any
   /// pending debounce. A no-op if there is nothing new to save.
   void _flushRepeatMinutes() {
-    _repeatMinutesSaveTimer?.cancel();
-    _repeatMinutesSaveTimer = null;
+    _cancelRepeatMinutesTimer();
     final minutes = _pendingRepeatMinutes;
     _pendingRepeatMinutes = null;
     if (minutes == null || minutes == _pref.pillRepeatMinutes) return;
