@@ -968,6 +968,67 @@ void main() {
     });
 
     testWidgets(
+        'pill repeat minutes: a failed save does not clobber a newer '
+        'unflushed edit, which still saves afterwards ($brightness)',
+        (tester) async {
+      final api = _CycleApi()
+        ..alerts = const PartnerAlertPreference(
+          pillEnabled: true,
+          pillRepeatEnabled: true,
+          pillRepeatMinutes: 20,
+        )
+        ..saveDelay = const Duration(milliseconds: 200)
+        ..saveError = Exception('boom');
+      await tester.pumpWidget(_app(
+        brightness,
+        PartnerAlertsScreen(
+          api: api,
+          strings: _en,
+          share: const ShareState(status: 'active', ownerName: 'Her'),
+          reschedule: (_) async => LocalReminderSyncStatus.scheduled,
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      final minutesField =
+          find.byKey(const ValueKey('pill-repeat-minutes-field'));
+      expect(tester.widget<TextField>(minutesField).controller!.text, '20');
+
+      await tester.enterText(minutesField, '45');
+      // Debounce elapses: a save of 45 is now in flight and will fail.
+      await tester.pump(const Duration(milliseconds: 700));
+
+      // A newer edit lands inside its own debounce window before the failed
+      // save of 45 rolls back.
+      await tester.enterText(minutesField, '67');
+      expect(
+        tester.widget<TextField>(minutesField).controller!.text,
+        '67',
+      );
+
+      // The in-flight save of 45 now fails and rolls back `_pref`, but must
+      // not stomp the newer, still-unflushed 67.
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(find.text(_en.connectionError), findsOneWidget);
+      expect(
+        tester.widget<TextField>(minutesField).controller!.text,
+        '67',
+        reason: 'a newer unflushed edit must survive a stale failed save',
+      );
+
+      api.saveError = null;
+      await tester.pump(const Duration(milliseconds: 700));
+      await tester.pumpAndSettle();
+
+      expect(api.saves.last.pillRepeatMinutes, 67);
+      expect(
+        tester.widget<TextField>(minutesField).controller!.text,
+        '67',
+      );
+      expect(find.text(_en.pillRepeatHelper(67)), findsOneWidget);
+    });
+
+    testWidgets(
         'partner alerts keep saved toggles and cancel schedules when calendar consent blocks data ($brightness)',
         (tester) async {
       final api = _CycleApi(

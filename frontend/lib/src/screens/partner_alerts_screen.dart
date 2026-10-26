@@ -169,8 +169,20 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
       setState(() {
         if (identical(_pref, next)) {
           _pref = previous;
-          _repeatMinutesController.text = previous.pillRepeatMinutes.toString();
-          _repeatError = null;
+          // A debounced edit newer than this failed save must win: rewriting
+          // the controller here would show text for a value that was never
+          // sent and drop the pending save that would have fixed it.
+          final hasNewerUnflushedEdit = _repeatMinutesSaveTimer != null ||
+              (_pendingRepeatMinutes != null &&
+                  _pendingRepeatMinutes != next.pillRepeatMinutes);
+          if (!hasNewerUnflushedEdit) {
+            _repeatMinutesSaveTimer?.cancel();
+            _repeatMinutesSaveTimer = null;
+            _pendingRepeatMinutes = null;
+            _repeatMinutesController.text =
+                previous.pillRepeatMinutes.toString();
+            _repeatError = null;
+          }
         }
         _error = friendlyError(widget.strings, err);
       });
