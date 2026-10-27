@@ -21,6 +21,11 @@ type CycleInfo struct {
 const (
 	DefaultPMSTime  = "09:00"
 	DefaultPillTime = "21:00"
+	// DefaultPillRepeatMinutes seeds the field the first time a partner
+	// turns the repeat on.
+	DefaultPillRepeatMinutes = 15
+	MinPillRepeatMinutes     = 1
+	MaxPillRepeatMinutes     = 120
 )
 
 // PartnerAlertPreference holds a partner's notification toggles and times.
@@ -29,8 +34,22 @@ type PartnerAlertPreference struct {
 	PMSTime     string `json:"pms_time"`
 	PillEnabled bool   `json:"pill_enabled"`
 	PillTime    string `json:"pill_time"`
+	// PillRepeatEnabled repeats the pill-not-logged alert every
+	// PillRepeatMinutes until the pill is logged or the day ends.
+	PillRepeatEnabled bool `json:"pill_repeat_enabled"`
+	PillRepeatMinutes int  `json:"pill_repeat_minutes"`
 }
 
 func DefaultPartnerAlertPreference() PartnerAlertPreference {
-	return PartnerAlertPreference{PMSTime: DefaultPMSTime, PillTime: DefaultPillTime}
+	return PartnerAlertPreference{
+		PMSTime:           DefaultPMSTime,
+		PillTime:          DefaultPillTime,
+		PillRepeatMinutes: DefaultPillRepeatMinutes,
+	}
+}
+
+// ValidPillRepeatMinutes reports whether minutes is in the allowed interval,
+// regardless of whether the repeat is currently enabled.
+func ValidPillRepeatMinutes(minutes int) bool {
+	return minutes >= MinPillRepeatMinutes && minutes <= MaxPillRepeatMinutes
 }

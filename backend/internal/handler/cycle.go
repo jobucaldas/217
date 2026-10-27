@@ -156,13 +156,19 @@ func (h *Handler) UpsertPartnerAlerts(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "only partners have partner alerts"})
 		return
 	}
-	var pref model.PartnerAlertPreference
+	// Pre-fill defaults so older clients that omit newer fields (e.g.
+	// pill_repeat_minutes) keep working instead of failing validation on 0.
+	pref := model.DefaultPartnerAlertPreference()
 	if err := json.NewDecoder(r.Body).Decode(&pref); err != nil {
 		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
 		return
 	}
 	if !validClock(pref.PMSTime) || !validClock(pref.PillTime) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "times must use HH:MM in 24-hour format"})
+		return
+	}
+	if !model.ValidPillRepeatMinutes(pref.PillRepeatMinutes) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "pill_repeat_minutes must be between 1 and 120"})
 		return
 	}
 	saved, err := h.store.UpsertPartnerAlerts(userID, pref)

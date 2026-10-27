@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
 import '../api/client.dart';
@@ -41,17 +44,42 @@ class PartnerAlertsScreen extends StatefulWidget {
 }
 
 class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
+  static const _repeatMinutesSaveDebounce = Duration(milliseconds: 700);
+
   bool _loading = true;
   bool _saving = false;
+  int _inFlightSaves = 0;
+  Future<void> _saveChain = Future.value();
   String? _error;
   String? _calendarDataError;
   bool _pmsSuppressed = false;
   PartnerAlertPreference _pref = const PartnerAlertPreference();
+  final _repeatMinutesController = TextEditingController();
+  final _repeatMinutesFocusNode = FocusNode();
+  Timer? _repeatMinutesSaveTimer;
+  int? _pendingRepeatMinutes;
+  String? _repeatError;
 
   @override
   void initState() {
     super.initState();
+    _repeatMinutesController.text = _pref.pillRepeatMinutes.toString();
+    _repeatMinutesFocusNode.addListener(_onRepeatMinutesFocusChange);
     _load();
+  }
+
+  void _cancelRepeatMinutesTimer() {
+    _repeatMinutesSaveTimer?.cancel();
+    _repeatMinutesSaveTimer = null;
+  }
+
+  @override
+  void dispose() {
+    _cancelRepeatMinutesTimer();
+    _repeatMinutesFocusNode.removeListener(_onRepeatMinutesFocusChange);
+    _repeatMinutesFocusNode.dispose();
+    _repeatMinutesController.dispose();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -67,6 +95,8 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
       setState(() {
         _pref = pref;
         _loading = false;
+        _repeatError = null;
+        _repeatMinutesController.text = pref.pillRepeatMinutes.toString();
       });
     } catch (err) {
       if (err is! ApiException || err.message != 'consent required') {
@@ -100,15 +130,27 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
     }
   }
 
-  Future<void> _save(PartnerAlertPreference next) async {
+  /// Queues the request behind any save already in flight so two writes can
+  /// never race on the server or on rolling back `_pref`.
+  Future<void> _save(PartnerAlertPreference next) {
     final previous = _pref;
-    final syncQueue = widget.syncQueue;
-    final revision = syncQueue?.beginIntent();
+    _inFlightSaves++;
     setState(() {
       _pref = next;
       _saving = true;
       _error = null;
     });
+    final run = _saveChain.then((_) => _performSave(next, previous));
+    _saveChain = run;
+    return run;
+  }
+
+  Future<void> _performSave(
+    PartnerAlertPreference next,
+    PartnerAlertPreference previous,
+  ) async {
+    final syncQueue = widget.syncQueue;
+    final revision = syncQueue?.beginIntent();
     try {
       final saved = await widget.api.savePartnerAlerts(next);
       final status = widget.reschedule != null
@@ -116,8 +158,9 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
           : await _reschedule(saved, revision: revision);
       if (!mounted) return;
       setState(() {
-        _pref = saved;
-        _saving = false;
+        // A newer edit may have landed in `_pref` while this request was in
+        // flight; only replace it with the server echo if nothing has.
+        if (identical(_pref, next)) _pref = saved;
         _error = _calendarDataError;
         if (status == LocalReminderSyncStatus.permissionDenied) {
           _error = widget.strings.reminderPermissionDenied;
@@ -129,12 +172,29 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
     } catch (err) {
       if (!mounted) return;
       setState(() {
-        _pref = previous;
-        _saving = false;
+        if (identical(_pref, next)) {
+          _pref = previous;
+          // A debounced edit newer than this failed save must win: rewriting
+          // the controller here would show text for a value that was never
+          // sent and drop the pending save that would have fixed it.
+          final hasNewerUnflushedEdit =
+              _repeatMinutesSaveTimer?.isActive == true ||
+                  (_pendingRepeatMinutes != null &&
+                      _pendingRepeatMinutes != next.pillRepeatMinutes);
+          if (!hasNewerUnflushedEdit) {
+            _cancelRepeatMinutesTimer();
+            _pendingRepeatMinutes = null;
+            _repeatMinutesController.text =
+                previous.pillRepeatMinutes.toString();
+            _repeatError = null;
+          }
+        }
         _error = friendlyError(widget.strings, err);
       });
     } finally {
       if (revision != null) syncQueue?.finishIntent(revision);
+      _inFlightSaves--;
+      if (mounted) setState(() => _saving = _inFlightSaves > 0);
     }
   }
 
@@ -221,6 +281,7 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
     required String time,
     required ValueChanged<bool> onToggle,
     required VoidCallback onPickTime,
+    Widget? extra,
   }) {
     final scheme = Theme.of(context).colorScheme;
     final text = Theme.of(context).textTheme;
@@ -252,8 +313,151 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
             ),
             onTap: onPickTime,
           ),
+          if (extra != null) extra,
         ],
       ),
+    );
+  }
+
+  /// Turns the pill repeat on/off; a fresh enable seeds the default minutes.
+  Future<void> _onToggleRepeat(bool enabled) async {
+    _cancelRepeatMinutesTimer();
+    _pendingRepeatMinutes = null;
+    setState(() => _repeatError = null);
+    if (!enabled) {
+      await _save(_pref.copyWith(pillRepeatEnabled: false));
+      return;
+    }
+    final minutes =
+        _pref.pillRepeatMinutes >= 1 && _pref.pillRepeatMinutes <= 120
+            ? _pref.pillRepeatMinutes
+            : 15;
+    _repeatMinutesController.text = minutes.toString();
+    await _save(
+      _pref.copyWith(pillRepeatEnabled: true, pillRepeatMinutes: minutes),
+    );
+  }
+
+  /// Validates the typed interval; only ever queues a value within 1-120.
+  /// Saving is debounced so digits typed in quick succession (e.g. "45")
+  /// never get locked out by a save of an earlier, partial digit.
+  void _onRepeatMinutesChanged(String value) {
+    final minutes = int.tryParse(value);
+    if (minutes == null || minutes < 1 || minutes > 120) {
+      _cancelRepeatMinutesTimer();
+      _pendingRepeatMinutes = null;
+      setState(() => _repeatError = widget.strings.pillRepeatRangeError);
+      return;
+    }
+    setState(() => _repeatError = null);
+    _pendingRepeatMinutes = minutes;
+    _cancelRepeatMinutesTimer();
+    _repeatMinutesSaveTimer =
+        Timer(_repeatMinutesSaveDebounce, _flushRepeatMinutes);
+  }
+
+  void _onRepeatMinutesFocusChange() {
+    if (!_repeatMinutesFocusNode.hasFocus) _flushRepeatMinutes();
+  }
+
+  /// Sends the latest valid minutes value immediately, cancelling any
+  /// pending debounce. A no-op if there is nothing new to save.
+  void _flushRepeatMinutes() {
+    _cancelRepeatMinutesTimer();
+    final minutes = _pendingRepeatMinutes;
+    _pendingRepeatMinutes = null;
+    if (minutes == null || minutes == _pref.pillRepeatMinutes) return;
+    _save(_pref.copyWith(pillRepeatMinutes: minutes));
+  }
+
+  Widget _pillRepeatSection() {
+    final strings = widget.strings;
+    final scheme = Theme.of(context).colorScheme;
+    final text = Theme.of(context).textTheme;
+    final enabled = _pref.pillEnabled && !_saving;
+    final hasError = _repeatError != null;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Divider(height: 1, indent: 16, endIndent: 16),
+        SwitchListTile(
+          key: const ValueKey('pill-repeat-toggle'),
+          title: Text(strings.pillRepeatTitle),
+          subtitle: Text(strings.pillRepeatSubtitle),
+          value: _pref.pillRepeatEnabled,
+          onChanged: enabled ? _onToggleRepeat : null,
+        ),
+        if (_pref.pillRepeatEnabled)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 14),
+                  child: Text(strings.pillRepeatEveryLabel),
+                ),
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 80,
+                  child: TextField(
+                    key: const ValueKey('pill-repeat-minutes-field'),
+                    controller: _repeatMinutesController,
+                    focusNode: _repeatMinutesFocusNode,
+                    // Never gated on `_saving`: a save triggered by this
+                    // field (or any other control) must not lock out typing.
+                    enabled: _pref.pillEnabled,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.digitsOnly,
+                      LengthLimitingTextInputFormatter(3),
+                    ],
+                    decoration: InputDecoration(
+                      isDense: true,
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(
+                          color: hasError ? scheme.error : scheme.outline,
+                        ),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(
+                          color: hasError ? scheme.error : scheme.primary,
+                          width: 1.6,
+                        ),
+                      ),
+                    ),
+                    onChanged: _onRepeatMinutesChanged,
+                    onSubmitted: (_) => _flushRepeatMinutes(),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Padding(
+                  padding: const EdgeInsets.only(top: 14),
+                  child: Text(
+                    strings.pillRepeatMinutesUnit,
+                    style: text.bodyMedium?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        if (_pref.pillRepeatEnabled)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: Text(
+              hasError
+                  ? _repeatError!
+                  : strings.pillRepeatHelper(_pref.pillRepeatMinutes),
+              style: text.bodySmall?.copyWith(
+                color: hasError ? scheme.error : scheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+      ],
     );
   }
 
@@ -319,6 +523,7 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
                     final t = await _pickTime(_pref.pillTime);
                     if (t != null) await _save(_pref.copyWith(pillTime: t));
                   },
+                  extra: _pillRepeatSection(),
                 ),
                 if (_error != null) ...[
                   const SizedBox(height: 12),

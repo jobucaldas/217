@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -257,18 +258,37 @@ func TestPartnerAlertPreferences(t *testing.T) {
 		t.Fatalf("owner partner alerts: %d", w.Code)
 	}
 	w := call(t, h, h.GetPartnerAlerts, http.MethodGet, "/api/partner-alerts", partnerCookie, "")
-	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"pms_time":"09:00"`) || !strings.Contains(w.Body.String(), `"pill_enabled":false`) {
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"pms_time":"09:00"`) || !strings.Contains(w.Body.String(), `"pill_enabled":false`) ||
+		!strings.Contains(w.Body.String(), `"pill_repeat_enabled":false`) || !strings.Contains(w.Body.String(), `"pill_repeat_minutes":15`) {
 		t.Fatalf("defaults: %d %s", w.Code, w.Body.String())
 	}
 	if w := call(t, h, h.UpsertPartnerAlerts, http.MethodPut, "/api/partner-alerts", partnerCookie, `{"pms_enabled":true,"pms_time":"25:00","pill_enabled":false,"pill_time":"21:00"}`); w.Code != http.StatusBadRequest {
 		t.Fatalf("bad time: %d", w.Code)
 	}
+	// Older clients that omit the new fields entirely keep working.
 	w = call(t, h, h.UpsertPartnerAlerts, http.MethodPut, "/api/partner-alerts", partnerCookie, `{"pms_enabled":true,"pms_time":"08:30","pill_enabled":true,"pill_time":"22:15"}`)
 	if w.Code != http.StatusOK {
-		t.Fatalf("save: %d %s", w.Code, w.Body.String())
+		t.Fatalf("save without repeat fields: %d %s", w.Code, w.Body.String())
 	}
 	pref, _ := s.GetPartnerAlerts(partner.ID)
-	if !pref.PMSEnabled || pref.PMSTime != "08:30" || !pref.PillEnabled || pref.PillTime != "22:15" {
+	if !pref.PMSEnabled || pref.PMSTime != "08:30" || !pref.PillEnabled || pref.PillTime != "22:15" ||
+		pref.PillRepeatEnabled || pref.PillRepeatMinutes != model.DefaultPillRepeatMinutes {
 		t.Fatalf("saved: %+v", pref)
+	}
+	for _, minutes := range []int{0, -1, 121, 1000} {
+		body := `{"pms_time":"08:30","pill_time":"22:15","pill_repeat_enabled":true,"pill_repeat_minutes":` +
+			strconv.Itoa(minutes) + `}`
+		if w := call(t, h, h.UpsertPartnerAlerts, http.MethodPut, "/api/partner-alerts", partnerCookie, body); w.Code != http.StatusBadRequest {
+			t.Fatalf("pill_repeat_minutes=%d: %d %s", minutes, w.Code, w.Body.String())
+		}
+	}
+	w = call(t, h, h.UpsertPartnerAlerts, http.MethodPut, "/api/partner-alerts", partnerCookie,
+		`{"pms_time":"08:30","pill_time":"22:15","pill_repeat_enabled":true,"pill_repeat_minutes":30}`)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"pill_repeat_enabled":true`) || !strings.Contains(w.Body.String(), `"pill_repeat_minutes":30`) {
+		t.Fatalf("save with repeat: %d %s", w.Code, w.Body.String())
+	}
+	pref, _ = s.GetPartnerAlerts(partner.ID)
+	if !pref.PillRepeatEnabled || pref.PillRepeatMinutes != 30 {
+		t.Fatalf("saved repeat: %+v", pref)
 	}
 }

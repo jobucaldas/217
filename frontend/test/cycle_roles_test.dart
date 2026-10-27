@@ -52,6 +52,8 @@ class _CycleApi extends ApiClient {
   String? role;
   PartnerAlertPreference alerts = const PartnerAlertPreference();
   final saves = <PartnerAlertPreference>[];
+  Duration? saveDelay;
+  Object? saveError;
 
   @override
   Future<List<Entry>> listEntries(int year, int month) async => entries;
@@ -75,6 +77,8 @@ class _CycleApi extends ApiClient {
     PartnerAlertPreference pref,
   ) async {
     saves.add(pref);
+    if (saveDelay != null) await Future<void>.delayed(saveDelay!);
+    if (saveError != null) throw saveError!;
     return alerts = pref;
   }
 
@@ -251,6 +255,131 @@ void main() {
         pillTime: '09:00',
       ));
       expect(early.first.when, DateTime(2026, 10, 4, 9));
+    });
+
+    group('pill repeat', () {
+      List<PlannedAlert> repeatsForDay(List<PlannedAlert> alerts, int day) {
+        final base = partnerPillRepeatIdBase + day * maxPillRepeatsPerDay;
+        return alerts
+            .where((a) => a.id >= base && a.id < base + maxPillRepeatsPerDay)
+            .toList()
+          ..sort((a, b) => a.when.compareTo(b.when));
+      }
+
+      test('disabled by default even with the base alert on', () {
+        final alerts = plan(const PartnerAlertPreference(pillEnabled: true));
+        expect(alerts.every((a) => a.id < partnerPillRepeatIdBase), isTrue);
+      });
+
+      test('fires every X minutes after the pill time, capped at 23:59', () {
+        const pref = PartnerAlertPreference(
+          pillEnabled: true,
+          pillTime: '21:00',
+          pillRepeatEnabled: true,
+          pillRepeatMinutes: 30,
+        );
+        final day0 = repeatsForDay(plan(pref), 0);
+        expect(day0.map((a) => a.when), [
+          DateTime(2026, 10, 3, 21, 30),
+          DateTime(2026, 10, 3, 22, 0),
+          DateTime(2026, 10, 3, 22, 30),
+          DateTime(2026, 10, 3, 23, 0),
+          DateTime(2026, 10, 3, 23, 30),
+        ]);
+        // Never rolls into the next day (24:00 would be the 6th occurrence).
+        expect(day0.every((a) => a.when.day == 3), isTrue);
+      });
+
+      test('stops once today is logged, future days stay scheduled', () {
+        const pref = PartnerAlertPreference(
+          pillEnabled: true,
+          pillTime: '21:00',
+          pillRepeatEnabled: true,
+          pillRepeatMinutes: 30,
+        );
+        final alerts = plan(pref, logged: true);
+        expect(repeatsForDay(alerts, 0), isEmpty);
+        expect(repeatsForDay(alerts, 1), isNotEmpty);
+      });
+
+      test('per-day count is bounded even at a 1-minute interval', () {
+        final alerts = planPartnerAlerts(
+          now: DateTime(2026, 10, 3),
+          pref: const PartnerAlertPreference(
+            pillEnabled: true,
+            pillTime: '00:00',
+            pillRepeatEnabled: true,
+            pillRepeatMinutes: 1,
+          ),
+          cycle: CycleInfo.empty,
+          todayLogged: false,
+          pmsTitle: (_) => 'pms',
+          pmsBody: (_) => 'pms',
+          pillTitle: 'pill',
+          pillBody: 'pill',
+        );
+        expect(repeatsForDay(alerts, 0).length, maxPillRepeatsPerDay);
+      });
+
+      test('not queued beyond the repeat horizon even at a 1-minute interval',
+          () {
+        final alerts = planPartnerAlerts(
+          now: DateTime(2026, 10, 3),
+          pref: const PartnerAlertPreference(
+            pillEnabled: true,
+            pillTime: '00:00',
+            pillRepeatEnabled: true,
+            pillRepeatMinutes: 1,
+          ),
+          cycle: CycleInfo.empty,
+          todayLogged: false,
+          pmsTitle: (_) => 'pms',
+          pmsBody: (_) => 'pms',
+          pillTitle: 'pill',
+          pillBody: 'pill',
+        );
+        final totalRepeats =
+            alerts.where((a) => a.id >= partnerPillRepeatIdBase).length;
+        expect(totalRepeats, lessThanOrEqualTo(96));
+        expect(totalRepeats, pillRepeatHorizonDays * maxPillRepeatsPerDay);
+        for (var d = pillRepeatHorizonDays; d < pillAlertHorizonDays; d++) {
+          expect(repeatsForDay(alerts, d), isEmpty, reason: 'day $d');
+        }
+      });
+
+      test('ids are unique and stay within their reserved ranges', () {
+        const pref = PartnerAlertPreference(
+          pmsEnabled: true,
+          pillEnabled: true,
+          pillTime: '21:00',
+          pillRepeatEnabled: true,
+          pillRepeatMinutes: 15,
+        );
+        final ids = plan(pref).map((a) => a.id).toList();
+        expect(ids.toSet().length, ids.length);
+        for (final id in ids) {
+          final inPms = id >= partnerPmsIdBase &&
+              id < partnerPmsIdBase + partnerAlertIdCount;
+          final inPill = id >= partnerPillIdBase &&
+              id < partnerPillIdBase + partnerAlertIdCount;
+          final inRepeat = id >= partnerPillRepeatIdBase &&
+              id < partnerPillRepeatIdBase + partnerPillRepeatIdCount;
+          expect(inPms || inPill || inRepeat, isTrue, reason: 'id $id');
+        }
+      });
+
+      test('replanning the same inputs twice is idempotent', () {
+        const pref = PartnerAlertPreference(
+          pillEnabled: true,
+          pillTime: '21:00',
+          pillRepeatEnabled: true,
+          pillRepeatMinutes: 15,
+        );
+        final first = plan(pref);
+        final second = plan(pref);
+        expect(first.map((a) => a.id), second.map((a) => a.id));
+        expect(first.map((a) => a.when), second.map((a) => a.when));
+      });
     });
   });
 
@@ -646,10 +775,12 @@ void main() {
       expect(find.text('21:00'), findsOneWidget);
       expect(find.text(_en.pmsNotCounted), findsNothing);
 
-      await tester.tap(find.descendant(
-        of: find.byKey(const ValueKey('alert-pill')),
-        matching: find.byType(Switch),
-      ));
+      await tester.tap(find
+          .descendant(
+            of: find.byKey(const ValueKey('alert-pill')),
+            matching: find.byType(Switch),
+          )
+          .first);
       await tester.pumpAndSettle();
       expect(api.saves.last.pillEnabled, isTrue);
       expect(api.saves.last.pmsEnabled, isFalse);
@@ -667,6 +798,291 @@ void main() {
           Theme.of(tester.element(find.text('PMS heads-up'))).colorScheme;
       final time = tester.widget<Text>(find.text('09:00'));
       expect(meetsBodyContrast(time.style!.color!, scheme.surface), isTrue);
+    });
+
+    testWidgets(
+        'pill repeat: toggling shows the field, validates, saves '
+        '($brightness)', (tester) async {
+      final api = _CycleApi()
+        ..alerts = const PartnerAlertPreference(pillEnabled: true);
+      await tester.pumpWidget(_app(
+        brightness,
+        PartnerAlertsScreen(
+          api: api,
+          strings: _en,
+          share: const ShareState(status: 'active', ownerName: 'Her'),
+          reschedule: (_) async => LocalReminderSyncStatus.scheduled,
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      final repeatToggle = find.byKey(const ValueKey('pill-repeat-toggle'));
+      final minutesField =
+          find.byKey(const ValueKey('pill-repeat-minutes-field'));
+      expect(repeatToggle, findsOneWidget);
+      expect(minutesField, findsNothing);
+
+      await tester.tap(find.descendant(
+        of: repeatToggle,
+        matching: find.byType(Switch),
+      ));
+      await tester.pumpAndSettle();
+      expect(api.saves.last.pillRepeatEnabled, isTrue);
+      expect(api.saves.last.pillRepeatMinutes, 15);
+      expect(minutesField, findsOneWidget);
+      expect(find.text(_en.pillRepeatRangeError), findsNothing);
+      expect(find.text(_en.pillRepeatHelper(15)), findsOneWidget);
+
+      for (final invalid in ['0', '121', '']) {
+        final savesBefore = api.saves.length;
+        await tester.enterText(minutesField, invalid);
+        await tester.pumpAndSettle();
+        // Error renders as its own full-width line, not clipped inside the
+        // narrow minutes field, and replaces the helper line while invalid.
+        expect(find.text(_en.pillRepeatRangeError), findsOneWidget);
+        expect(
+          find.descendant(
+            of: minutesField,
+            matching: find.text(_en.pillRepeatRangeError),
+          ),
+          findsNothing,
+        );
+        expect(find.text(_en.pillRepeatHelper(15)), findsNothing);
+        expect(api.saves.length, savesBefore, reason: 'invalid: $invalid');
+      }
+
+      await tester.enterText(minutesField, '45');
+      await tester.pump();
+      // Saving the typed minutes is debounced; nothing is sent yet.
+      expect(find.text(_en.pillRepeatRangeError), findsNothing);
+      expect(api.saves.last.pillRepeatMinutes, 15);
+      await tester.pump(const Duration(milliseconds: 700));
+      await tester.pumpAndSettle();
+      expect(find.text(_en.pillRepeatRangeError), findsNothing);
+      expect(find.text(_en.pillRepeatHelper(45)), findsOneWidget);
+      expect(api.saves.last.pillRepeatMinutes, 45);
+      expect(api.saves.last.pillRepeatEnabled, isTrue);
+
+      await tester.tap(find.descendant(
+        of: repeatToggle,
+        matching: find.byType(Switch),
+      ));
+      await tester.pumpAndSettle();
+      expect(api.saves.last.pillRepeatEnabled, isFalse);
+      expect(minutesField, findsNothing);
+    });
+
+    testWidgets(
+        'pill repeat minutes: digits typed quickly debounce to a single '
+        'save and the field stays editable while a save is in flight '
+        '($brightness)', (tester) async {
+      final api = _CycleApi()
+        ..alerts = const PartnerAlertPreference(pillEnabled: true)
+        ..saveDelay = const Duration(seconds: 2);
+      await tester.pumpWidget(_app(
+        brightness,
+        PartnerAlertsScreen(
+          api: api,
+          strings: _en,
+          share: const ShareState(status: 'active', ownerName: 'Her'),
+          reschedule: (_) async => LocalReminderSyncStatus.scheduled,
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      final repeatToggle = find.byKey(const ValueKey('pill-repeat-toggle'));
+      final minutesField =
+          find.byKey(const ValueKey('pill-repeat-minutes-field'));
+
+      // Enabling the toggle kicks off a slow save (still in flight below).
+      await tester.tap(find.descendant(
+        of: repeatToggle,
+        matching: find.byType(Switch),
+      ));
+      await tester.pump();
+      expect(minutesField, findsOneWidget);
+      expect(tester.widget<TextField>(minutesField).enabled, isTrue);
+
+      // Two keystrokes land well inside the debounce window; the field must
+      // never lock up because of the toggle's own in-flight save.
+      await tester.enterText(minutesField, '4');
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(tester.widget<TextField>(minutesField).enabled, isTrue);
+      expect(api.saves.any((p) => p.pillRepeatMinutes == 45), isFalse);
+
+      await tester.enterText(minutesField, '45');
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(tester.widget<TextField>(minutesField).enabled, isTrue);
+      expect(api.saves.any((p) => p.pillRepeatMinutes == 45), isFalse);
+
+      // The debounce elapses, but the minutes save queues behind the
+      // toggle's still in-flight save rather than racing it.
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(api.saves.any((p) => p.pillRepeatMinutes == 45), isFalse);
+      expect(tester.widget<TextField>(minutesField).enabled, isTrue);
+
+      // Once the toggle's save finishes, the queued minutes save fires.
+      await tester.pump(const Duration(seconds: 2));
+      expect(api.saves.where((p) => p.pillRepeatMinutes == 45).length, 1);
+      expect(tester.widget<TextField>(minutesField).enabled, isTrue);
+
+      await tester.pump(const Duration(seconds: 2));
+    });
+
+    testWidgets(
+        'pill repeat minutes: a failed save restores the previous value '
+        '($brightness)', (tester) async {
+      final api = _CycleApi()
+        ..alerts = const PartnerAlertPreference(
+          pillEnabled: true,
+          pillRepeatEnabled: true,
+          pillRepeatMinutes: 20,
+        );
+      await tester.pumpWidget(_app(
+        brightness,
+        PartnerAlertsScreen(
+          api: api,
+          strings: _en,
+          share: const ShareState(status: 'active', ownerName: 'Her'),
+          reschedule: (_) async => LocalReminderSyncStatus.scheduled,
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      final minutesField =
+          find.byKey(const ValueKey('pill-repeat-minutes-field'));
+      expect(tester.widget<TextField>(minutesField).controller!.text, '20');
+
+      api.saveError = Exception('boom');
+      await tester.enterText(minutesField, '45');
+      // The debounce has not fired yet: nothing has been saved or optimistically
+      // applied, so the helper still reflects the saved value.
+      expect(find.text(_en.pillRepeatHelper(20)), findsOneWidget);
+      await tester.pump(const Duration(milliseconds: 700));
+      await tester.pumpAndSettle();
+
+      expect(api.saves.last.pillRepeatMinutes, 45);
+      expect(
+        tester.widget<TextField>(minutesField).controller!.text,
+        '20',
+        reason: 'failed save must roll the field back to the saved value',
+      );
+      expect(find.text(_en.pillRepeatHelper(20)), findsOneWidget);
+      expect(find.text(_en.pillRepeatRangeError), findsNothing);
+      expect(find.text(_en.connectionError), findsOneWidget);
+    });
+
+    for (final cancellation in ['toggle', 'invalid input']) {
+      testWidgets(
+          'pill repeat minutes: $cancellation cancels pending edits before '
+          'a failed save rolls back ($brightness)', (tester) async {
+        final api = _CycleApi()
+          ..alerts = const PartnerAlertPreference(
+            pillEnabled: true,
+            pillRepeatEnabled: true,
+            pillRepeatMinutes: 20,
+          )
+          ..saveDelay = const Duration(milliseconds: 200)
+          ..saveError = Exception('boom');
+        await tester.pumpWidget(_app(
+          brightness,
+          PartnerAlertsScreen(
+            api: api,
+            strings: _en,
+            share: const ShareState(status: 'active', ownerName: 'Her'),
+            reschedule: (_) async => LocalReminderSyncStatus.scheduled,
+          ),
+        ));
+        await tester.pumpAndSettle();
+
+        final minutesField =
+            find.byKey(const ValueKey('pill-repeat-minutes-field'));
+        await tester.enterText(minutesField, '45');
+        if (cancellation == 'toggle') {
+          // Avoid a focus change flushing the debounce before the toggle.
+          tester
+              .widget<SwitchListTile>(
+                  find.byKey(const ValueKey('pill-repeat-toggle')))
+              .onChanged!(false);
+          await tester.pump();
+        } else {
+          await tester.pump(const Duration(milliseconds: 700));
+          // Cancel a newer pending edit while the save of 45 is in flight.
+          await tester.enterText(minutesField, '67');
+          await tester.enterText(minutesField, '0');
+        }
+        await tester.pump(const Duration(milliseconds: 200));
+        await tester.pumpAndSettle();
+
+        expect(tester.widget<TextField>(minutesField).controller!.text, '20');
+        expect(find.text(_en.pillRepeatHelper(20)), findsOneWidget);
+        expect(find.text(_en.pillRepeatRangeError), findsNothing);
+        expect(find.text(_en.connectionError), findsOneWidget);
+        await tester.pump(const Duration(seconds: 1));
+        expect(api.saves, hasLength(1),
+            reason: 'cancelled minutes must never flush later');
+      });
+    }
+
+    testWidgets(
+        'pill repeat minutes: a failed save does not clobber a newer '
+        'unflushed edit, which still saves afterwards ($brightness)',
+        (tester) async {
+      final api = _CycleApi()
+        ..alerts = const PartnerAlertPreference(
+          pillEnabled: true,
+          pillRepeatEnabled: true,
+          pillRepeatMinutes: 20,
+        )
+        ..saveDelay = const Duration(milliseconds: 200)
+        ..saveError = Exception('boom');
+      await tester.pumpWidget(_app(
+        brightness,
+        PartnerAlertsScreen(
+          api: api,
+          strings: _en,
+          share: const ShareState(status: 'active', ownerName: 'Her'),
+          reschedule: (_) async => LocalReminderSyncStatus.scheduled,
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      final minutesField =
+          find.byKey(const ValueKey('pill-repeat-minutes-field'));
+      expect(tester.widget<TextField>(minutesField).controller!.text, '20');
+
+      await tester.enterText(minutesField, '45');
+      // Debounce elapses: a save of 45 is now in flight and will fail.
+      await tester.pump(const Duration(milliseconds: 700));
+
+      // A newer edit lands inside its own debounce window before the failed
+      // save of 45 rolls back.
+      await tester.enterText(minutesField, '67');
+      expect(
+        tester.widget<TextField>(minutesField).controller!.text,
+        '67',
+      );
+
+      // The in-flight save of 45 now fails and rolls back `_pref`, but must
+      // not stomp the newer, still-unflushed 67.
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(find.text(_en.connectionError), findsOneWidget);
+      expect(
+        tester.widget<TextField>(minutesField).controller!.text,
+        '67',
+        reason: 'a newer unflushed edit must survive a stale failed save',
+      );
+
+      api.saveError = null;
+      await tester.pump(const Duration(milliseconds: 700));
+      await tester.pumpAndSettle();
+
+      expect(api.saves.last.pillRepeatMinutes, 67);
+      expect(
+        tester.widget<TextField>(minutesField).controller!.text,
+        '67',
+      );
+      expect(find.text(_en.pillRepeatHelper(67)), findsOneWidget);
     });
 
     testWidgets(
@@ -715,19 +1131,23 @@ void main() {
       );
       expect(
         tester
-            .widget<Switch>(find.descendant(
-              of: find.byKey(const ValueKey('alert-pill')),
-              matching: find.byType(Switch),
-            ))
+            .widget<Switch>(find
+                .descendant(
+                  of: find.byKey(const ValueKey('alert-pill')),
+                  matching: find.byType(Switch),
+                )
+                .first)
             .value,
         isFalse,
       );
       expect(find.text(_en.sharedCalendarOwnerConsentRequired), findsOneWidget);
 
-      await tester.tap(find.descendant(
-        of: find.byKey(const ValueKey('alert-pill')),
-        matching: find.byType(Switch),
-      ));
+      await tester.tap(find
+          .descendant(
+            of: find.byKey(const ValueKey('alert-pill')),
+            matching: find.byType(Switch),
+          )
+          .first);
       await tester.pumpAndSettle();
 
       expect(api.saves.last.pmsEnabled, isTrue);

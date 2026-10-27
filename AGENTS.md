@@ -82,7 +82,7 @@ Android deep-link PKCE:
 - `PUT /api/account/role` — `{role: owner|partner}`; 409 while shared
 - `PUT /api/account/stage` — `{stage: cycling|perimenopause|menopause}` (owner only)
 - `POST /api/share/enable|revoke` (owner), `POST /api/share/accept` (unset role or partner)
-- `GET|PUT /api/partner-alerts` (partner) — `{pms_enabled, pms_time, pill_enabled, pill_time}`
+- `GET|PUT /api/partner-alerts` (partner) — `{pms_enabled, pms_time, pill_enabled, pill_time, pill_repeat_enabled, pill_repeat_minutes}`; `pill_repeat_minutes` is 1-120
 
 ## Testing expectations
 - Backend: `docker compose run --rm test-backend` (store tests also hit PostgreSQL when `TEST_DATABASE_URL` is set; CI sets it)
