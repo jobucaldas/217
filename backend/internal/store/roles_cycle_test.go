@@ -164,6 +164,22 @@ func testRolesCycleAlerts(t *testing.T, s Store) {
 	if err != nil || !reloaded.PillRepeatEnabled || reloaded.PillRepeatMinutes != 30 {
 		t.Fatalf("reloaded alerts: %+v %v", reloaded, err)
 	}
+
+	reminderPref, err := s.GetReminderPreference(owner.ID)
+	if err != nil || reminderPref.RepeatEnabled || reminderPref.RepeatMinutes != model.DefaultRepeatMinutes {
+		t.Fatalf("default reminder preference: %+v %v", reminderPref, err)
+	}
+	savedReminder, err := s.UpsertReminderPreference(owner.ID, model.ReminderPreference{
+		Enabled: true, Time: "21:30", Timezone: "UTC", RepeatEnabled: true, RepeatMinutes: 45,
+	})
+	if err != nil || !savedReminder.Enabled || savedReminder.Time != "21:30" ||
+		!savedReminder.RepeatEnabled || savedReminder.RepeatMinutes != 45 {
+		t.Fatalf("saved reminder preference: %+v %v", savedReminder, err)
+	}
+	reloadedReminder, err := s.GetReminderPreference(owner.ID)
+	if err != nil || !reloadedReminder.RepeatEnabled || reloadedReminder.RepeatMinutes != 45 {
+		t.Fatalf("reloaded reminder preference: %+v %v", reloadedReminder, err)
+	}
 }
 
 func TestMigrationLetsUnusedOwnersPickRole(t *testing.T) {

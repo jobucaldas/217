@@ -653,18 +653,31 @@ func validateReminderPreference(preference model.ReminderPreference) error {
 }
 
 func (h *Handler) UpsertReminderPreference(w http.ResponseWriter, r *http.Request) {
-	var preference model.ReminderPreference
-	if err := json.NewDecoder(r.Body).Decode(&preference); err != nil {
+	userID := getUserID(r)
+	// Start from the currently stored preference (defaults if none yet) so
+	// older clients that omit repeat_enabled/repeat_minutes keep their
+	// existing values instead of resetting them.
+	preference, err := h.store.GetReminderPreference(userID)
+	if err != nil {
+		log.Printf("get reminder preference: %v", err)
+		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+		return
+	}
+	if err := json.NewDecoder(r.Body).Decode(preference); err != nil {
 		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
 		return
 	}
-	if err := validateReminderPreference(preference); err != nil {
+	if err := validateReminderPreference(*preference); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if !model.ValidRepeatMinutes(preference.RepeatMinutes) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "repeat_minutes must be between 1 and 120"})
 		return
 	}
 	// Allow enabling without a web-push subscription so native clients can
 	// schedule OS local notifications. Deliverable still reflects push readiness.
-	result, err := h.store.UpsertReminderPreference(getUserID(r), preference)
+	result, err := h.store.UpsertReminderPreference(userID, *preference)
 	if err != nil {
 		log.Printf("upsert reminder preference: %v", err)
 		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
