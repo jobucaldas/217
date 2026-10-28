@@ -292,3 +292,43 @@ func TestPartnerAlertPreferences(t *testing.T) {
 		t.Fatalf("saved repeat: %+v", pref)
 	}
 }
+
+func TestOwnerReminderRepeatPreference(t *testing.T) {
+	h, s := newTestHandler(t)
+	owner := newUser(t, s, "owner@example.com", "owner")
+	cookie := sessionCookie(t, s, owner.ID)
+
+	w := call(t, h, h.GetReminderPreference, http.MethodGet, "/api/reminders/preferences", cookie, "")
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"repeat_enabled":false`) || !strings.Contains(w.Body.String(), `"repeat_minutes":15`) {
+		t.Fatalf("defaults: %d %s", w.Code, w.Body.String())
+	}
+
+	for _, minutes := range []int{0, -1, 121, 1000} {
+		body := `{"enabled":true,"time":"21:00","timezone":"UTC","repeat_enabled":true,"repeat_minutes":` +
+			strconv.Itoa(minutes) + `}`
+		if w := call(t, h, h.UpsertReminderPreference, http.MethodPut, "/api/reminders/preferences", cookie, body); w.Code != http.StatusBadRequest {
+			t.Fatalf("repeat_minutes=%d: %d %s", minutes, w.Code, w.Body.String())
+		}
+	}
+
+	w = call(t, h, h.UpsertReminderPreference, http.MethodPut, "/api/reminders/preferences", cookie,
+		`{"enabled":true,"time":"21:00","timezone":"UTC","repeat_enabled":true,"repeat_minutes":30}`)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"repeat_enabled":true`) || !strings.Contains(w.Body.String(), `"repeat_minutes":30`) {
+		t.Fatalf("save with repeat: %d %s", w.Code, w.Body.String())
+	}
+	pref, _ := s.GetReminderPreference(owner.ID)
+	if !pref.RepeatEnabled || pref.RepeatMinutes != 30 || !pref.Enabled || pref.Time != "21:00" {
+		t.Fatalf("saved repeat: %+v", pref)
+	}
+
+	// Older clients that omit the new fields keep the already-stored repeat values.
+	w = call(t, h, h.UpsertReminderPreference, http.MethodPut, "/api/reminders/preferences", cookie,
+		`{"enabled":true,"time":"20:30","timezone":"UTC"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("save without repeat fields: %d %s", w.Code, w.Body.String())
+	}
+	pref, _ = s.GetReminderPreference(owner.ID)
+	if pref.Time != "20:30" || !pref.RepeatEnabled || pref.RepeatMinutes != 30 {
+		t.Fatalf("repeat fields reset by old client: %+v", pref)
+	}
+}

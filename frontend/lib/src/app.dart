@@ -12,6 +12,7 @@ import 'i18n.dart';
 import 'models.dart';
 import 'notifications/local_reminders.dart';
 import 'notifications/daily_reminder_sync_queue.dart';
+import 'notifications/owner_reminder_repeat_sync.dart';
 import 'notifications/partner_alert_sync_queue.dart';
 import 'platform/open_url.dart';
 import 'prefs.dart';
@@ -330,19 +331,66 @@ class _App217State extends State<App217> {
   /// Agreed to the privacy notice: the app can load and offer what waited.
   Future<void> _onConsented(SessionSnapshot session) async {
     _applySession(session);
-    final generation = _sessionGeneration;
-    unawaited(_restoreOwnerReminderAfterConsent(session, generation));
+    unawaited(_restoreOwnerReminderAfterConsent(session));
     await _offerPendingInvite();
   }
 
   Future<void> _restoreOwnerReminderAfterConsent(
     SessionSnapshot session,
-    int generation,
   ) async {
     final user = session.user;
     if (session.consentRequired || user == null || !user.isOwner) return;
+    await _syncOwnerReminder();
+  }
 
-    // Consent recovery can race the cancellation started by bootstrap. Let it
+  Future<void>? _ownerReminderSync;
+  bool _ownerReminderSyncDirty = false;
+
+  /// Re-applies the saved owner reminder (and its "pill not logged" repeat
+  /// range) to the OS scheduler from the latest preference and a fresh
+  /// "logged today" read. Shared by consent restore, calendar writes and app
+  /// resume, so logging today's pill stops today's repeats everywhere, not
+  /// just from the settings screen. Concurrent callers (e.g. a consent
+  /// restore racing the calendar's own initial load) coalesce into the same
+  /// in-flight run. A caller that arrives while one is already running
+  /// instead marks it dirty, so exactly one more full run (fresh preference
+  /// and fresh "logged today" read) starts right after - otherwise that
+  /// caller's state change could join a read that started before it and was
+  /// never refreshed. That caller awaits the trailing run rather than the
+  /// stale one it missed; a caller that arrives during the trailing run
+  /// marks it dirty again rather than being dropped.
+  Future<void> _syncOwnerReminder() {
+    final inFlight = _ownerReminderSync;
+    if (inFlight != null) {
+      _ownerReminderSyncDirty = true;
+      return inFlight;
+    }
+    return _ownerReminderSync = _runOwnerReminderSync();
+  }
+
+  Future<void> _runOwnerReminderSync() async {
+    try {
+      await _doSyncOwnerReminder();
+      while (_ownerReminderSyncDirty) {
+        _ownerReminderSyncDirty = false;
+        await _doSyncOwnerReminder();
+      }
+    } finally {
+      _ownerReminderSyncDirty = false;
+      _ownerReminderSync = null;
+    }
+  }
+
+  Future<void> _doSyncOwnerReminder() async {
+    final user = _user;
+    if (user == null || !user.isOwner || _consentRequired) return;
+    // Already known off: no-op without touching the network or the OS
+    // scheduler (and so without ever prompting for notification permission
+    // from this background path).
+    if (_remindersOn == false) return;
+    final generation = _sessionGeneration;
+
+    // Consent recovery or a settings cancellation can be mid-flight. Let it
     // finish before re-arming the saved local reminder.
     await _dailyReminderSyncQueue.whenIdle;
     if (!_isCurrentConsentedOwner(user.id, generation)) return;
@@ -360,18 +408,34 @@ class _App217State extends State<App217> {
         return;
       }
 
+      // Unknown whether today is logged: skip repeats rather than risk a
+      // spam of reminders fired from a stale assumption.
+      var todayLogged = true;
+      if (pref!.repeatEnabled) {
+        try {
+          todayLogged = await fetchTodayLogged(_api);
+        } catch (_) {}
+      }
+      if (!_isCurrentConsentedOwner(user.id, generation) ||
+          !_dailyReminderSyncQueue.isCurrent(reminderRevision)) {
+        return;
+      }
+
       // Permission denial leaves the saved preference on. The reminder
       // settings screen continues to report permissionDenied on its next load.
       await _dailyReminderSyncQueue.scheduleIfCurrent(
         revision: reminderRevision,
         enabled: true,
-        timeHhMm: pref!.time,
+        timeHhMm: pref.time,
         title: '217',
         body: _strings.recordToday,
+        repeatEnabled: pref.repeatEnabled,
+        repeatMinutes: pref.repeatMinutes,
+        todayLogged: todayLogged,
       );
     } catch (_) {
-      // Consent is already accepted; a reminder restore failure must not gate
-      // the calendar or change the saved preference.
+      // Best-effort background resync; a failure must not gate the calendar,
+      // change the saved preference, or spam retries.
     }
   }
 
@@ -756,6 +820,7 @@ class _App217State extends State<App217> {
       cycleRefreshSignal: _stageChanges,
       onShareChanged: (share) => setState(() => _share = share),
       partnerAlertSyncQueue: _partnerAlertSyncQueue,
+      onOwnerReminderResync: _user!.isOwner ? _syncOwnerReminder : null,
       sessionGeneration: () => _sessionGeneration,
       isSessionCurrent: (generation, userId) =>
           mounted &&

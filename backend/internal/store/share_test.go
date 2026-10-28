@@ -256,6 +256,32 @@ func forEachStore(t *testing.T, fn func(t *testing.T, name string, s Store)) {
 	t.Run("postgres", func(t *testing.T) { fn(t, "postgres", pgTestStore(t)) })
 }
 
+// A zero-value RepeatMinutes means "unset", not "every 0 minutes": the store
+// must seed the model default instead of persisting 0 (which PostgreSQL's
+// repeat_minutes_check constraint rejects).
+func TestUpsertReminderPreferenceDefaultsRepeatMinutes(t *testing.T) {
+	forEachStore(t, func(t *testing.T, name string, s Store) {
+		u, err := s.LinkWorkOSIdentity("zero-"+name, "zero-"+name+"@example.com", "Zero", true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		saved, err := s.UpsertReminderPreference(u.ID, model.ReminderPreference{Enabled: true, Time: "08:00", Timezone: "UTC"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if saved.RepeatMinutes != model.DefaultRepeatMinutes || saved.RepeatEnabled {
+			t.Fatalf("zero-value repeat fields on upsert: %+v", saved)
+		}
+		reloaded, err := s.GetReminderPreference(u.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if reloaded.RepeatMinutes != model.DefaultRepeatMinutes || reloaded.RepeatEnabled {
+			t.Fatalf("zero-value repeat fields on reload: %+v", reloaded)
+		}
+	})
+}
+
 func TestReminderTargetsRequireCurrentConsent(t *testing.T) {
 	forEachStore(t, func(t *testing.T, name string, s Store) {
 		no, _ := s.LinkWorkOSIdentity("no-"+name, "no-"+name+"@example.com", "No", true)

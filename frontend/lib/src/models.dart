@@ -342,6 +342,8 @@ class ReminderPreference {
     required this.time,
     required this.timezone,
     required this.deliverable,
+    this.repeatEnabled = false,
+    this.repeatMinutes = 15,
   });
 
   final bool enabled;
@@ -349,12 +351,20 @@ class ReminderPreference {
   final String timezone;
   final bool deliverable;
 
+  /// Repeats the "pill not logged" reminder every [repeatMinutes] (1-120)
+  /// until today's pill is logged or the day ends.
+  final bool repeatEnabled;
+  final int repeatMinutes;
+
   factory ReminderPreference.fromJson(Map<String, dynamic> json) {
     return ReminderPreference(
       enabled: json['enabled'] as bool? ?? false,
       time: (json['time'] as String?) ?? '09:00',
       timezone: (json['timezone'] as String?) ?? 'UTC',
       deliverable: json['deliverable'] as bool? ?? false,
+      // Older servers do not send these: default to off/15.
+      repeatEnabled: json['repeat_enabled'] as bool? ?? false,
+      repeatMinutes: (json['repeat_minutes'] as num?)?.toInt() ?? 15,
     );
   }
 }

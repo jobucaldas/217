@@ -371,7 +371,7 @@ func (s *MemoryStore) ConsumeOAuthAttempt(state, binding string) (OAuthAttempt, 
 func (s *MemoryStore) GetReminderPreference(userID string) (*model.ReminderPreference, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	preference := model.ReminderPreference{Time: model.DefaultReminderTime, Timezone: model.DefaultReminderTimezone}
+	preference := model.ReminderPreference{Time: model.DefaultReminderTime, Timezone: model.DefaultReminderTimezone, RepeatMinutes: model.DefaultRepeatMinutes}
 	if existing, ok := s.preferences[userID]; ok {
 		preference = *existing
 	}
@@ -387,6 +387,9 @@ func (s *MemoryStore) GetReminderPreference(userID string) (*model.ReminderPrefe
 func (s *MemoryStore) UpsertReminderPreference(userID string, preference model.ReminderPreference) (*model.ReminderPreference, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if preference.RepeatMinutes == 0 {
+		preference.RepeatMinutes = model.DefaultRepeatMinutes
+	}
 	now := time.Now().UTC()
 	if existing, ok := s.preferences[userID]; ok {
 		preference.CreatedAt = existing.CreatedAt

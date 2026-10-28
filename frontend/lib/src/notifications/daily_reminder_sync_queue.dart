@@ -5,6 +5,9 @@ typedef DailyReminderScheduler = Future<LocalReminderSyncResult> Function({
   required String timeHhMm,
   required String title,
   required String body,
+  bool repeatEnabled,
+  int repeatMinutes,
+  bool todayLogged,
 });
 
 /// Serializes local daily reminder operations and invalidates stale restores.
@@ -31,6 +34,9 @@ class DailyReminderSyncQueue {
     required String timeHhMm,
     required String title,
     required String body,
+    bool repeatEnabled = false,
+    int repeatMinutes = 15,
+    bool todayLogged = false,
   }) {
     final revision = beginIntent();
     return _enqueue(
@@ -39,6 +45,9 @@ class DailyReminderSyncQueue {
       timeHhMm: timeHhMm,
       title: title,
       body: body,
+      repeatEnabled: repeatEnabled,
+      repeatMinutes: repeatMinutes,
+      todayLogged: todayLogged,
     );
   }
 
@@ -49,6 +58,9 @@ class DailyReminderSyncQueue {
     required String timeHhMm,
     required String title,
     required String body,
+    bool repeatEnabled = false,
+    int repeatMinutes = 15,
+    bool todayLogged = false,
   }) =>
       _enqueue(
         revision: revision,
@@ -56,6 +68,9 @@ class DailyReminderSyncQueue {
         timeHhMm: timeHhMm,
         title: title,
         body: body,
+        repeatEnabled: repeatEnabled,
+        repeatMinutes: repeatMinutes,
+        todayLogged: todayLogged,
       );
 
   /// Consent, logout, or account changes invalidate pending restores first.
@@ -80,6 +95,9 @@ class DailyReminderSyncQueue {
     required String timeHhMm,
     required String title,
     required String body,
+    bool repeatEnabled = false,
+    int repeatMinutes = 15,
+    bool todayLogged = false,
     bool runEvenIfSuperseded = false,
   }) {
     final operation = _tail.then((_) async {
@@ -89,6 +107,9 @@ class DailyReminderSyncQueue {
         timeHhMm: timeHhMm,
         title: title,
         body: body,
+        repeatEnabled: repeatEnabled,
+        repeatMinutes: repeatMinutes,
+        todayLogged: todayLogged,
       );
     });
     _tail = operation.then<void>((_) {}, onError: (Object _) {});

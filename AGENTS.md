@@ -73,6 +73,9 @@ Android deep-link PKCE:
 - `GET /api/stats?year=YYYY&month=MM`
 - `GET /api/cycle?today=YYYY-MM-DD` — period starts + next predicted periods/PMS windows
 
+### Reminders (auth required)
+- `GET|PUT /api/reminders/preferences` — `{enabled, time, timezone, repeat_enabled, repeat_minutes}`; `repeat_minutes` is 1-120 and repeats the owner's own "pill not logged" reminder until logged or day end
+
 ### Privacy (auth required; reachable before consent)
 - `PUT /api/account/consent` — `{version}`; every other data endpoint answers 403 `consent required` until the current `model.ConsentVersion` is agreed
 - `GET /api/account/export` — all data about the caller (JSON attachment)

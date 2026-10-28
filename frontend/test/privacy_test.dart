@@ -225,6 +225,9 @@ void main() {
         required timeHhMm,
         required title,
         required body,
+        repeatEnabled = false,
+        repeatMinutes = 15,
+        todayLogged = false,
       }) async {
         if (enabled) {
           reminderOperations.add('schedule:$timeHhMm');
@@ -260,13 +263,18 @@ void main() {
     );
     await tester.pumpAndSettle();
     await tester.pump(const Duration(milliseconds: 100));
+    // Consent restore and the newly-mounted calendar's own initial load both
+    // ask for a resync around the same time; the second arrives while the
+    // first is still waiting on the cancel above, so it runs again right
+    // after as a trailing sync (same saved plan, so the same schedule call
+    // twice) rather than silently joining a read it arrived too late for.
     expect(
       reminderOperations,
-      ['cancel-start', 'cancel-finished', 'schedule:07:35'],
+      ['cancel-start', 'cancel-finished', 'schedule:07:35', 'schedule:07:35'],
       reason:
           'role=${server.role}, preferenceCalls=${server.reminderPreferenceCalls}, calls=${server.calls}',
     );
-    expect(server.reminderPreferenceCalls, 1);
+    expect(server.reminderPreferenceCalls, 2);
   });
 
   testWidgets('settings hide consent-gated controls until agreed',
@@ -440,5 +448,8 @@ Future<LocalReminderSyncResult> _noScheduler({
   required String timeHhMm,
   required String title,
   required String body,
+  bool repeatEnabled = false,
+  int repeatMinutes = 15,
+  bool todayLogged = false,
 }) async =>
     const LocalReminderSyncResult(LocalReminderSyncStatus.scheduled);

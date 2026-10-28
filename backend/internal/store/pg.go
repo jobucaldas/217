@@ -371,10 +371,10 @@ func (s *PGStore) LinkWorkOSIdentity(subject, verifiedEmail, name string, author
 }
 
 func (s *PGStore) GetReminderPreference(userID string) (*model.ReminderPreference, error) {
-	preference := &model.ReminderPreference{Time: model.DefaultReminderTime, Timezone: model.DefaultReminderTimezone}
-	err := s.db.QueryRow(`SELECT enabled, reminder_time, timezone, created_at, updated_at
+	preference := &model.ReminderPreference{Time: model.DefaultReminderTime, Timezone: model.DefaultReminderTimezone, RepeatMinutes: model.DefaultRepeatMinutes}
+	err := s.db.QueryRow(`SELECT enabled, reminder_time, timezone, repeat_enabled, repeat_minutes, created_at, updated_at
 		FROM reminder_preferences WHERE user_id = $1`, userID).
-		Scan(&preference.Enabled, &preference.Time, &preference.Timezone, &preference.CreatedAt, &preference.UpdatedAt)
+		Scan(&preference.Enabled, &preference.Time, &preference.Timezone, &preference.RepeatEnabled, &preference.RepeatMinutes, &preference.CreatedAt, &preference.UpdatedAt)
 	if err != nil && err != sql.ErrNoRows {
 		return nil, fmt.Errorf("getting reminder preference: %w", err)
 	}
@@ -388,14 +388,18 @@ func (s *PGStore) GetReminderPreference(userID string) (*model.ReminderPreferenc
 }
 
 func (s *PGStore) UpsertReminderPreference(userID string, preference model.ReminderPreference) (*model.ReminderPreference, error) {
+	if preference.RepeatMinutes == 0 {
+		preference.RepeatMinutes = model.DefaultRepeatMinutes
+	}
 	result := &model.ReminderPreference{}
-	err := s.db.QueryRow(`INSERT INTO reminder_preferences (user_id, enabled, reminder_time, timezone)
-		VALUES ($1, $2, $3, $4)
+	err := s.db.QueryRow(`INSERT INTO reminder_preferences (user_id, enabled, reminder_time, timezone, repeat_enabled, repeat_minutes)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT (user_id) DO UPDATE SET enabled = EXCLUDED.enabled,
-			reminder_time = EXCLUDED.reminder_time, timezone = EXCLUDED.timezone, updated_at = NOW()
-		RETURNING enabled, reminder_time, timezone, created_at, updated_at`,
-		userID, preference.Enabled, preference.Time, preference.Timezone).
-		Scan(&result.Enabled, &result.Time, &result.Timezone, &result.CreatedAt, &result.UpdatedAt)
+			reminder_time = EXCLUDED.reminder_time, timezone = EXCLUDED.timezone,
+			repeat_enabled = EXCLUDED.repeat_enabled, repeat_minutes = EXCLUDED.repeat_minutes, updated_at = NOW()
+		RETURNING enabled, reminder_time, timezone, repeat_enabled, repeat_minutes, created_at, updated_at`,
+		userID, preference.Enabled, preference.Time, preference.Timezone, preference.RepeatEnabled, preference.RepeatMinutes).
+		Scan(&result.Enabled, &result.Time, &result.Timezone, &result.RepeatEnabled, &result.RepeatMinutes, &result.CreatedAt, &result.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("upserting reminder preference: %w", err)
 	}
