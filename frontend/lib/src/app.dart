@@ -344,6 +344,7 @@ class _App217State extends State<App217> {
   }
 
   Future<void>? _ownerReminderSync;
+  bool _ownerReminderSyncDirty = false;
 
   /// Re-applies the saved owner reminder (and its "pill not logged" repeat
   /// range) to the OS scheduler from the latest preference and a fresh
@@ -351,11 +352,34 @@ class _App217State extends State<App217> {
   /// resume, so logging today's pill stops today's repeats everywhere, not
   /// just from the settings screen. Concurrent callers (e.g. a consent
   /// restore racing the calendar's own initial load) coalesce into the same
-  /// fetch, so neither double-schedules nor double-counts preference reads.
-  Future<void> _syncOwnerReminder() =>
-      _ownerReminderSync ??= _doSyncOwnerReminder().whenComplete(() {
-        _ownerReminderSync = null;
-      });
+  /// in-flight run. A caller that arrives while one is already running
+  /// instead marks it dirty, so exactly one more full run (fresh preference
+  /// and fresh "logged today" read) starts right after - otherwise that
+  /// caller's state change could join a read that started before it and was
+  /// never refreshed. That caller awaits the trailing run rather than the
+  /// stale one it missed; a caller that arrives during the trailing run
+  /// marks it dirty again rather than being dropped.
+  Future<void> _syncOwnerReminder() {
+    final inFlight = _ownerReminderSync;
+    if (inFlight != null) {
+      _ownerReminderSyncDirty = true;
+      return inFlight;
+    }
+    return _ownerReminderSync = _runOwnerReminderSync();
+  }
+
+  Future<void> _runOwnerReminderSync() async {
+    try {
+      await _doSyncOwnerReminder();
+      while (_ownerReminderSyncDirty) {
+        _ownerReminderSyncDirty = false;
+        await _doSyncOwnerReminder();
+      }
+    } finally {
+      _ownerReminderSyncDirty = false;
+      _ownerReminderSync = null;
+    }
+  }
 
   Future<void> _doSyncOwnerReminder() async {
     final user = _user;

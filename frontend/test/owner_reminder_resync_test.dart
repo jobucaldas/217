@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -23,6 +24,36 @@ class _OwnerServer {
   int repeatMinutes = 15;
   int reminderPreferenceCalls = 0;
   final Map<String, Map<String, dynamic>> entries = {};
+
+  /// When true, every GET /api/reminders/preferences parks on its own
+  /// [Completer] instead of responding, so a test can hold one resync's
+  /// preference read open while others arrive behind it.
+  bool gateReminderPreferenceReads = false;
+  final _pendingPreferenceGates = <Completer<void>>[];
+
+  int get pendingPreferenceGateCount => _pendingPreferenceGates.length;
+
+  /// Releases the oldest still-parked preference read, letting its resync
+  /// run continue.
+  void releaseOldestPreferenceGate() =>
+      _pendingPreferenceGates.removeAt(0).complete();
+
+  /// 1-based count of GET /api/entries calls seen so far.
+  int entriesCalls = 0;
+  int? _gateAtEntriesCall;
+  Completer<void>? _entriesGateCompleter;
+
+  /// Parks the [callNumber]th GET /api/entries call (counting from server
+  /// creation) until [releaseGatedEntriesRead] is called. The response it
+  /// eventually returns reflects the entries snapshot as of when the
+  /// request arrived, mirroring a real server racing a mutation that lands
+  /// while the read is still in flight.
+  void gateEntriesCall(int callNumber) {
+    _gateAtEntriesCall = callNumber;
+    _entriesGateCompleter = Completer<void>();
+  }
+
+  void releaseGatedEntriesRead() => _entriesGateCompleter?.complete();
 
   final today = DateTime.now();
   late final todayKey = DateFormat('yyyy-MM-dd').format(today);
@@ -52,6 +83,11 @@ class _OwnerServer {
               }
               if (path == '/api/reminders/preferences') {
                 reminderPreferenceCalls++;
+                if (gateReminderPreferenceReads) {
+                  final gate = Completer<void>();
+                  _pendingPreferenceGates.add(gate);
+                  await gate.future;
+                }
                 return http.Response(
                   jsonEncode({
                     'enabled': reminderEnabled,
@@ -65,8 +101,13 @@ class _OwnerServer {
                 );
               }
               if (path == '/api/entries') {
+                entriesCalls++;
+                final snapshot = entries.values.toList();
+                if (entriesCalls == _gateAtEntriesCall) {
+                  await _entriesGateCompleter!.future;
+                }
                 return http.Response(
-                  jsonEncode({'entries': entries.values.toList()}),
+                  jsonEncode({'entries': snapshot}),
                   200,
                 );
               }
@@ -250,5 +291,108 @@ void main() {
     // Repeat is off: no fresh "logged today" read is needed, so the entries
     // endpoint for it is skipped and todayLogged keeps its default.
     expect(log.todayLogged.last, isTrue);
+  });
+
+  testWidgets(
+      'a resync that arrives while an earlier one\'s logged-today read is '
+      'still pending ends with a schedule reflecting the new state',
+      (tester) async {
+    final server = _OwnerServer();
+    final log = _SchedulerLog();
+    final api = server.client();
+    await tester.pumpWidget(App217(
+      config: api.config,
+      api: api,
+      dailyReminderScheduler: log.scheduler,
+    ));
+    await tester.pumpAndSettle();
+    expect(log.todayLogged, [false]);
+
+    // The calendar's own grid load always fetches the current, previous and
+    // next month first; the resync's own "logged today" read for the
+    // current month is the next /api/entries call after those three. Gate
+    // that one so it's still in flight when a second resync arrives.
+    server.gateEntriesCall(server.entriesCalls + 4);
+
+    // Earlier resync: reaches its logged-today read and parks there.
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    expect(log.todayLogged, [false], reason: 'still parked, no new schedule');
+
+    // Another device logs today's pill while that read is in flight.
+    server.entries[server.todayKey] = {
+      'date': server.todayKey,
+      'taken': true,
+      'notes': '',
+      'heart': false,
+      'period': false,
+    };
+
+    // Later resync: arrives mid-flight, so it only marks the run dirty.
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    expect(log.todayLogged, [false], reason: 'still parked, no new schedule');
+
+    // Release the stale read: the earlier run finishes (with the old,
+    // stale todayLogged), then exactly one trailing run re-reads the fresh
+    // preference and entries and produces the final schedule.
+    server.releaseGatedEntriesRead();
+    await tester.pumpAndSettle();
+
+    expect(log.todayLogged, [false, false, true]);
+    expect(log.todayLogged.last, isTrue,
+        reason: 'the trailing run must reflect the new logged-today state');
+  });
+
+  testWidgets(
+      'three overlapping resync calls while a preference read is pending '
+      'produce exactly one trailing run', (tester) async {
+    final server = _OwnerServer();
+    final log = _SchedulerLog();
+    final api = server.client();
+    await tester.pumpWidget(App217(
+      config: api.config,
+      api: api,
+      dailyReminderScheduler: log.scheduler,
+    ));
+    await tester.pumpAndSettle();
+    // Startup reads preferences both for the reminder hint bubble and for
+    // the owner resync itself; only the latter is relevant here.
+    final afterStartup = server.reminderPreferenceCalls;
+
+    server.gateReminderPreferenceReads = true;
+
+    // Call A starts its preference read and parks on the gate.
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    expect(server.pendingPreferenceGateCount, 1);
+    expect(server.reminderPreferenceCalls, afterStartup + 1);
+
+    // Call B arrives while A is in flight: coalesces into A's run instead
+    // of starting its own preference read.
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    expect(server.pendingPreferenceGateCount, 1);
+    expect(server.reminderPreferenceCalls, afterStartup + 1);
+
+    // Call C arrives too: still just one dirty flag, not a second queued run.
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    expect(server.pendingPreferenceGateCount, 1);
+    expect(server.reminderPreferenceCalls, afterStartup + 1);
+
+    // Let A finish: because B and C arrived mid-flight, exactly one
+    // trailing run starts right after, issuing one more preference read.
+    server.releaseOldestPreferenceGate();
+    await tester.pump();
+    expect(server.reminderPreferenceCalls, afterStartup + 2);
+    expect(server.pendingPreferenceGateCount, 1);
+
+    // Let the trailing run finish. Nothing arrived while it was running,
+    // so no further run starts.
+    server.releaseOldestPreferenceGate();
+    await tester.pumpAndSettle();
+    expect(server.reminderPreferenceCalls, afterStartup + 2);
+    expect(log.todayLogged.length, 3, reason: 'startup + A + one trailing run');
   });
 }
