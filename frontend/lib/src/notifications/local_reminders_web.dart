@@ -13,6 +13,9 @@ Future<LocalReminderSyncResult> syncLocalDailyReminder({
   required String timeHhMm,
   required String title,
   required String body,
+  bool repeatEnabled = false,
+  int repeatMinutes = 15,
+  bool todayLogged = false,
 }) async {
   if (!html.Notification.supported) {
     return const LocalReminderSyncResult(LocalReminderSyncStatus.unsupported);

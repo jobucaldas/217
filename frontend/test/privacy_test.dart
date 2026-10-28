@@ -225,6 +225,9 @@ void main() {
         required timeHhMm,
         required title,
         required body,
+        repeatEnabled = false,
+        repeatMinutes = 15,
+        todayLogged = false,
       }) async {
         if (enabled) {
           reminderOperations.add('schedule:$timeHhMm');
@@ -440,5 +443,8 @@ Future<LocalReminderSyncResult> _noScheduler({
   required String timeHhMm,
   required String title,
   required String body,
+  bool repeatEnabled = false,
+  int repeatMinutes = 15,
+  bool todayLogged = false,
 }) async =>
     const LocalReminderSyncResult(LocalReminderSyncStatus.scheduled);

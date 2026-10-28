@@ -518,6 +518,8 @@ class ApiClient {
     required bool enabled,
     required String time,
     required String timezone,
+    bool repeatEnabled = false,
+    int repeatMinutes = 15,
   }) async {
     final response = await _send(
       'PUT',
@@ -526,6 +528,8 @@ class ApiClient {
         'enabled': enabled,
         'time': time,
         'timezone': timezone,
+        'repeat_enabled': repeatEnabled,
+        'repeat_minutes': repeatMinutes,
       },
     );
     if (response.statusCode != 200) {

@@ -276,6 +276,11 @@ class Strings {
         'Neste navegador, o lembrete em segundo plano precisa de notificações push do servidor.',
         'En este navegador, los recordatorios en segundo plano necesitan notificaciones push del servidor.',
       );
+  String reminderRepeatHelper(int minutes) => _t(
+        'Repeats every $minutes min until you log today’s pill, until the end of the day',
+        'Repete a cada $minutes min até você registrar a pílula de hoje, até o fim do dia',
+        'Se repite cada $minutes min hasta que registres la píldora de hoy, hasta el final del día',
+      );
 
   // Updates (Android only)
   String get autoUpdateTitle => _t(

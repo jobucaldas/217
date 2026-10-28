@@ -5,6 +5,7 @@ import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:timezone/data/latest_all.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
 
+import 'owner_reminder_repeat_plan.dart';
 import 'partner_alert_plan.dart';
 import 'reminder_schedule.dart';
 
@@ -26,6 +27,9 @@ Future<LocalReminderSyncResult> syncLocalDailyReminder({
   required String timeHhMm,
   required String title,
   required String body,
+  bool repeatEnabled = false,
+  int repeatMinutes = 15,
+  bool todayLogged = false,
 }) async {
   if (!supportsLocalReminders) {
     return const LocalReminderSyncResult(LocalReminderSyncStatus.unsupported);
@@ -41,6 +45,7 @@ Future<LocalReminderSyncResult> syncLocalDailyReminder({
 
     if (!enabled) {
       await _plugin.cancel(_notifId);
+      await _cancelOwnerReminderRepeats();
       return const LocalReminderSyncResult(LocalReminderSyncStatus.cancelled);
     }
 
@@ -71,6 +76,36 @@ Future<LocalReminderSyncResult> syncLocalDailyReminder({
           UILocalNotificationDateInterpretation.absoluteTime,
       matchDateTimeComponents: DateTimeComponents.time,
     );
+
+    // Repeat range cleared in full on every sync (idempotent replan), so a
+    // logged pill or a disabled repeat drops any pending occurrence.
+    await _cancelOwnerReminderRepeats();
+    if (repeatEnabled) {
+      final repeats = planOwnerReminderRepeat(
+        now: DateTime.now(),
+        enabled: enabled,
+        repeatEnabled: repeatEnabled,
+        repeatMinutes: repeatMinutes,
+        timeHhMm: timeHhMm,
+        todayLogged: todayLogged,
+        title: title,
+        body: body,
+      );
+      for (final repeat in repeats) {
+        await _plugin.zonedSchedule(
+          repeat.id,
+          repeat.title,
+          repeat.body,
+          tz.TZDateTime.from(repeat.when, tz.local),
+          details,
+          androidScheduleMode: exact
+              ? AndroidScheduleMode.exactAllowWhileIdle
+              : AndroidScheduleMode.inexactAllowWhileIdle,
+          uiLocalNotificationDateInterpretation:
+              UILocalNotificationDateInterpretation.absoluteTime,
+        );
+      }
+    }
     return LocalReminderSyncResult(
       LocalReminderSyncStatus.scheduled,
       exact: exact,
@@ -79,6 +114,12 @@ Future<LocalReminderSyncResult> syncLocalDailyReminder({
     return const LocalReminderSyncResult(LocalReminderSyncStatus.unsupported);
   } catch (_) {
     return const LocalReminderSyncResult(LocalReminderSyncStatus.failed);
+  }
+}
+
+Future<void> _cancelOwnerReminderRepeats() async {
+  for (var i = 0; i < ownerReminderRepeatIdCount; i++) {
+    await _plugin.cancel(ownerReminderRepeatIdBase + i);
   }
 }
 

@@ -16,6 +16,9 @@ void main() {
       required timeHhMm,
       required title,
       required body,
+      repeatEnabled = false,
+      repeatMinutes = 15,
+      todayLogged = false,
     }) async {
       calls.add('${enabled ? 'schedule' : 'cancel'}:$timeHhMm');
       if (enabled) {
@@ -60,6 +63,9 @@ void main() {
       required timeHhMm,
       required title,
       required body,
+      repeatEnabled = false,
+      repeatMinutes = 15,
+      todayLogged = false,
     }) async {
       schedules++;
       return const LocalReminderSyncResult(LocalReminderSyncStatus.scheduled);
@@ -89,6 +95,9 @@ void main() {
       required timeHhMm,
       required title,
       required body,
+      repeatEnabled = false,
+      repeatMinutes = 15,
+      todayLogged = false,
     }) async {
       calls.add(enabled);
       if (enabled) {

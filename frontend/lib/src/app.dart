@@ -12,6 +12,7 @@ import 'i18n.dart';
 import 'models.dart';
 import 'notifications/local_reminders.dart';
 import 'notifications/daily_reminder_sync_queue.dart';
+import 'notifications/owner_reminder_repeat_sync.dart';
 import 'notifications/partner_alert_sync_queue.dart';
 import 'platform/open_url.dart';
 import 'prefs.dart';
@@ -360,14 +361,30 @@ class _App217State extends State<App217> {
         return;
       }
 
+      // Unknown whether today is logged: skip repeats rather than risk a
+      // spam of reminders fired from a stale assumption.
+      var todayLogged = true;
+      if (pref!.repeatEnabled) {
+        try {
+          todayLogged = await fetchTodayLogged(_api);
+        } catch (_) {}
+      }
+      if (!_isCurrentConsentedOwner(user.id, generation) ||
+          !_dailyReminderSyncQueue.isCurrent(reminderRevision)) {
+        return;
+      }
+
       // Permission denial leaves the saved preference on. The reminder
       // settings screen continues to report permissionDenied on its next load.
       await _dailyReminderSyncQueue.scheduleIfCurrent(
         revision: reminderRevision,
         enabled: true,
-        timeHhMm: pref!.time,
+        timeHhMm: pref.time,
         title: '217',
         body: _strings.recordToday,
+        repeatEnabled: pref.repeatEnabled,
+        repeatMinutes: pref.repeatMinutes,
+        todayLogged: todayLogged,
       );
     } catch (_) {
       // Consent is already accepted; a reminder restore failure must not gate
