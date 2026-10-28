@@ -388,6 +388,9 @@ func (s *PGStore) GetReminderPreference(userID string) (*model.ReminderPreferenc
 }
 
 func (s *PGStore) UpsertReminderPreference(userID string, preference model.ReminderPreference) (*model.ReminderPreference, error) {
+	if preference.RepeatMinutes == 0 {
+		preference.RepeatMinutes = model.DefaultRepeatMinutes
+	}
 	result := &model.ReminderPreference{}
 	err := s.db.QueryRow(`INSERT INTO reminder_preferences (user_id, enabled, reminder_time, timezone, repeat_enabled, repeat_minutes)
 		VALUES ($1, $2, $3, $4, $5, $6)
