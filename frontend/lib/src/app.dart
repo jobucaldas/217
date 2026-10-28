@@ -331,19 +331,42 @@ class _App217State extends State<App217> {
   /// Agreed to the privacy notice: the app can load and offer what waited.
   Future<void> _onConsented(SessionSnapshot session) async {
     _applySession(session);
-    final generation = _sessionGeneration;
-    unawaited(_restoreOwnerReminderAfterConsent(session, generation));
+    unawaited(_restoreOwnerReminderAfterConsent(session));
     await _offerPendingInvite();
   }
 
   Future<void> _restoreOwnerReminderAfterConsent(
     SessionSnapshot session,
-    int generation,
   ) async {
     final user = session.user;
     if (session.consentRequired || user == null || !user.isOwner) return;
+    await _syncOwnerReminder();
+  }
 
-    // Consent recovery can race the cancellation started by bootstrap. Let it
+  Future<void>? _ownerReminderSync;
+
+  /// Re-applies the saved owner reminder (and its "pill not logged" repeat
+  /// range) to the OS scheduler from the latest preference and a fresh
+  /// "logged today" read. Shared by consent restore, calendar writes and app
+  /// resume, so logging today's pill stops today's repeats everywhere, not
+  /// just from the settings screen. Concurrent callers (e.g. a consent
+  /// restore racing the calendar's own initial load) coalesce into the same
+  /// fetch, so neither double-schedules nor double-counts preference reads.
+  Future<void> _syncOwnerReminder() =>
+      _ownerReminderSync ??= _doSyncOwnerReminder().whenComplete(() {
+        _ownerReminderSync = null;
+      });
+
+  Future<void> _doSyncOwnerReminder() async {
+    final user = _user;
+    if (user == null || !user.isOwner || _consentRequired) return;
+    // Already known off: no-op without touching the network or the OS
+    // scheduler (and so without ever prompting for notification permission
+    // from this background path).
+    if (_remindersOn == false) return;
+    final generation = _sessionGeneration;
+
+    // Consent recovery or a settings cancellation can be mid-flight. Let it
     // finish before re-arming the saved local reminder.
     await _dailyReminderSyncQueue.whenIdle;
     if (!_isCurrentConsentedOwner(user.id, generation)) return;
@@ -387,8 +410,8 @@ class _App217State extends State<App217> {
         todayLogged: todayLogged,
       );
     } catch (_) {
-      // Consent is already accepted; a reminder restore failure must not gate
-      // the calendar or change the saved preference.
+      // Best-effort background resync; a failure must not gate the calendar,
+      // change the saved preference, or spam retries.
     }
   }
 
@@ -773,6 +796,7 @@ class _App217State extends State<App217> {
       cycleRefreshSignal: _stageChanges,
       onShareChanged: (share) => setState(() => _share = share),
       partnerAlertSyncQueue: _partnerAlertSyncQueue,
+      onOwnerReminderResync: _user!.isOwner ? _syncOwnerReminder : null,
       sessionGeneration: () => _sessionGeneration,
       isSessionCurrent: (generation, userId) =>
           mounted &&

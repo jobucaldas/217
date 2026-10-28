@@ -28,6 +28,7 @@ class CalendarScreen extends StatefulWidget {
     this.onShareChanged,
     this.partnerAlertScheduler,
     this.partnerAlertSyncQueue,
+    this.onOwnerReminderResync,
     this.sessionGeneration,
     this.isSessionCurrent,
     this.palette = AppPalette.blue,
@@ -45,6 +46,13 @@ class CalendarScreen extends StatefulWidget {
   final Future<LocalReminderSyncStatus> Function(List<PlannedAlert>)?
       partnerAlertScheduler;
   final PartnerAlertSyncQueue? partnerAlertSyncQueue;
+
+  /// Owner only: replans the daily reminder and its "pill not logged"
+  /// repeats from the latest preference and a fresh "logged today" read.
+  /// Called after the cycle (and so today's entry) refreshes, which covers
+  /// calendar writes, app resume, and foreground refreshes alike.
+  final Future<void> Function()? onOwnerReminderResync;
+
   /// Read live: a refresh signal can fire before this widget is rebuilt.
   final int Function()? sessionGeneration;
   final bool Function(int generation, String userId)? isSessionCurrent;
@@ -310,6 +318,8 @@ class _CalendarScreenState extends State<CalendarScreen>
         sessionGeneration: sessionGeneration,
         queueRevision: queueRevision,
       );
+    } else if (widget.user.isOwner) {
+      await widget.onOwnerReminderResync?.call();
     }
   }
 
