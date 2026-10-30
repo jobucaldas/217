@@ -45,7 +45,7 @@ func TestWorkOSExchangeAgainstMockAuthKit(t *testing.T) {
 	}
 	provider.apiBaseURL = server.URL
 	provider.httpClient = server.Client()
-	info, err := provider.ExchangeWithRedirect(context.Background(), "auth-code", "pkce-verifier", "com.jobucaldas.a217://auth/callback")
+	info, err := provider.ExchangeWithRedirect(context.Background(), "auth-code", "pkce-verifier", "com.caldasstudios.a217://auth/callback")
 	if err != nil {
 		t.Fatalf("exchange: %v", err)
 	}
@@ -72,9 +72,20 @@ func TestWorkOSExchangeAgainstMockAuthKit(t *testing.T) {
 	defer failing.Close()
 	provider.apiBaseURL = failing.URL
 	provider.httpClient = failing.Client()
-	_, err = provider.ExchangeWithRedirect(context.Background(), "auth-code", "pkce-verifier", "com.jobucaldas.a217://auth/callback")
+	_, err = provider.ExchangeWithRedirect(context.Background(), "auth-code", "pkce-verifier", "com.caldasstudios.a217://auth/callback")
 	if err == nil || !strings.Contains(err.Error(), "email_verification_required") ||
 		strings.Contains(err.Error(), "leak@example.com") || strings.Contains(err.Error(), "tok_secret") {
 		t.Fatalf("exchange error must name the code without personal data: %v", err)
+	}
+}
+
+func TestIsNativeRedirectURIAcceptsLegacyScheme(t *testing.T) {
+	for _, uri := range []string{NativeAuthRedirectURI, LegacyNativeAuthRedirectURI, DesktopAuthRedirectURI} {
+		if !IsNativeRedirectURI(uri) {
+			t.Errorf("%q should be accepted", uri)
+		}
+	}
+	if IsNativeRedirectURI("com.evil.a217://auth/callback") {
+		t.Error("unknown scheme accepted")
 	}
 }

@@ -2,7 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 /// Android intents bridge (share sheet) in `MainActivity.kt`.
-const intentsChannel = MethodChannel('com.jobucaldas.a217/intents');
+const intentsChannel = MethodChannel('com.caldasstudios.a217/intents');
 
 /// True when this build can open the OS share sheet (Android).
 bool get canShareNatively =>
