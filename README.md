@@ -62,6 +62,7 @@ services:
       TLS_CERT_FILE: /certs/backend/tls.crt
       TLS_KEY_FILE: /certs/backend/tls.key
       APP_BASE_URL: ${APP_BASE_URL:?set APP_BASE_URL in .env}
+      APP_ALLOWED_ORIGINS: ${APP_ALLOWED_ORIGINS:-}
       WORKOS_CLIENT_ID: ${WORKOS_CLIENT_ID:?set WORKOS_CLIENT_ID in .env}
       WORKOS_API_KEY: ${WORKOS_API_KEY:-}
       PRIVACY_CONTACT: ${PRIVACY_CONTACT:-}
@@ -105,6 +106,7 @@ POSTGRES_PASSWORD=
 # Encrypts personal data before it is stored, e.g.: openssl rand -base64 32
 DATA_ENCRYPTION_KEY=
 APP_BASE_URL=https://217.example.com   # or http://localhost:8787 to try it
+# APP_ALLOWED_ORIGINS=https://217.example.com,https://217.example.org  # optional: serve sign-in on more hosts
 WORKOS_CLIENT_ID=client_...
 WORKOS_API_KEY=sk_...                  # optional: also deletes the WorkOS sign-in identity during account erasure
 # PRIVACY_CONTACT=privacy@example.com  # who answers privacy requests (shown in the app)
@@ -117,6 +119,8 @@ WORKOS_API_KEY=sk_...                  # optional: also deletes the WorkOS sign-
 docker compose up -d
 curl http://localhost:8787/api/auth/config   # {"authkit":true,...}
 ```
+
+To serve the web app on more than one host, list every origin in `APP_ALLOWED_ORIGINS` (comma-separated, same rules as `APP_BASE_URL`; the base URL is always included) and register each `https://<host>/api/auth/workos/callback` in WorkOS. Sign-in uses the host the request arrived on (`X-Forwarded-Host` from your proxy, else `Host`) only if it is listed, otherwise `APP_BASE_URL`. Each host keeps its own session; invite links use `APP_BASE_URL`.
 
 Open `APP_BASE_URL`. Update with `docker compose pull && docker compose up -d`; pin `:nightly` to a `YYYYMMDDHHMMSS_<shortsha>` tag to stay on a fixed version. Data is in the `pgdata` volume.
 

@@ -249,7 +249,7 @@ func TestMemoryStore_LinkWorkOSIdentityCreatesOAuthUser(t *testing.T) {
 
 func TestMemoryStore_OAuthAttemptOneTimeAndExpiring(t *testing.T) {
 	s := NewMemoryStore()
-	if err := s.CreateOAuthAttempt("state-1", "binding-1", "verifier-1", "nonce-1", time.Now().Add(time.Minute)); err != nil {
+	if err := s.CreateOAuthAttempt("state-1", "binding-1", "verifier-1", "nonce-1", "", time.Now().Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	verifier, err := s.ConsumeOAuthAttempt("state-1", "binding-1")
@@ -262,13 +262,13 @@ func TestMemoryStore_OAuthAttemptOneTimeAndExpiring(t *testing.T) {
 	if _, err := s.ConsumeOAuthAttempt("state-1", "binding-1"); err == nil {
 		t.Fatal("expected one-time state to be rejected on reuse")
 	}
-	if err := s.CreateOAuthAttempt("state-2", "binding-2", "verifier-2", "nonce-2", time.Now().Add(-time.Minute)); err != nil {
+	if err := s.CreateOAuthAttempt("state-2", "binding-2", "verifier-2", "nonce-2", "", time.Now().Add(-time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.ConsumeOAuthAttempt("state-2", "binding-2"); err == nil {
 		t.Fatal("expected expired state to be rejected")
 	}
-	if err := s.CreateOAuthAttempt("state-3", "binding-3", "verifier-3", "nonce-3", time.Now().Add(time.Minute)); err != nil {
+	if err := s.CreateOAuthAttempt("state-3", "binding-3", "verifier-3", "nonce-3", "", time.Now().Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.ConsumeOAuthAttempt("state-3", "wrong-binding"); err == nil {

@@ -68,6 +68,7 @@ type pushPayload struct {
 type oauthPayload struct {
 	CodeVerifier string `json:"code_verifier"`
 	Nonce        string `json:"nonce"`
+	RedirectURI  string `json:"redirect_uri,omitempty"`
 }
 
 func sealJSON(kr *fieldcrypt.Keyring, v any, ctx string) []byte {

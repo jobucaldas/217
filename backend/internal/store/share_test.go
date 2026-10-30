@@ -204,7 +204,7 @@ func TestPurgeExpiredKeepsLiveData(t *testing.T) {
 			if err := s.CreateSession(u.ID, "live", time.Now().Add(time.Hour)); err != nil {
 				t.Fatal(err)
 			}
-			if err := s.CreateOAuthAttempt("old", "b", "v", "n", time.Now().Add(time.Second)); err != nil {
+			if err := s.CreateOAuthAttempt("old", "b", "v", "n", "", time.Now().Add(time.Second)); err != nil {
 				t.Fatal(err)
 			}
 			oldSub, err := s.SavePushSubscription(u.ID, model.PushSubscriptionRequest{Endpoint: "https://old.example/sub"})

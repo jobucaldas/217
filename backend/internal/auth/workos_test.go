@@ -135,3 +135,60 @@ func TestUserInfoFromWorkOSRequiresClaims(t *testing.T) {
 		t.Fatal("expected error for nil response")
 	}
 }
+
+func TestWorkOSMultiOriginRedirects(t *testing.T) {
+	w, err := NewWorkOSOAuth("sk_test", "client_test", "https://a.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.SetAllowedOrigins([]string{"https://a.example", "https://b.example"})
+	for _, origin := range []string{"https://a.example", "https://b.example"} {
+		redirect := origin + "/api/auth/workos/callback"
+		parsed, err := url.Parse(w.AuthCodeURLForRedirect("s", "c", "n", redirect))
+		if err != nil || parsed.Query().Get("redirect_uri") != redirect {
+			t.Fatalf("redirect_uri for %s: %v %v", origin, parsed, err)
+		}
+	}
+	if got := w.AuthCodeURLForRedirect("s", "c", "n", "https://evil.example/api/auth/workos/callback"); got != "" {
+		t.Fatalf("unlisted redirect must be refused, got %q", got)
+	}
+	if _, err := w.ExchangeWithRedirect(context.Background(), "code", "verifier", "https://evil.example/api/auth/workos/callback"); err == nil {
+		t.Fatal("exchange must refuse an unlisted redirect")
+	}
+	if w.RedirectURI() != "https://a.example/api/auth/workos/callback" {
+		t.Fatalf("canonical redirect changed: %q", w.RedirectURI())
+	}
+}
+
+func TestParseAllowedOrigins(t *testing.T) {
+	got, err := ParseAllowedOrigins("https://a.example", " https://b.example/ , https://a.example,,")
+	if err != nil || len(got) != 2 || got[0] != "https://a.example" || got[1] != "https://b.example" {
+		t.Fatalf("got %v, %v", got, err)
+	}
+	for _, bad := range []string{"http://b.example", "https://b.example/path", "b.example", "https://u@b.example"} {
+		if _, err := ParseAllowedOrigins("https://a.example", bad); err == nil {
+			t.Errorf("%q should be rejected", bad)
+		}
+	}
+	if _, err := ParseAllowedOrigins("", "https://b.example"); err == nil {
+		t.Error("extras without canonical origin should be rejected")
+	}
+	if got, err := ParseAllowedOrigins("", ""); err != nil || len(got) != 0 {
+		t.Errorf("empty config: %v, %v", got, err)
+	}
+}
+
+func TestMatchOriginHost(t *testing.T) {
+	allowed := []string{"https://a.example", "http://localhost:8787"}
+	if got := MatchOriginHost(allowed, "A.Example"); got != "https://a.example" {
+		t.Errorf("got %q", got)
+	}
+	if got := MatchOriginHost(allowed, "localhost:8787"); got != "http://localhost:8787" {
+		t.Errorf("got %q", got)
+	}
+	for _, host := range []string{"", "evil.example", "a.example.evil.example", "localhost", "a.example:444"} {
+		if got := MatchOriginHost(allowed, host); got != "" {
+			t.Errorf("%q matched %q", host, got)
+		}
+	}
+}

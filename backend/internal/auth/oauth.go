@@ -31,6 +31,12 @@ type WorkOSExchanger interface {
 	ExchangeWithRedirect(ctx context.Context, code, codeVerifier, redirectURI string) (*OAuthUserInfo, error)
 }
 
+// RedirectAuthCodeURLer builds the authorization URL for one of several
+// registered browser callbacks (multi-origin deployments).
+type RedirectAuthCodeURLer interface {
+	AuthCodeURLForRedirect(state, codeChallenge, nonce, redirectURI string) string
+}
+
 // ClientIDReporter exposes the public AuthKit client ID, so a generic app
 // build can start sign-in for whichever server it is pointed at.
 type ClientIDReporter interface {
