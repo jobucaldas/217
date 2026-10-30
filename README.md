@@ -13,7 +13,7 @@ Your calendar lives on a server you run. You only need Docker; no clone of this 
 **1. WorkOS.** You bring your own sign-in: create a project at [WorkOS](https://workos.com/docs/authkit) and enable AuthKit (free tier is enough). Copy the **Client ID** (public) and an **API key** (secret). Nothing of the maintainers' is built in, and the apps pick up your client ID from your server. Add these redirect URIs, with your public address:
 
 - `https://217.example.com/api/auth/workos/callback` (web)
-- `com.jobucaldas.a217://auth/callback` (Android)
+- `com.caldasstudios.a217://auth/callback` (Android)
 - `http://localhost:21717/auth/callback` (Windows, Linux)
 
 Optional: upload `frontend/branding/logo-217-light.svg` / `logo-217-dark.svg` under **Branding** for the hosted sign-in page.

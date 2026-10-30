@@ -13,7 +13,7 @@ val hasReleaseKey = listOf(releaseKeystore, releaseKeystorePassword, releaseKeyA
     .all { !it.isNullOrEmpty() }
 
 android {
-    namespace = "com.jobucaldas.a217"
+    namespace = "com.caldasstudios.a217"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -24,7 +24,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.jobucaldas.a217"
+        applicationId = "com.caldasstudios.a217"
         minSdk = maxOf(flutter.minSdkVersion, 24)
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode

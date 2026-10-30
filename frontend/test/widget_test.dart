@@ -82,6 +82,6 @@ void main() {
   test('config defaults bake in no WorkOS client id', () {
     final config = AppConfig.fromEnvironment();
     expect(config.workosClientId, isEmpty);
-    expect(config.redirectUri, 'com.jobucaldas.a217://auth/callback');
+    expect(config.redirectUri, 'com.caldasstudios.a217://auth/callback');
   });
 }

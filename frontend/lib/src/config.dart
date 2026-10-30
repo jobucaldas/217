@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 /// AuthKit callback for Android: a custom scheme claimed in the manifest.
-const androidRedirectUri = 'com.jobucaldas.a217://auth/callback';
+const androidRedirectUri = 'com.caldasstudios.a217://auth/callback';
 
 /// AuthKit callback for desktop: the app listens on this loopback address while
 /// the system browser signs in (RFC 8252). Must match the server's allowlist.

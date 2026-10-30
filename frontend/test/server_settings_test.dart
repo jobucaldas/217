@@ -22,7 +22,7 @@ const _default = 'https://default.example.com';
 AppConfig _config() => AppConfig(
       apiBaseUrl: _default,
       workosClientId: 'client_test',
-      redirectUri: 'com.jobucaldas.a217://auth/callback',
+      redirectUri: 'com.caldasstudios.a217://auth/callback',
     );
 
 void main() {

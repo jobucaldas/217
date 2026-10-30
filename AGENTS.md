@@ -43,7 +43,7 @@ Browser (same origin) cookie flow:
  / → Flutter web → GET /api/auth/workos (JSON + binding cookie) → AuthKit → /api/auth/workos/callback → cookie → /
 
 Android deep-link PKCE:
-  Flutter → AuthKit → com.jobucaldas.a217://… → POST /api/auth/workos/exchange → Bearer
+  Flutter → AuthKit → com.caldasstudios.a217://… → POST /api/auth/workos/exchange → Bearer
 ```
 
 ```
