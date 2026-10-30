@@ -377,6 +377,53 @@ void main() {
     }
   }
 
+  for (final (name, size, capped) in <(String, Size, bool)>[
+    ('portrait phone', const Size(390, 844), true),
+    ('short landscape', const Size(900, 400), false),
+  ]) {
+    testWidgets('day cell height on $name', (tester) async {
+      await tester.binding.setSurfaceSize(size);
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildApp217Theme(
+            brightness: Brightness.light,
+            palette: AppPalette.blue,
+          ),
+          home: MediaQuery(
+            data: MediaQueryData(size: size),
+            child: CalendarScreen(
+              api: _FakeCalendarApi(),
+              user: const User(
+                id: 'u1',
+                email: 'shot@example.invalid',
+                name: 'Shot',
+              ),
+              strings: const Strings(AppLanguage.en),
+              onOpenSettings: () {},
+              palette: AppPalette.blue,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Days 10, 11 and 17 sit in the grid (after the header); 10 and 17
+      // share a column one week apart.
+      final tenth = tester.getCenter(find.text('10').last);
+      final eleventh = tester.getCenter(find.text('11').last);
+      final seventeenth = tester.getCenter(find.text('17').last);
+      final cellWidth = eleventh.dx - tenth.dx;
+      final cellHeight = seventeenth.dy - tenth.dy;
+      if (capped) {
+        expect(cellHeight, closeTo(cellWidth * 1.15, 0.5));
+      } else {
+        expect(cellHeight, lessThan(cellWidth * 1.15));
+      }
+    });
+  }
+
   testWidgets(
     'record-today chip is a Positioned overlay (grid keeps 12px inset)',
     (tester) async {
