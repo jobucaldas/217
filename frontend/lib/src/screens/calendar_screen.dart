@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -1165,21 +1166,37 @@ class _MonthGrid extends StatelessWidget {
             ),
           ),
           Expanded(
-            child: Column(
-              children: [
-                for (var row = 0; row < rowCount; row++)
-                  Expanded(
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        for (var col = 0; col < 7; col++)
-                          Expanded(
-                            child: slot(row * 7 + col),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                // Rows share the height but never get taller than 1.15x the
+                // cell width, so portrait phones keep compact cells instead of
+                // stretching them across the screen.
+                final rowHeight = math.min(
+                  constraints.maxHeight / rowCount,
+                  constraints.maxWidth / 7 * 1.15,
+                );
+                return Align(
+                  alignment: Alignment.topCenter,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      for (var row = 0; row < rowCount; row++)
+                        SizedBox(
+                          height: rowHeight,
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              for (var col = 0; col < 7; col++)
+                                Expanded(
+                                  child: slot(row * 7 + col),
+                                ),
+                            ],
                           ),
-                      ],
-                    ),
+                        ),
+                    ],
                   ),
-              ],
+                );
+              },
             ),
           ),
         ],
