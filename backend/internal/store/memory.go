@@ -26,6 +26,7 @@ type memorySession struct {
 }
 
 type memoryOAuthAttempt struct {
+	RedirectURI  string
 	Nonce        string
 	CodeVerifier string
 	BindingHash  string
@@ -335,7 +336,7 @@ func (s *MemoryStore) LinkWorkOSIdentity(subject, verifiedEmail, name string, au
 	return sanitizeUser(user), nil
 }
 
-func (s *MemoryStore) CreateOAuthAttempt(state, binding, codeVerifier, nonce string, expiresAt time.Time) error {
+func (s *MemoryStore) CreateOAuthAttempt(state, binding, codeVerifier, nonce, redirectURI string, expiresAt time.Time) error {
 	hash := hashString(state)
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -345,7 +346,7 @@ func (s *MemoryStore) CreateOAuthAttempt(state, binding, codeVerifier, nonce str
 			delete(s.oauthAttempts, key)
 		}
 	}
-	s.oauthAttempts[hash] = memoryOAuthAttempt{Nonce: nonce, CodeVerifier: codeVerifier, BindingHash: hashString(binding), ExpiresAt: expiresAt}
+	s.oauthAttempts[hash] = memoryOAuthAttempt{RedirectURI: redirectURI, Nonce: nonce, CodeVerifier: codeVerifier, BindingHash: hashString(binding), ExpiresAt: expiresAt}
 	return nil
 }
 
@@ -365,7 +366,7 @@ func (s *MemoryStore) ConsumeOAuthAttempt(state, binding string) (OAuthAttempt, 
 		return OAuthAttempt{}, fmt.Errorf("oauth browser binding mismatch")
 	}
 	delete(s.oauthAttempts, hash)
-	return OAuthAttempt{CodeVerifier: attempt.CodeVerifier, Nonce: attempt.Nonce}, nil
+	return OAuthAttempt{CodeVerifier: attempt.CodeVerifier, Nonce: attempt.Nonce, RedirectURI: attempt.RedirectURI}, nil
 }
 
 func (s *MemoryStore) GetReminderPreference(userID string) (*model.ReminderPreference, error) {

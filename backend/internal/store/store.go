@@ -41,7 +41,7 @@ type Store interface {
 	FinishReminderDelivery(subscriptionID string, reminderDate time.Time, sent bool, now time.Time) error
 
 	// OAuth attempts
-	CreateOAuthAttempt(state, binding, codeVerifier, nonce string, expiresAt time.Time) error
+	CreateOAuthAttempt(state, binding, codeVerifier, nonce, redirectURI string, expiresAt time.Time) error
 	ConsumeOAuthAttempt(state, binding string) (OAuthAttempt, error)
 
 	// Session management
@@ -80,4 +80,6 @@ type Store interface {
 type OAuthAttempt struct {
 	CodeVerifier string
 	Nonce        string
+	// RedirectURI is the browser callback chosen at login; empty for attempts that predate it.
+	RedirectURI string
 }

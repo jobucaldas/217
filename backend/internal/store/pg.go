@@ -549,10 +549,10 @@ func (s *PGStore) FinishReminderDelivery(subscriptionID string, reminderDate tim
 	return err
 }
 
-func (s *PGStore) CreateOAuthAttempt(state, binding, codeVerifier, nonce string, expiresAt time.Time) error {
+func (s *PGStore) CreateOAuthAttempt(state, binding, codeVerifier, nonce, redirectURI string, expiresAt time.Time) error {
 	hash := hashString(state)
 	_, _ = s.db.Exec(`DELETE FROM oauth_attempts WHERE expires_at <= NOW() OR consumed_at IS NOT NULL`)
-	sealed := sealJSON(s.kr, oauthPayload{CodeVerifier: codeVerifier, Nonce: nonce}, oauthCtx(hash))
+	sealed := sealJSON(s.kr, oauthPayload{CodeVerifier: codeVerifier, Nonce: nonce, RedirectURI: redirectURI}, oauthCtx(hash))
 	_, err := s.db.Exec(`INSERT INTO oauth_attempts (state_hash, binding_hash, sealed, expires_at, consumed_at)
 		VALUES ($1, $2, $3, $4, NULL)`, hash, hashString(binding), sealed, expiresAt)
 	if err != nil {
@@ -604,7 +604,7 @@ func (s *PGStore) ConsumeOAuthAttempt(state, binding string) (OAuthAttempt, erro
 	if err := tx.Commit(); err != nil {
 		return OAuthAttempt{}, fmt.Errorf("committing oauth attempt: %w", err)
 	}
-	return OAuthAttempt{CodeVerifier: p.CodeVerifier, Nonce: p.Nonce}, nil
+	return OAuthAttempt{CodeVerifier: p.CodeVerifier, Nonce: p.Nonce, RedirectURI: p.RedirectURI}, nil
 }
 
 func (s *PGStore) CreateSession(userID, sessionID string, expiresAt time.Time) error {

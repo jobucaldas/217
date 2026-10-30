@@ -62,7 +62,7 @@ Android deep-link PKCE:
 
 ### Auth
 - `GET /api/auth/workos` — browser AuthKit start
-- `GET /api/auth/workos/callback` — browser callback
+- `GET /api/auth/workos/callback` — browser callback; the redirect URI is chosen at login from the request host (`X-Forwarded-Host`/`Host`) if it is in `APP_BASE_URL` + `APP_ALLOWED_ORIGINS`, else `APP_BASE_URL`, and stored with the attempt (sealed) for the exchange and final redirect
 - `POST /api/auth/workos/exchange` — native PKCE exchange
 - `GET /api/auth/session` — cookie or Bearer
 - `POST /api/auth/logout`

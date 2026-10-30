@@ -74,9 +74,10 @@ func main() {
 	}
 
 	log.Fatal(server.Run(server.Config{
-		Addr:        *addr,
-		DatabaseURL: dsn,
-		AppBaseURL:  os.Getenv("APP_BASE_URL"),
+		Addr:           *addr,
+		DatabaseURL:    dsn,
+		AppBaseURL:     os.Getenv("APP_BASE_URL"),
+		AllowedOrigins: os.Getenv("APP_ALLOWED_ORIGINS"),
 		Push: server.PushConfig{
 			PublicKey:  os.Getenv("VAPID_PUBLIC_KEY"),
 			PrivateKey: os.Getenv("VAPID_PRIVATE_KEY"),

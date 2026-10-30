@@ -48,17 +48,9 @@ func TestValidatePushConfigRejectsIncompleteOrInvalidInputs(t *testing.T) {
 	}
 }
 
-func TestOriginFromValidatedBaseURL(t *testing.T) {
-	for _, baseURL := range []string{"http://localhost:8080", "https://app.example"} {
-		if got := originFromBaseURL(baseURL); got != baseURL {
-			t.Fatalf("originFromBaseURL(%q) = %q", baseURL, got)
-		}
-	}
-}
-
 func TestCORSMiddlewareSetsVaryOnlyForAllowedOrigin(t *testing.T) {
 	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-	h := corsMiddleware(next, "https://app.example/path")
+	h := corsMiddleware(next, []string{"https://app.example", "https://legacy.example"})
 	for _, tc := range []struct {
 		name      string
 		origin    string
@@ -66,6 +58,7 @@ func TestCORSMiddlewareSetsVaryOnlyForAllowedOrigin(t *testing.T) {
 		wantVary  string
 	}{
 		{name: "allowed", origin: "https://app.example", wantAllow: "https://app.example", wantVary: "Origin"},
+		{name: "second allowed", origin: "https://legacy.example", wantAllow: "https://legacy.example", wantVary: "Origin"},
 		{name: "evil", origin: "https://evil.example"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

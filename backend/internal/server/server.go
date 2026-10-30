@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -54,8 +55,10 @@ type Config struct {
 	Addr        string
 	DatabaseURL string
 	AppBaseURL  string
-	Push        PushConfig
-	WorkOS      WorkOSConfig
+	// AllowedOrigins is a comma-separated list of extra public origins for browser sign-in.
+	AllowedOrigins string
+	Push           PushConfig
+	WorkOS         WorkOSConfig
 	// Keyring seals personal data at rest; required with a database.
 	Keyring *fieldcrypt.Keyring
 	// PrivacyContact (email or URL) is shown in the app's privacy notice.
@@ -82,6 +85,10 @@ func Run(cfg Config) error {
 		appBaseURL = workosBaseURL
 	}
 	cfg.WorkOS.AppBaseURL = appBaseURL
+	allowedOrigins, err := auth.ParseAllowedOrigins(appBaseURL, cfg.AllowedOrigins)
+	if err != nil {
+		return err
+	}
 	push, err := ValidatePushConfig(cfg.Push)
 	if err != nil {
 		return err
@@ -117,6 +124,7 @@ func Run(cfg Config) error {
 
 	h := handler.NewWithVAPID(s, push.PublicKey)
 	h.SetAppBaseURL(appBaseURL)
+	h.SetAllowedOrigins(allowedOrigins)
 	h.SetPrivacyContact(cfg.PrivacyContact)
 
 	stopJanitor := make(chan struct{})
@@ -130,6 +138,7 @@ func Run(cfg Config) error {
 		if providerErr != nil {
 			log.Printf("workos oauth disabled: %v", providerErr)
 		} else {
+			provider.SetAllowedOrigins(allowedOrigins)
 			h.SetOAuthProvider(provider)
 			if cfg.WorkOS.APIKey == "" {
 				log.Println("workos oauth enabled (PKCE public exchange)")
@@ -203,7 +212,7 @@ func Run(cfg Config) error {
 
 	srv := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           secureHeaders(limitBody(corsMiddleware(mux, appBaseURL))),
+		Handler:           secureHeaders(limitBody(corsMiddleware(mux, allowedOrigins))),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      60 * time.Second,
@@ -271,11 +280,10 @@ func databaseTLSVerified(databaseURL string) bool {
 	return mode == "verify-full" || mode == "verify-ca"
 }
 
-func corsMiddleware(next http.Handler, appBaseURL string) http.Handler {
-	allowedOrigin := originFromBaseURL(appBaseURL)
+func corsMiddleware(next http.Handler, allowedOrigins []string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		if origin != "" && allowedOrigin != "" && origin == allowedOrigin {
+		if origin != "" && slices.Contains(allowedOrigins, origin) {
 			w.Header().Add("Vary", "Origin")
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
@@ -288,14 +296,6 @@ func corsMiddleware(next http.Handler, appBaseURL string) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
-}
-
-func originFromBaseURL(appBaseURL string) string {
-	u, err := url.Parse(appBaseURL)
-	if err != nil || u.Scheme == "" || u.Host == "" {
-		return ""
-	}
-	return u.Scheme + "://" + u.Host
 }
 
 // parseSessionTTL reads SESSION_TTL (Go duration, e.g. 24h). Empty → default.

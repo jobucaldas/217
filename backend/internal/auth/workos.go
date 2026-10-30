@@ -38,7 +38,9 @@ type WorkOSOAuth struct {
 	apiBaseURL  string
 	clientID    string
 	redirectURI string
-	apiKey      string
+	// redirectURIs are every browser callback this server may use (canonical first).
+	redirectURIs map[string]bool
+	apiKey       string
 }
 
 // NewWorkOSOAuth builds a WorkOS AuthKit client with an exact browser callback URL.
@@ -51,16 +53,26 @@ func NewWorkOSOAuth(apiKey, clientID, appBaseURL string) (*WorkOSOAuth, error) {
 	if err != nil {
 		return nil, err
 	}
-	redirectURI := canonicalBaseURL + "/api/auth/workos/callback"
+	redirectURI := canonicalBaseURL + BrowserCallbackPath
 	client := workos.NewClient(apiKey, workos.WithClientID(clientID))
 	return &WorkOSOAuth{
-		client:      client,
-		httpClient:  &http.Client{Timeout: 15 * time.Second},
-		apiBaseURL:  workosAPIDefault,
-		clientID:    clientID,
-		redirectURI: redirectURI,
-		apiKey:      apiKey,
+		client:       client,
+		httpClient:   &http.Client{Timeout: 15 * time.Second},
+		apiBaseURL:   workosAPIDefault,
+		clientID:     clientID,
+		redirectURI:  redirectURI,
+		redirectURIs: map[string]bool{redirectURI: true},
+		apiKey:       apiKey,
 	}, nil
+}
+
+// SetAllowedOrigins registers the extra origins whose browser callback may be
+// used besides the canonical one. Origins must already be validated.
+func (w *WorkOSOAuth) SetAllowedOrigins(origins []string) {
+	w.redirectURIs = map[string]bool{w.redirectURI: true}
+	for _, o := range origins {
+		w.redirectURIs[o+BrowserCallbackPath] = true
+	}
 }
 
 // RedirectURI returns the registered AuthKit callback for the browser cookie flow.
@@ -72,11 +84,20 @@ func (w *WorkOSOAuth) ClientID() string { return w.clientID }
 // AuthCodeURL returns the AuthKit consent URL with PKCE S256 parameters.
 // The nonce argument is accepted for OAuthProvider compatibility and is unused by AuthKit.
 func (w *WorkOSOAuth) AuthCodeURL(state, codeChallenge, nonce string) string {
+	return w.AuthCodeURLForRedirect(state, codeChallenge, nonce, w.redirectURI)
+}
+
+// AuthCodeURLForRedirect is AuthCodeURL for a specific registered browser
+// callback. An unregistered redirectURI yields "" (never reflected).
+func (w *WorkOSOAuth) AuthCodeURLForRedirect(state, codeChallenge, nonce, redirectURI string) string {
 	_ = nonce
+	if !w.redirectURIs[redirectURI] {
+		return ""
+	}
 	provider := "authkit"
 	method := "S256"
 	params := workos.AuthKitAuthorizationURLParams{
-		RedirectURI:         w.redirectURI,
+		RedirectURI:         redirectURI,
 		ClientID:            w.clientID,
 		Provider:            &provider,
 		State:               &state,
@@ -113,7 +134,7 @@ func (w *WorkOSOAuth) ExchangeWithRedirect(ctx context.Context, code, codeVerifi
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	if redirectURI != w.redirectURI && !IsNativeRedirectURI(redirectURI) {
+	if !w.redirectURIs[redirectURI] && !IsNativeRedirectURI(redirectURI) {
 		return nil, fmt.Errorf("redirect uri is not registered")
 	}
 	// Public PKCE client: code_verifier is the only client authenticator.

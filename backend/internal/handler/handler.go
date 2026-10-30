@@ -46,6 +46,7 @@ type Handler struct {
 	sessionDuration time.Duration
 	oauthProvider   auth.OAuthProvider
 	appBaseURL      string
+	allowedOrigins  []string
 	authLimiter     *ipRateLimiter
 	inviteLimiter   *ipRateLimiter
 	privacyContact  string
@@ -90,6 +91,41 @@ func (h *Handler) SetOAuthProvider(p auth.OAuthProvider) { h.oauthProvider = p }
 // (the controller or its data protection officer): an email or a URL.
 func (h *Handler) SetPrivacyContact(contact string) { h.privacyContact = strings.TrimSpace(contact) }
 func (h *Handler) SetAppBaseURL(u string)           { h.appBaseURL = u }
+
+// SetAllowedOrigins sets the extra public origins (besides the app base URL)
+// that may start browser sign-in and send same-origin cookie requests.
+func (h *Handler) SetAllowedOrigins(origins []string) { h.allowedOrigins = origins }
+
+// browserOrigins lists the canonical origin first, then the extra allowed ones.
+func (h *Handler) browserOrigins() []string {
+	canonical := h.appOrigin()
+	if canonical == "" {
+		return nil
+	}
+	out := []string{canonical}
+	for _, o := range h.allowedOrigins {
+		if o != canonical {
+			out = append(out, o)
+		}
+	}
+	return out
+}
+
+// requestOrigin picks the allowlisted origin serving this request, derived
+// from X-Forwarded-Host (set by the trusted proxy) or Host. Anything not on
+// the allowlist falls back to the canonical origin, so a spoofed host is
+// never reflected into a redirect URI.
+func (h *Handler) requestOrigin(r *http.Request) string {
+	origins := h.browserOrigins()
+	host := r.Host
+	if fwd := r.Header.Get("X-Forwarded-Host"); fwd != "" {
+		host, _, _ = strings.Cut(fwd, ",")
+	}
+	if o := auth.MatchOriginHost(origins, host); o != "" {
+		return o
+	}
+	return h.appOrigin()
+}
 
 func (h *Handler) authkitEnabled() bool { return h.oauthProvider != nil }
 
@@ -189,7 +225,12 @@ func (h *Handler) sameOriginAllowed(r *http.Request) bool {
 		return true
 	}
 	origin := r.Header.Get("Origin")
-	return origin != "" && origin == h.appOrigin()
+	for _, allowed := range h.browserOrigins() {
+		if origin != "" && origin == allowed {
+			return true
+		}
+	}
+	return false
 }
 
 func isUnsafeMethod(method string) bool {
@@ -319,13 +360,23 @@ func (h *Handler) StartWorkOSOAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	expires := time.Now().UTC().Add(5 * time.Minute)
-	if err := h.store.CreateOAuthAttempt(state, binding, verifier, nonce, expires); err != nil {
+	origin := h.requestOrigin(r)
+	redirectURI := ""
+	if origin != "" {
+		redirectURI = origin + auth.BrowserCallbackPath
+	}
+	if err := h.store.CreateOAuthAttempt(state, binding, verifier, nonce, redirectURI, expires); err != nil {
 		log.Printf("create oauth attempt failed: %v", err)
 		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
 		return
 	}
 	http.SetCookie(w, h.oauthBindingCookieValue(binding, expires))
-	authURL := h.oauthProvider.AuthCodeURL(state, pkceChallengeS256(verifier), nonce)
+	var authURL string
+	if p, ok := h.oauthProvider.(auth.RedirectAuthCodeURLer); ok && redirectURI != "" {
+		authURL = p.AuthCodeURLForRedirect(state, pkceChallengeS256(verifier), nonce, redirectURI)
+	} else {
+		authURL = h.oauthProvider.AuthCodeURL(state, pkceChallengeS256(verifier), nonce)
+	}
 	if authURL == "" {
 		http.Error(w, `{"error":"cannot build authorization url"}`, http.StatusInternalServerError)
 		return
@@ -388,7 +439,13 @@ func (h *Handler) WorkOSOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"invalid or expired state"}`, http.StatusBadRequest)
 		return
 	}
-	userInfo, err := h.oauthProvider.Exchange(r.Context(), code, attempt.CodeVerifier, attempt.Nonce)
+	// The token exchange must use the redirect URI the attempt started with.
+	var userInfo *auth.OAuthUserInfo
+	if exchanger, ok := h.oauthProvider.(auth.WorkOSExchanger); ok && attempt.RedirectURI != "" {
+		userInfo, err = exchanger.ExchangeWithRedirect(r.Context(), code, attempt.CodeVerifier, attempt.RedirectURI)
+	} else {
+		userInfo, err = h.oauthProvider.Exchange(r.Context(), code, attempt.CodeVerifier, attempt.Nonce)
+	}
 	if err != nil {
 		log.Printf("oauth exchange error: %v", err)
 		http.Error(w, `{"error":"oauth exchange failed"}`, http.StatusBadRequest)
@@ -403,7 +460,10 @@ func (h *Handler) WorkOSOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"cannot create session"}`, http.StatusInternalServerError)
 		return
 	}
-	redirectTo := strings.TrimRight(h.appBaseURL, "/")
+	redirectTo := strings.TrimSuffix(attempt.RedirectURI, auth.BrowserCallbackPath)
+	if redirectTo == "" || redirectTo == attempt.RedirectURI && attempt.RedirectURI != "" {
+		redirectTo = strings.TrimRight(h.appBaseURL, "/")
+	}
 	if redirectTo == "" {
 		redirectTo = "/"
 	}

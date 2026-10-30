@@ -45,7 +45,7 @@ func testWorkOSIdentityStore(t *testing.T, s Store) {
 	if _, err := s.LinkWorkOSIdentity("ambiguous", "AMBIGUOUS@example.com", "Ambiguous", true); err == nil {
 		t.Fatal("ambiguous email accepted")
 	}
-	if err := s.CreateOAuthAttempt("one-time", "browser", "verifier", "independent-nonce", time.Now().Add(time.Minute)); err != nil {
+	if err := s.CreateOAuthAttempt("one-time", "browser", "verifier", "independent-nonce", "", time.Now().Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.ConsumeOAuthAttempt("one-time", "wrong-browser"); err == nil {
