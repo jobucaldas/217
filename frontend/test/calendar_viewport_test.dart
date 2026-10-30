@@ -409,12 +409,11 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // Days 10, 11 and 17 sit in the grid (after the header); 10 and 17
-      // share a column one week apart.
+      // Days 10 and 17 share a column one week apart in any month. Grid
+      // width is the screen minus the 12px side padding, split in 7 columns.
       final tenth = tester.getCenter(find.text('10').last);
-      final eleventh = tester.getCenter(find.text('11').last);
       final seventeenth = tester.getCenter(find.text('17').last);
-      final cellWidth = eleventh.dx - tenth.dx;
+      final cellWidth = (size.width - 24) / 7;
       final cellHeight = seventeenth.dy - tenth.dy;
       if (capped) {
         expect(cellHeight, closeTo(cellWidth * 1.15, 0.5));
