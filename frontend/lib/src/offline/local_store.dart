@@ -40,6 +40,10 @@ abstract class LocalStore {
   Future<PendingWrite> enqueue(String userId, PendingWrite write);
   Future<void> removePending(int id);
 
+  /// Drops the calendar months and predictions kept for [userId] (the
+  /// calendar it shows changed); the session and queued edits stay.
+  Future<void> clearCalendar(String userId);
+
   /// Drops everything kept for [userId] (sign-out, account deletion).
   Future<void> clearAccount(String userId);
   Future<void> clearAll();

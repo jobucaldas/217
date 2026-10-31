@@ -91,6 +91,12 @@ func TestDeviceKeyRenewsSessionUntilLogout(t *testing.T) {
 		t.Fatalf("replayed challenge accepted: %d", code)
 	}
 
+	// An expired Bearer session gets 401 at logout, so the app renews first
+	// and the key can still be revoked.
+	if code, _ := postJSON(t, h.Logout, "/api/auth/logout", map[string]string{}, "expired-token"); code != http.StatusUnauthorized {
+		t.Fatalf("logout with unknown bearer: %d", code)
+	}
+
 	// Logging out revokes the key: the device has to sign in again.
 	if code, _ := postJSON(t, h.Logout, "/api/auth/logout", map[string]string{}, token); code != http.StatusOK {
 		t.Fatalf("logout: %d", code)

@@ -39,6 +39,9 @@ class _Server {
   final requests = <String>[];
   int refuseWritesWith = 0;
   bool deviceRevoked = false;
+  int challengeStatus = 200;
+  Map<String, dynamic> user = Map.of(_user);
+  Map<String, dynamic>? share;
 
   late final client = MockClient((req) async {
     if (!up) throw http.ClientException('offline');
@@ -46,20 +49,26 @@ class _Server {
     final authed = req.headers['Authorization'] == 'Bearer $validToken';
     switch ((req.method, req.url.path)) {
       case ('GET', '/api/auth/session'):
-        return _json({'user': authed ? _user : null, 'share': null});
+        return _json({'user': authed ? user : null, 'share': share});
       case ('POST', '/api/auth/device/challenge'):
         if (deviceRevoked) {
           return http.Response('{"error":"device not recognized"}', 401);
         }
+        if (challengeStatus != 200) {
+          return http.Response('{"error":"busy"}', challengeStatus);
+        }
         return _json({'challenge': 'c1'});
       case ('POST', '/api/auth/device/session'):
-        return _json({'user': _user, 'session_token': validToken});
+        return _json({'user': user, 'session_token': validToken});
       case ('GET', '/api/entries'):
         if (!authed) return http.Response('{"error":"unauthorized"}', 401);
         return _json({'entries': entries.values.toList()});
     }
     if (req.url.path.startsWith('/api/entries/')) {
       if (!authed) return http.Response('{"error":"unauthorized"}', 401);
+      if (refuseWritesWith == 403) {
+        return http.Response('{"error":"calendar is read-only"}', 403);
+      }
       if (refuseWritesWith != 0) {
         return http.Response('{"error":"bad"}', refuseWritesWith);
       }
@@ -145,5 +154,36 @@ void main() {
     expect(session.user, isNull);
     expect(deviceKey.deleted, isTrue);
     expect(await api.readSessionToken(), isNull);
+  });
+
+  test('a passing renewal error keeps the device signed in', () async {
+    await api.currentSession(); // renews and caches the session
+    await api.saveSessionToken('expired');
+    server.challengeStatus = 503;
+    final session = await api.currentSession();
+    expect(session.user?.id, 'u1');
+    expect(deviceKey.deleted, isFalse);
+  });
+
+  test('a read-only refusal drops the edit instead of blocking the queue',
+      () async {
+    await api.currentSession();
+    server.refuseWritesWith = 403;
+    await expectLater(api.upsertEntry('2026-10-03', taken: true),
+        throwsA(isA<ApiException>()));
+    expect(api.pendingWrites.value, 0);
+  });
+
+  test('another owner\'s calendar never shows the previous one', () async {
+    server.user = {..._user, 'role': 'partner'};
+    server.share = {'status': 'active', 'owner_email': 'a@example.com'};
+    server.entries['2026-10-01'] = {'date': '2026-10-01', 'taken': true};
+    await api.currentSession();
+    await api.listEntries(2026, 10);
+
+    server.share = {'status': 'active', 'owner_email': 'b@example.com'};
+    await api.currentSession();
+    server.up = false;
+    await expectLater(api.listEntries(2026, 10), throwsA(anything));
   });
 }

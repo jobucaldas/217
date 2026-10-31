@@ -61,8 +61,12 @@ class SqliteLocalStore implements LocalStore {
     try {
       return await open();
     } on DatabaseException {
-      // Unreadable (key lost or file damaged): it is only a cache, start over.
-      await deleteDatabase(path);
+      // Unreadable (file damaged): set it aside rather than delete it, since
+      // it may hold unsent edits, and start a fresh one.
+      final file = File(path);
+      if (await file.exists()) {
+        await file.rename('$path.unreadable-${DateTime.now().millisecondsSinceEpoch}');
+      }
       return open();
     }
   }
@@ -190,6 +194,17 @@ class SqliteLocalStore implements LocalStore {
   @override
   Future<void> removePending(int id) async {
     await (await _open).delete('outbox', where: 'id = ?', whereArgs: [id]);
+  }
+
+  @override
+  Future<void> clearCalendar(String userId) async {
+    await (await _open).transaction((tx) async {
+      for (final table in ['months', 'entries']) {
+        await tx.delete(table, where: 'user_id = ?', whereArgs: [userId]);
+      }
+      await tx.delete('docs',
+          where: 'user_id = ? AND key = ?', whereArgs: [userId, 'cycle']);
+    });
   }
 
   @override

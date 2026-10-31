@@ -321,6 +321,12 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if token, ok := h.sessionTokenFromRequest(r); ok {
+		// An expired Bearer session no longer leads to its device key: answer
+		// 401 so the app renews with the key and logs out again, revoking it.
+		if _, err := h.store.GetUserBySession(token); err != nil && cookieErr != nil {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			return
+		}
 		// A device key ends with the session: signing out means signing in again.
 		if err := h.store.DeleteSessionAndDevice(token); err != nil {
 			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "could not log out; retry"})

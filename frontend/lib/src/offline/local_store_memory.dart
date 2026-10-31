@@ -70,6 +70,12 @@ class MemoryLocalStore implements LocalStore {
       _pending.removeWhere((p) => p.$2.id == id);
 
   @override
+  Future<void> clearCalendar(String userId) async {
+    _months.removeWhere((k, _) => k.startsWith('$userId|'));
+    _docs.remove('$userId|cycle');
+  }
+
+  @override
   Future<void> clearAccount(String userId) async {
     _docs.removeWhere((k, _) => k.startsWith('$userId|'));
     _months.removeWhere((k, _) => k.startsWith('$userId|'));

@@ -174,8 +174,34 @@ class ApiClient {
         ..remove('session_token')
         ..remove('device_key_id');
       await _remember(user.id, jsonEncode(decoded));
+      _role = user.role;
+      await _calendarIs(user.id, user.role, snapshot.share);
     }
     return snapshot;
+  }
+
+  String? _role;
+
+  /// Months and predictions kept here belong to one calendar: the owner's
+  /// own, or the one a partner follows. When that changes (joined another
+  /// owner, share revoked, role switched) the old copy goes.
+  Future<void> _calendarIs(String userId, String role, ShareState? share) async {
+    final calendar = role == 'partner'
+        ? 'partner:${share?.status ?? 'none'}:${share?.ownerEmail ?? ''}'
+        : 'own';
+    final known = await _local.readDoc(userId, 'calendar');
+    if (known == calendar) return;
+    if (known != null) await _local.clearCalendar(userId);
+    await _local.writeDoc(userId, 'calendar', calendar);
+  }
+
+  Future<ShareState> _shareChanged(ShareState share) async {
+    final userId = _userId;
+    final role = _role;
+    if (userId != null && role != null) {
+      await _calendarIs(userId, role, share);
+    }
+    return share;
   }
 
   /// The last account's session as kept on the device, while it can still
@@ -192,6 +218,7 @@ class ApiClient {
         SessionSnapshot.fromJson(jsonDecode(body) as Map<String, dynamic>);
     if (snapshot.user?.id != userId) return null;
     _userId = userId;
+    _role = snapshot.user!.role;
     await _countPending(userId);
     return snapshot;
   }
@@ -203,7 +230,7 @@ class ApiClient {
 
   /// The server could not be reached (vs. it answered with an error).
   static bool _unreachable(Object err) =>
-      err is! ApiException || err.statusCode >= 502;
+      err is! ApiException || err.statusCode >= 500 || err.statusCode == 429;
 
   /// [fromServer], or the device's copy when the server is out of reach.
   Future<T> _orCached<T>(
@@ -224,7 +251,9 @@ class ApiClient {
   Future<bool>? _renewing;
 
   /// Gets a new session with the device key; false when there is none or
-  /// the server no longer knows it. One renewal at a time.
+  /// the server no longer knows it. Throws when the server cannot answer
+  /// now (offline, 429, 5xx), so nothing is cleared for a passing error.
+  /// One renewal at a time.
   Future<bool> _renewSession() =>
       _renewing ??= _doRenew().whenComplete(() => _renewing = null);
 
@@ -241,10 +270,14 @@ class ApiClient {
       await _forgetDevice();
       return false;
     }
-    if (challengeResponse.statusCode != 200) return false;
+    if (challengeResponse.statusCode != 200) {
+      throw ApiException('device challenge', challengeResponse);
+    }
     final challenge =
         (jsonDecode(challengeResponse.body) as Map)['challenge'] as String?;
-    if (challenge == null) return false;
+    if (challenge == null) {
+      throw ApiException('device challenge', challengeResponse);
+    }
     // Same message the server checks (backend handler/device.go).
     final signature =
         await _deviceKey.sign('217 device session v1\n$keyId\n$challenge');
@@ -263,9 +296,13 @@ class ApiClient {
       await _forgetDevice();
       return false;
     }
-    if (response.statusCode != 200) return false;
+    if (response.statusCode != 200) {
+      throw ApiException('device session', response);
+    }
     final token = (jsonDecode(response.body) as Map)['session_token'];
-    if (token is! String || token.isEmpty) return false;
+    if (token is! String || token.isEmpty) {
+      throw ApiException('device session', response);
+    }
     await saveSessionToken(token);
     return true;
   }
@@ -402,7 +439,7 @@ class ApiClient {
       if (cached != null) return cached;
       rethrow;
     }
-    if (response.statusCode >= 502) {
+    if (response.statusCode >= 500 || response.statusCode == 429) {
       return await _cachedSession() ?? const SessionSnapshot();
     }
     if (response.statusCode != 200) {
@@ -570,8 +607,8 @@ class ApiClient {
     if (response.statusCode != 200) {
       throw ApiException('revoke share', response);
     }
-    return ShareState.fromJson(
-        jsonDecode(response.body) as Map<String, dynamic>);
+    return _shareChanged(ShareState.fromJson(
+        jsonDecode(response.body) as Map<String, dynamic>));
   }
 
   Future<ShareState> acceptShare(String code) async {
@@ -583,8 +620,10 @@ class ApiClient {
     if (response.statusCode != 200) {
       throw ApiException('accept share', response);
     }
-    return ShareState.fromJson(
-        jsonDecode(response.body) as Map<String, dynamic>);
+    // Accepting makes this account a partner of that owner.
+    _role = 'partner';
+    return _shareChanged(ShareState.fromJson(
+        jsonDecode(response.body) as Map<String, dynamic>));
   }
 
   /// Messages the user sent or received, newest first.
@@ -700,6 +739,7 @@ class ApiClient {
     if (response.statusCode != 200) {
       throw ApiException('save partner alerts', response);
     }
+    await _keepDoc('partner_alerts', response.body);
     return PartnerAlertPreference.fromJson(
       jsonDecode(response.body) as Map<String, dynamic>,
     );
@@ -710,6 +750,7 @@ class ApiClient {
   Future<List<Entry>> listEntries(int year, int month) => _orCached(
         () async {
           final userId = _userId;
+          final writes = _queueChanges;
           final response = await _send(
             'GET',
             _uri('/api/entries', {
@@ -725,6 +766,12 @@ class ApiClient {
               .map((e) => Entry.fromJson(e as Map<String, dynamic>))
               .toList();
           if (userId == null || userId != _userId) return entries;
+          if (writes != _queueChanges) {
+            // An edit was queued or sent meanwhile: this answer may predate
+            // it. The device's copy has every edit; the next load refreshes.
+            final local = await _local.monthEntries(userId, year, month);
+            if (local != null) return local;
+          }
           final days = {for (final e in entries) e.date: e};
           final prefix = monthPrefix(year, month);
           for (final w in await _local.pendingWrites(userId)) {
@@ -801,7 +848,11 @@ class ApiClient {
   /// Edits the server refused for good, by queue ID, for whoever waits.
   final Map<int, ApiException> _refused = {};
 
+  /// Moves whenever the queue gains or sends an edit (see listEntries).
+  int _queueChanges = 0;
+
   Future<void> _queueWrite(String userId, String date, Entry? entry) async {
+    _queueChanges++;
     await _local.putEntry(userId, date, entry);
     final queued =
         await _local.enqueue(userId, PendingWrite(date: date, entry: entry));
@@ -849,8 +900,10 @@ class ApiClient {
             await _sendUpsert(entry);
           }
         } on ApiException catch (err) {
+          // Consent fixes itself once agreed to; any other 403 (read-only
+          // calendar after a role change elsewhere) is a refusal.
           final retryLater = err.statusCode == 401 ||
-              err.statusCode == 403 ||
+              (err.statusCode == 403 && err.message == 'consent required') ||
               err.statusCode == 408 ||
               err.statusCode == 429 ||
               err.statusCode >= 500;
@@ -862,6 +915,7 @@ class ApiClient {
         } catch (_) {
           return; // out of reach
         }
+        _queueChanges++;
         await _local.removePending(write.id!);
         await _countPending(userId);
       }
@@ -912,6 +966,7 @@ class ApiClient {
     if (response.statusCode != 200) {
       throw ApiException('save reminder', response);
     }
+    await _keepDoc('reminder', response.body);
     return ReminderPreference.fromJson(
         jsonDecode(response.body) as Map<String, dynamic>);
   }
