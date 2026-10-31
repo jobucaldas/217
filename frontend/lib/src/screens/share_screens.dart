@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:intl/intl.dart';
 
 import '../api/client.dart';
 import '../errors.dart';
@@ -489,43 +490,130 @@ class _PartnerJoinScreenState extends State<PartnerJoinScreen> {
   }
 }
 
+/// App bar button that opens the messages screen, with the unread count.
+/// Owners and linked partners both have one.
+class InboxButton extends StatelessWidget {
+  const InboxButton({
+    super.key,
+    required this.api,
+    required this.strings,
+    required this.share,
+    this.onSynced,
+  });
+
+  final ApiClient api;
+  final Strings strings;
+  final ShareState share;
+
+  /// Called with the messages each time the screen loads them.
+  final ValueChanged<List<InboxMessage>>? onSynced;
+
+  @override
+  Widget build(BuildContext context) {
+    final unread = share.unreadNotes;
+    return IconButton(
+      key: const ValueKey('inbox-button'),
+      tooltip: strings.inbox,
+      onPressed: () {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => InboxScreen(
+              api: api,
+              strings: strings,
+              canSend: share.isActive,
+              onSynced: onSynced,
+            ),
+          ),
+        );
+      },
+      icon: Badge(
+        isLabelVisible: unread > 0,
+        label: Text('$unread'),
+        child: const Icon(Icons.forum_outlined),
+      ),
+    );
+  }
+}
+
+/// Conversation with the other person of the share: received messages on
+/// the left, the user's own on the right, newest at the bottom. Opening it
+/// marks what arrived as read.
 class InboxScreen extends StatefulWidget {
   const InboxScreen({
     super.key,
     required this.api,
     required this.strings,
+    this.canSend = false,
+    this.onSynced,
   });
 
   final ApiClient api;
   final Strings strings;
+
+  /// A live share: there is someone to write to.
+  final bool canSend;
+  final ValueChanged<List<InboxMessage>>? onSynced;
 
   @override
   State<InboxScreen> createState() => _InboxScreenState();
 }
 
 class _InboxScreenState extends State<InboxScreen> {
+  final _compose = TextEditingController();
   bool _loading = true;
+  bool _sending = false;
   String? _error;
-  List<PartnerNote> _notes = const [];
+  List<InboxMessage> _messages = const [];
+
+  /// Highlighted for this visit, though already marked read on the server.
+  final Set<String> _newIds = {};
 
   @override
   void initState() {
     super.initState();
+    _compose.addListener(() => setState(() {}));
     _load();
+  }
+
+  @override
+  void dispose() {
+    _compose.dispose();
+    super.dispose();
   }
 
   Future<void> _load() async {
     setState(() {
-      _loading = true;
+      _loading = _messages.isEmpty;
       _error = null;
     });
     try {
-      final notes = await widget.api.listInbox();
+      var messages = await widget.api.listInbox();
+      final unread = messages.where((m) => m.isUnread).toList();
+      if (unread.isNotEmpty) {
+        _newIds.addAll(unread.map((m) => m.id));
+        await Future.wait(unread
+            .map((m) => widget.api.markInboxNoteRead(m.id).catchError((_) {})));
+        final now = DateTime.now().toUtc();
+        messages = [
+          for (final m in messages)
+            m.isUnread
+                ? InboxMessage(
+                    id: m.id,
+                    body: m.body,
+                    createdAt: m.createdAt,
+                    fromName: m.fromName,
+                    fromEmail: m.fromEmail,
+                    readAt: now,
+                  )
+                : m,
+        ];
+      }
       if (!mounted) return;
       setState(() {
-        _notes = notes;
+        _messages = messages;
         _loading = false;
       });
+      widget.onSynced?.call(messages);
     } catch (err) {
       if (!mounted) return;
       setState(() {
@@ -535,148 +623,198 @@ class _InboxScreenState extends State<InboxScreen> {
     }
   }
 
-  Future<void> _markRead(PartnerNote note) async {
-    if (!note.isUnread) return;
+  Future<void> _send() async {
+    final body = _compose.text.trim();
+    if (body.isEmpty || _sending) return;
+    setState(() => _sending = true);
     try {
-      await widget.api.markInboxNoteRead(note.id);
-      await _load();
-    } catch (_) {}
+      final sent = await widget.api.sendMessage(body);
+      if (!mounted) return;
+      _compose.clear();
+      setState(() {
+        _messages = [sent, ..._messages];
+        _sending = false;
+      });
+    } catch (err) {
+      if (!mounted) return;
+      setState(() => _sending = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(friendlyError(widget.strings, err))),
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final text = Theme.of(context).textTheme;
+    final Widget body;
+    if (_loading) {
+      body = Center(child: Text(widget.strings.loading));
+    } else if (_error != null) {
+      body = Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(_error!),
+            const SizedBox(height: 12),
+            OutlinedButton(
+              onPressed: _load,
+              child: Text(widget.strings.retry),
+            ),
+          ],
+        ),
+      );
+    } else if (_messages.isEmpty) {
+      body = Center(
+        child: Text(
+          widget.strings.inboxEmpty,
+          style: text.bodyLarge?.copyWith(color: scheme.onSurfaceVariant),
+        ),
+      );
+    } else {
+      body = RefreshIndicator(
+        onRefresh: _load,
+        child: ListView.separated(
+          reverse: true,
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+          itemCount: _messages.length,
+          separatorBuilder: (_, __) => const SizedBox(height: 8),
+          itemBuilder: (context, index) => _MessageBubble(
+            message: _messages[index],
+            strings: widget.strings,
+            highlighted: _newIds.contains(_messages[index].id),
+          ),
+        ),
+      );
+    }
     return Scaffold(
       appBar: AppBar(title: Text(widget.strings.inbox)),
-      body: _loading
-          ? Center(child: Text(widget.strings.loading))
-          : _error != null
-              ? Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(_error!),
-                      const SizedBox(height: 12),
-                      OutlinedButton(
-                        onPressed: _load,
-                        child: Text(widget.strings.retry),
-                      ),
-                    ],
-                  ),
-                )
-              : _notes.isEmpty
-                  ? Center(
-                      child: Text(
-                        widget.strings.inboxEmpty,
-                        style: text.bodyLarge?.copyWith(
-                          color: scheme.onSurfaceVariant,
+      body: Column(
+        children: [
+          Expanded(child: body),
+          SafeArea(
+            top: false,
+            child: widget.canSend
+                ? Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 4, 8, 8),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            key: const ValueKey('message-compose'),
+                            controller: _compose,
+                            minLines: 1,
+                            maxLines: 4,
+                            maxLength: 2000,
+                            textCapitalization: TextCapitalization.sentences,
+                            decoration: InputDecoration(
+                              hintText: widget.strings.messageHint,
+                              counterText: '',
+                            ),
+                          ),
                         ),
-                      ),
-                    )
-                  : ListView.separated(
-                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-                      itemCount: _notes.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 8),
-                      itemBuilder: (context, index) {
-                        final note = _notes[index];
-                        return Material(
-                          color: note.isUnread
-                              ? scheme.primaryContainer
-                              : scheme.surface,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14),
-                            side: BorderSide(
-                              color: scheme.outline.withValues(alpha: 0.4),
-                            ),
-                          ),
-                          child: InkWell(
-                            borderRadius: BorderRadius.circular(14),
-                            onTap: () => _markRead(note),
-                            child: Padding(
-                              padding: const EdgeInsets.all(14),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    note.fromName.isEmpty
-                                        ? note.fromEmail
-                                        : note.fromName,
-                                    style: text.labelLarge?.copyWith(
-                                      color: note.isUnread
-                                          ? scheme.onPrimaryContainer
-                                          : scheme.onSurfaceVariant,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 6),
-                                  Text(
-                                    note.body,
-                                    style: text.bodyLarge?.copyWith(
-                                      color: note.isUnread
-                                          ? scheme.onPrimaryContainer
-                                          : scheme.onSurface,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        );
-                      },
+                        const SizedBox(width: 4),
+                        IconButton.filled(
+                          key: const ValueKey('message-send'),
+                          tooltip: widget.strings.sendNote,
+                          onPressed: _compose.text.trim().isEmpty || _sending
+                              ? null
+                              : _send,
+                          icon: const Icon(Icons.send_rounded),
+                        ),
+                      ],
                     ),
+                  )
+                : Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                    child: Text(
+                      widget.strings.messagesNeedPartner,
+                      textAlign: TextAlign.center,
+                      style: text.bodyMedium
+                          ?.copyWith(color: scheme.onSurfaceVariant),
+                    ),
+                  ),
+          ),
+        ],
+      ),
     );
   }
 }
 
-Future<void> showPartnerNoteDialog({
-  required BuildContext context,
-  required ApiClient api,
-  required Strings strings,
-}) async {
-  final controller = TextEditingController();
-  final result = await showDialog<String>(
-    context: context,
-    builder: (context) {
-      return AlertDialog(
-        title: Text(strings.leaveNote),
-        content: TextField(
-          controller: controller,
-          maxLines: 4,
-          maxLength: 2000,
-          decoration: InputDecoration(
-            hintText: strings.leaveNote,
+class _MessageBubble extends StatelessWidget {
+  const _MessageBubble({
+    required this.message,
+    required this.strings,
+    required this.highlighted,
+  });
+
+  final InboxMessage message;
+  final Strings strings;
+  final bool highlighted;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final text = Theme.of(context).textTheme;
+    final mine = message.fromMe;
+    final background = mine
+        ? scheme.primary
+        : highlighted
+            ? scheme.primaryContainer
+            : scheme.surfaceContainerHighest;
+    final foreground = mine
+        ? scheme.onPrimary
+        : highlighted
+            ? scheme.onPrimaryContainer
+            : scheme.onSurface;
+    final when = DateFormat.MMMd(strings.dateLocale)
+        .add_Hm()
+        .format(message.createdAt.toLocal());
+    final header = [
+      mine ? strings.messageFromMe : message.fromLabel,
+      when,
+      if (highlighted) strings.messageUnread,
+    ].join(' · ');
+    return Align(
+      alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.sizeOf(context).width * 0.8,
+        ),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: background,
+            borderRadius: BorderRadius.only(
+              topLeft: const Radius.circular(16),
+              topRight: const Radius.circular(16),
+              bottomLeft: Radius.circular(mine ? 16 : 4),
+              bottomRight: Radius.circular(mine ? 4 : 16),
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  header,
+                  style: text.labelMedium?.copyWith(
+                    color: foreground.withValues(alpha: 0.8),
+                    fontWeight: highlighted ? FontWeight.w700 : null,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  message.body,
+                  style: text.bodyLarge?.copyWith(color: foreground),
+                ),
+              ],
+            ),
           ),
         ),
-        actions: [
-          DialogActionRow(
-            secondary: DialogLinkButton(
-              onPressed: () => Navigator.pop(context),
-              label: strings.cancel,
-            ),
-            primary: FilledButton(
-              onPressed: () => Navigator.pop(context, controller.text.trim()),
-              child: Text(strings.sendNote),
-            ),
-          ),
-        ],
-      );
-    },
-  );
-  controller.dispose();
-  if (result == null || result.isEmpty) return;
-  try {
-    await api.createPartnerNote(result);
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(strings.noteSent)),
-      );
-    }
-  } catch (err) {
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(friendlyError(strings, err))),
-      );
-    }
+      ),
+    );
   }
 }

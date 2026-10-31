@@ -97,6 +97,10 @@ class _ConsentServer {
                       200,
                     )
                   : http.Response('{"error":"consent required"}', 403);
+            case '/api/inbox':
+              return consented
+                  ? http.Response('{"notes":[]}', 200)
+                  : http.Response('{"error":"consent required"}', 403);
             case '/api/auth/logout':
               loggedOut = true;
               return http.Response('{"status":"ok"}', 200);

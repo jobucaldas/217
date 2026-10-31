@@ -10,6 +10,7 @@ Roles are picked once after first sign-in (`users.role` is NULL until then):
 - **partner** — joins one owner's calendar read-only via invite; gets optional PMS and pill-not-logged alerts (separate toggles + times).
 Switching role is refused while a calendar is shared. Period days drive cycle/PMS predictions (`backend/internal/cycle`), drawn on both calendars (dashed amber ring = expected PMS, the 7 days before a predicted period; pink drop = period, outlined drop = predicted period).
 Owners can record cycling, perimenopause, or menopause; menopause suppresses PMS, while perimenopause keeps PMS when period days are logged.
+Linked owner and partner can message each other (Messages screen, unread badge on the calendar app bar); bodies are sealed in `partner_notes` (`sender` = owner|partner).
 
 ## Tech Stack
 - Client: Flutter (Android + web)
@@ -87,6 +88,11 @@ Android deep-link PKCE:
 - `POST /api/share/enable|revoke` (owner), `POST /api/share/accept` (unset role or partner)
 - `GET|PUT /api/partner-alerts` (partner) — `{pms_enabled, pms_time, pill_enabled, pill_time, pill_repeat_enabled, pill_repeat_minutes}`; `pill_repeat_minutes` is 1-120
 
+### Messages (auth required; owner ↔ linked partner)
+- `GET /api/inbox` — `{notes: [{id, sender, body, created_at, read_at, from_name, from_email, from_me}]}`, sent and received, newest first; `unread_notes` in the session share counts unread received ones
+- `POST /api/messages` — `{body}` (≤ 2000 bytes) to the other side of the active share; 403 `share inactive` or when the recipient has not agreed to the current notice (`POST /api/partner-notes` is kept as an alias for older apps)
+- `POST /api/inbox/{id}/read` — recipient only
+
 ## Testing expectations
 - Backend: `docker compose run --rm test-backend` (store tests also hit PostgreSQL when `TEST_DATABASE_URL` is set; CI sets it)
 - New personal-data columns are sealed (`internal/store/sealed.go`); `TestSealExistingRowsDropsPlaintext` checks a dump and the raw table files for plaintext
@@ -98,3 +104,4 @@ Android deep-link PKCE:
 - Live WorkOS sign-in / authenticated calendar not verified in CI
 - Reminder delivery on native Android (previous Web Push/PWA path) not ported
 - Partner alerts are local Android notifications planned from the last sync (app open/resume); no server push, so a pill logged after his last sync can still trigger that day's alert. Web shows the toggles but cannot deliver.
+- Message notifications are local too: the app checks `/api/inbox` on open/resume and every 2 minutes in the foreground (Settings toggle, Android only), so a message sent while the app is closed is announced the next time it opens.

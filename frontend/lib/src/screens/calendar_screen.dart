@@ -27,6 +27,7 @@ class CalendarScreen extends StatefulWidget {
     this.cycleRefreshSignal,
     this.share = const ShareState(status: 'none'),
     this.onShareChanged,
+    this.onInboxSynced,
     this.partnerAlertScheduler,
     this.partnerAlertSyncQueue,
     this.onOwnerReminderResync,
@@ -44,6 +45,9 @@ class CalendarScreen extends StatefulWidget {
   final VoidCallback onOpenSettings;
   final Listenable? cycleRefreshSignal;
   final ValueChanged<ShareState>? onShareChanged;
+
+  /// The messages screen loaded (and marked read) these messages.
+  final ValueChanged<List<InboxMessage>>? onInboxSynced;
   final Future<LocalReminderSyncStatus> Function(List<PlannedAlert>)?
       partnerAlertScheduler;
   final PartnerAlertSyncQueue? partnerAlertSyncQueue;
@@ -705,35 +709,12 @@ class _CalendarScreenState extends State<CalendarScreen>
       appBar: AppBar(
         title: Text(widget.strings.brand),
         actions: [
-          if (widget.user.isOwner)
-            IconButton(
-              tooltip: widget.strings.inbox,
-              onPressed: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => InboxScreen(
-                      api: widget.api,
-                      strings: widget.strings,
-                    ),
-                  ),
-                );
-              },
-              icon: Badge(
-                isLabelVisible: widget.share.unreadNotes > 0,
-                label: Text('${widget.share.unreadNotes}'),
-                child: const Icon(Icons.inbox_outlined),
-              ),
-            ),
-          if (widget.user.isPartner && widget.share.isActive)
-            IconButton(
-              tooltip: widget.strings.leaveNote,
-              onPressed: () => showPartnerNoteDialog(
-                context: context,
-                api: widget.api,
-                strings: widget.strings,
-              ),
-              icon: const Icon(Icons.edit_note_outlined),
-            ),
+          InboxButton(
+            api: widget.api,
+            strings: widget.strings,
+            share: widget.share,
+            onSynced: widget.onInboxSynced,
+          ),
           IconButton(
             tooltip: widget.strings.settings,
             onPressed: widget.onOpenSettings,

@@ -395,13 +395,42 @@ class Strings {
         'Você entrou no calendário',
         'Te uniste al calendario',
       );
-  String get inbox => _t('Inbox', 'Caixa de entrada', 'Bandeja de entrada');
-  String get inboxEmpty =>
-      _t('No notes yet.', 'Nenhuma nota ainda.', 'Aún no hay notas.');
-  String get leaveNote =>
-      _t('Leave a note', 'Deixar uma nota', 'Dejar una nota');
+  String get inbox => _t('Messages', 'Mensagens', 'Mensajes');
+  String get inboxEmpty => _t(
+        'No messages yet.',
+        'Nenhuma mensagem ainda.',
+        'Aún no hay mensajes.',
+      );
+  String get messageHint =>
+      _t('Write a message', 'Escreva uma mensagem', 'Escribe un mensaje');
   String get sendNote => _t('Send', 'Enviar', 'Enviar');
-  String get noteSent => _t('Note sent', 'Nota enviada', 'Nota enviada');
+  String get messagesNeedPartner => _t(
+        'Link a partner in Settings to send messages.',
+        'Vincule um parceiro nos Ajustes para enviar mensagens.',
+        'Vincula a tu pareja en Ajustes para enviar mensajes.',
+      );
+  String get messageFromMe => _t('You', 'Você', 'Tú');
+  String get messageUnread => _t('New', 'Nova', 'Nuevo');
+  String messageNotifTitle(String from) => _t(
+        from.trim().isEmpty ? 'New message' : 'New message from $from',
+        from.trim().isEmpty ? 'Nova mensagem' : 'Nova mensagem de $from',
+        from.trim().isEmpty ? 'Nuevo mensaje' : 'Nuevo mensaje de $from',
+      );
+  String messageNotifManyBody(int count) => _t(
+        '$count new messages',
+        '$count mensagens novas',
+        '$count mensajes nuevos',
+      );
+  String get messageNotifsTitle => _t(
+        'Message notifications',
+        'Notificações de mensagens',
+        'Notificaciones de mensajes',
+      );
+  String get messageNotifsSubtitle => _t(
+        'Tells you about new messages when 217 opens or while it is open.',
+        'Avisa sobre mensagens novas quando o 217 abre ou enquanto está aberto.',
+        'Te avisa de mensajes nuevos al abrir 217 o mientras está abierto.',
+      );
   String get partnerRevokedTitle => _t(
         'You are not invited to her 217 calendar',
         'Você não está convidado ao calendário 217 dela',
@@ -689,6 +718,11 @@ class Strings {
         'The calendar owner must agree to the current privacy notice before you can view their calendar.',
         'A pessoa responsável pelo calendário precisa concordar com o aviso de privacidade atual antes que você possa vê-lo.',
         'La persona responsable del calendario debe aceptar el aviso de privacidad actual antes de que puedas verlo.',
+      );
+  String get partnerConsentRequired => _t(
+        'Your partner must agree to the current privacy notice before you can send messages.',
+        'Seu parceiro precisa concordar com o aviso de privacidade atual antes que você possa enviar mensagens.',
+        'Tu pareja debe aceptar el aviso de privacidad actual antes de que puedas enviar mensajes.',
       );
   String get downloadData =>
       _t('Download my data', 'Baixar meus dados', 'Descargar mis datos');
