@@ -9,6 +9,7 @@ import '../models.dart';
 import '../notifications/local_reminders.dart';
 import '../notifications/partner_alert_sync.dart';
 import '../notifications/partner_alert_sync_queue.dart';
+import 'message_notifications_tile.dart';
 import 'repeat_minutes_controller.dart';
 import 'repeat_settings_section.dart';
 
@@ -24,6 +25,8 @@ class PartnerAlertsScreen extends StatefulWidget {
     this.partnerAlertScheduler,
     this.cancelPartnerAlerts,
     this.syncQueue,
+    this.messageNotifications = true,
+    this.onMessageNotificationsChanged,
   });
 
   final ApiClient api;
@@ -37,6 +40,10 @@ class PartnerAlertsScreen extends StatefulWidget {
       partnerAlertScheduler;
   final Future<LocalReminderSyncStatus> Function()? cancelPartnerAlerts;
   final PartnerAlertSyncQueue? syncQueue;
+
+  /// Android only: new-message notifications, also in the background.
+  final bool messageNotifications;
+  final ValueChanged<bool>? onMessageNotificationsChanged;
 
   @override
   State<PartnerAlertsScreen> createState() => _PartnerAlertsScreenState();
@@ -399,6 +406,14 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
                   },
                   extra: _pillRepeatSection(),
                 ),
+                if (widget.onMessageNotificationsChanged != null) ...[
+                  const SizedBox(height: 12),
+                  MessageNotificationsTile(
+                    strings: strings,
+                    value: widget.messageNotifications,
+                    onChanged: widget.onMessageNotificationsChanged!,
+                  ),
+                ],
                 if (_error != null) ...[
                   const SizedBox(height: 12),
                   Text(

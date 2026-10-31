@@ -11,6 +11,8 @@ import 'config.dart';
 import 'i18n.dart';
 import 'models.dart';
 import 'notifications/local_reminders.dart';
+import 'notifications/message_sync.dart';
+import 'notifications/message_worker.dart';
 import 'notifications/daily_reminder_sync_queue.dart';
 import 'notifications/owner_reminder_repeat_sync.dart';
 import 'notifications/partner_alert_sync_queue.dart';
@@ -164,22 +166,13 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     }
     return _messageChain = _messageChain.then((_) async {
       try {
-        final upTo = await _prefs.messagesNotifiedUpTo(userId);
-        // First check on this device: start from here, no backlog alert.
-        if (notify && upTo != null && _messageNotifs && _user?.id == userId) {
-          final fresh = unannouncedMessages(messages, upTo);
-          if (fresh.isNotEmpty) {
-            final text = messageNotificationText(_strings, fresh);
-            await showMessageNotification(title: text.title, body: text.body);
-          }
-        }
-        // An empty first check still sets the starting point, so the
-        // first message that arrives later is announced.
-        final newest = newestReceived(messages, upTo) ??
-            DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
-        if (newest != upTo) {
-          await _prefs.saveMessagesNotifiedUpTo(userId, newest);
-        }
+        await announceNewMessages(
+          prefs: _prefs,
+          userId: userId,
+          messages: messages,
+          strings: _strings,
+          notify: notify && _messageNotifs && _user?.id == userId,
+        );
       } catch (_) {}
     });
   }
@@ -199,6 +192,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
   Future<void> _setMessageNotifs(bool enabled) async {
     setState(() => _messageNotifs = enabled);
     await _prefs.saveMessageNotifications(enabled);
+    await syncMessageWorker(enabled: enabled);
     if (enabled) await requestNotificationPermission();
   }
 
@@ -238,6 +232,8 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
         _autoUpdate = autoUpdate;
         _messageNotifs = messageNotifs;
       });
+      // Re-registers each launch so an updated app runs its own worker.
+      unawaited(syncMessageWorker(enabled: messageNotifs));
     } catch (_) {
       // Keep defaults.
     }
