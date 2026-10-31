@@ -16,8 +16,6 @@ class AppearancePrefs {
   static const languageKey = 'language';
   static const pendingInviteKey = 'pending_invite';
   static const reminderHintDismissedKey = 'reminder_hint_dismissed';
-  static const fabSideKey = 'today_fab_side';
-  static const fabBottomKey = 'today_fab_bottom';
   static const autoUpdateKey = 'auto_update';
   static const messageNotificationsKey = 'message_notifications';
   static const messagesNotifiedKeyPrefix = 'messages_notified_';
@@ -99,20 +97,6 @@ class AppearancePrefs {
       _storage.write(
           key: messagesNotifiedKeyPrefix + userId,
           value: at.toUtc().toIso8601String());
-
-  /// Magnetic today FAB: `right` (default) or `left`, plus bottom inset in logical px.
-  Future<({bool right, double bottom})> loadFabPosition() async {
-    final side = await _storage.read(key: fabSideKey);
-    final bottomRaw = await _storage.read(key: fabBottomKey);
-    final bottom = double.tryParse(bottomRaw ?? '') ?? 16.0;
-    return (right: side != 'left', bottom: bottom.clamp(8.0, 400.0).toDouble());
-  }
-
-  Future<void> saveFabPosition({required bool right, required double bottom}) =>
-      Future.wait([
-        _storage.write(key: fabSideKey, value: right ? 'right' : 'left'),
-        _storage.write(key: fabBottomKey, value: bottom.toStringAsFixed(1)),
-      ]);
 
   static ThemeMode _parseThemeMode(String? raw) {
     switch (raw) {

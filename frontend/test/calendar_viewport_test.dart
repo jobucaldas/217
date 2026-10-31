@@ -424,22 +424,16 @@ void main() {
   }
 
   testWidgets(
-    'record-today chip is a Positioned overlay (grid keeps 12px inset)',
+    'update-today button sits under the grid and opens today; tags and note show',
     (tester) async {
       const size = Size(390, 844);
       await tester.binding.setSurfaceSize(size);
       addTearDown(() => tester.binding.setSurfaceSize(null));
 
-      const gridPadding = EdgeInsets.fromLTRB(12, 4, 12, 12);
-      final reservedForFab = find.byWidgetPredicate(
-        (w) =>
-            w is Padding &&
-            w.padding == const EdgeInsets.fromLTRB(12, 4, 12, 72),
-      );
-      final overlayInset = find.byWidgetPredicate(
-        (w) => w is Padding && w.padding == gridPadding,
-      );
-
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day)
+          .toIso8601String()
+          .substring(0, 10);
       await tester.pumpWidget(
         MaterialApp(
           theme: buildApp217Theme(
@@ -449,7 +443,9 @@ void main() {
           home: MediaQuery(
             data: const MediaQueryData(size: size),
             child: CalendarScreen(
-              api: _FakeCalendarApi(),
+              api: _FakeCalendarApi([
+                Entry(date: today, taken: true, notes: 'Felt fine', heart: true),
+              ]),
               user: const User(
                 id: 'u1',
                 email: 'shot@example.invalid',
@@ -464,16 +460,29 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.byIcon(Icons.add), findsOneWidget);
+      final button = find.byKey(const ValueKey('update-day-button'));
       expect(find.text('Update today'), findsOneWidget);
-      expect(find.byType(Positioned), findsWidgets);
-      // Carousel keeps three month pages; each uses the 12px bottom inset.
-      expect(overlayInset, findsNWidgets(3));
+      expect(find.byKey(const ValueKey('day-tag-heart')), findsOneWidget);
+      expect(find.byKey(const ValueKey('day-tag-note')), findsOneWidget);
+      expect(find.text('Felt fine'), findsOneWidget);
+      final carousel = find.byKey(const ValueKey('month-carousel'));
       expect(
-        reservedForFab,
-        findsNothing,
-        reason: 'chip must not inflate month-grid bottomInset',
+        tester.getTopLeft(button).dy,
+        greaterThanOrEqualTo(tester.getBottomLeft(carousel).dy),
       );
+      // Month pages keep their 12px inset.
+      expect(
+        find.byWidgetPredicate(
+          (w) =>
+              w is Padding &&
+              w.padding == const EdgeInsets.fromLTRB(12, 4, 12, 12),
+        ),
+        findsNWidgets(3),
+      );
+
+      await tester.tap(button);
+      await tester.pumpAndSettle();
+      expect(find.byType(DayEditorSheet), findsOneWidget);
     },
   );
 
@@ -505,7 +514,6 @@ void main() {
         ),
       ),
     );
-    // Chip settle bounce (~860ms) + load.
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 900));
     await tester.pumpAndSettle();
