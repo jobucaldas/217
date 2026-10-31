@@ -590,8 +590,20 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
     InboxScreen._open++;
     WidgetsBinding.instance.addObserver(this);
     _compose.addListener(() => setState(() {}));
-    _refresh = Timer.periodic(_refreshEvery, (_) => _load());
+    _refresh = Timer.periodic(_refreshEvery, (_) {
+      if (_visible) _load();
+    });
     _load();
+  }
+
+  /// In the foreground with this conversation on top. Only then are
+  /// messages refreshed and marked read: a message fetched while the app is
+  /// backgrounded or the screen is covered stays unread (and notifiable).
+  bool get _visible {
+    if (!mounted) return false;
+    final state = WidgetsBinding.instance.lifecycleState;
+    if (state != null && state != AppLifecycleState.resumed) return false;
+    return ModalRoute.of(context)?.isCurrent ?? true;
   }
 
   @override
@@ -615,6 +627,8 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
     });
     try {
       var messages = await widget.api.listInbox();
+      // Closed, covered or backgrounded meanwhile: nothing was seen.
+      if (!_visible || generation != _loadGeneration) return;
       final unread = messages.where((m) => m.isUnread).toList();
       final marked = <String>{};
       if (unread.isNotEmpty) {
@@ -647,7 +661,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
           if (!ids.contains(m.id)) m,
       ]..sort((a, b) => b.createdAt.compareTo(a.createdAt));
       setState(() {
-        _newIds.addAll(unread.map((m) => m.id));
+        _newIds.addAll(marked);
         _messages = merged;
         _loading = false;
         _error = null;
