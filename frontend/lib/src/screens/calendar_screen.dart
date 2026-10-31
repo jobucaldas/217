@@ -245,6 +245,19 @@ class _CalendarScreenState extends State<CalendarScreen>
         _monthCache[_monthKey(_prevMonth)] = prevMap;
         _monthCache[_monthKey(_month)] = map;
         _monthCache[_monthKey(_nextMonth)] = nextMap;
+        // Today's month may be cached from an earlier visit: keep its
+        // today cell in step with the fresh read.
+        final todayMonth = _monthKey(today);
+        final todayCached = _monthCache[todayMonth];
+        if (todayCached != null && todayCached[_todayKey] != todayEntry) {
+          final next = Map<String, Entry>.of(todayCached);
+          if (todayEntry == null) {
+            next.remove(_todayKey);
+          } else {
+            next[_todayKey] = todayEntry;
+          }
+          _monthCache[todayMonth] = next;
+        }
         _showCachedMonths();
         _todayEntry = todayEntry;
       });
@@ -547,9 +560,11 @@ class _CalendarScreenState extends State<CalendarScreen>
     _nextEntries = _monthCache[_monthKey(_nextMonth)] ?? const {};
   }
 
+  /// Today comes from [_todayEntry], refreshed on every load even when
+  /// today's month is not one of the three cached around [_month].
   Entry? _visibleEntry(String key) {
-    final cached = _monthCache[_monthKey(DateTime.parse(key))]?[key];
-    return cached ?? (key == _todayKey ? _todayEntry : null);
+    if (key == _todayKey) return _todayEntry;
+    return _monthCache[_monthKey(DateTime.parse(key))]?[key];
   }
 
   void _setLocal(String key, Entry? entry) {

@@ -277,7 +277,10 @@ class DayNotePanel extends StatelessWidget {
     return IgnorePointer(
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final lineHeight = (style?.fontSize ?? 17) * (style?.height ?? 1.4);
+          // Same text scaling the Text below gets from the device setting.
+          final lineHeight = MediaQuery.textScalerOf(context)
+                  .scale(style?.fontSize ?? 17) *
+              (style?.height ?? 1.4);
           // 24px of vertical padding inside the panel.
           final maxLines =
               ((constraints.maxHeight - 24) / lineHeight).floor().clamp(1, 12);
