@@ -207,29 +207,30 @@ class _CalendarScreenState extends State<CalendarScreen>
         ),
       ]);
       if (!mounted || generation != _loadGeneration) return;
-      final map = {for (final e in results[0]) e.date: e};
-      final prevMap = {for (final e in results[1]) e.date: e};
-      final nextMap = {for (final e in results[2]) e.date: e};
-      Entry? todayEntry;
+      // Every month read here is fresh; today's month is one of the three
+      // unless the view is two or more months away, then it is read too.
+      final fresh = <String, Map<String, Entry>>{
+        _monthKey(_month): {for (final e in results[0]) e.date: e},
+        _monthKey(_prevMonth): {for (final e in results[1]) e.date: e},
+        _monthKey(_nextMonth): {for (final e in results[2]) e.date: e},
+      };
       final today = _today;
-      if (_month.year == today.year && _month.month == today.month) {
-        todayEntry = map[_todayKey];
-      } else {
+      final todayMonth = _monthKey(today);
+      if (!fresh.containsKey(todayMonth)) {
         try {
           final list = await widget.api.listEntries(today.year, today.month);
           if (!mounted || generation != _loadGeneration) return;
-          for (final e in list) {
-            if (e.date == _todayKey) {
-              todayEntry = e;
-              break;
-            }
-          }
+          fresh[todayMonth] = {for (final e in list) e.date: e};
         } catch (err) {
           if (!mounted || generation != _loadGeneration) return;
           if (_handleConsentFailure(err)) return;
-          todayEntry = _todayEntry;
+          // Keep what we have for today: _todayEntry is never older than
+          // the cached month (edits and reads update both).
         }
       }
+      final todayFresh = fresh[todayMonth];
+      final todayEntry =
+          todayFresh != null ? todayFresh[_todayKey] : _todayEntry;
       if (!mounted || generation != _loadGeneration) return;
       if (_pendingWrites > 0) {
         _reloadAfterWrites = true;
@@ -242,22 +243,8 @@ class _CalendarScreenState extends State<CalendarScreen>
       }
       _confirmed.clear();
       setState(() {
-        _monthCache[_monthKey(_prevMonth)] = prevMap;
-        _monthCache[_monthKey(_month)] = map;
-        _monthCache[_monthKey(_nextMonth)] = nextMap;
-        // Today's month may be cached from an earlier visit: keep its
-        // today cell in step with the fresh read.
-        final todayMonth = _monthKey(today);
-        final todayCached = _monthCache[todayMonth];
-        if (todayCached != null && todayCached[_todayKey] != todayEntry) {
-          final next = Map<String, Entry>.of(todayCached);
-          if (todayEntry == null) {
-            next.remove(_todayKey);
-          } else {
-            next[_todayKey] = todayEntry;
-          }
-          _monthCache[todayMonth] = next;
-        }
+        // Today's month included, so its grid matches _todayEntry.
+        _monthCache.addAll(fresh);
         _showCachedMonths();
         _todayEntry = todayEntry;
       });
@@ -560,8 +547,9 @@ class _CalendarScreenState extends State<CalendarScreen>
     _nextEntries = _monthCache[_monthKey(_nextMonth)] ?? const {};
   }
 
-  /// Today comes from [_todayEntry], refreshed on every load even when
-  /// today's month is not one of the three cached around [_month].
+  /// Today comes from [_todayEntry]: every successful load and every edit
+  /// set it, so it is never older than the cached month (a failed extra
+  /// read of today's month leaves both as they were).
   Entry? _visibleEntry(String key) {
     if (key == _todayKey) return _todayEntry;
     return _monthCache[_monthKey(DateTime.parse(key))]?[key];
