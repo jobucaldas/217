@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
+import 'package:intl/intl.dart';
 
 import 'package:a217/src/api/client.dart';
 import 'package:a217/src/config.dart';
@@ -485,6 +486,66 @@ void main() {
       expect(find.byType(DayEditorSheet), findsOneWidget);
     },
   );
+
+  testWidgets('swipe with a note showing changes month; days stay tappable',
+      (tester) async {
+    const size = Size(390, 844);
+    await tester.binding.setSurfaceSize(size);
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day)
+        .toIso8601String()
+        .substring(0, 10);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildApp217Theme(
+          brightness: Brightness.light,
+          palette: AppPalette.blue,
+        ),
+        home: MediaQuery(
+          data: const MediaQueryData(size: size),
+          child: CalendarScreen(
+            api: _FakeCalendarApi([
+              Entry(date: today, taken: true, notes: 'Felt fine'),
+            ]),
+            user: const User(
+              id: 'u1',
+              email: 'shot@example.invalid',
+              name: 'Shot',
+            ),
+            strings: const Strings(AppLanguage.en),
+            onOpenSettings: () {},
+            palette: AppPalette.blue,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Felt fine'), findsOneWidget);
+
+    // Finger drag (not fling) so the gesture spans several frames.
+    final carousel = find.byKey(const ValueKey('month-carousel'));
+    final gesture = await tester.startGesture(tester.getCenter(carousel));
+    for (var i = 0; i < 10; i++) {
+      await gesture.moveBy(const Offset(30, 0));
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    final prev = DateTime(now.year, now.month - 1);
+    final grid = find.byKey(ValueKey('${prev.year}-${prev.month}'));
+    expect(
+      find.text(DateFormat.yMMMM('en_US').format(prev)),
+      findsOneWidget,
+    );
+    expect(find.text('Felt fine'), findsOneWidget);
+
+    await tester.tap(find.descendant(of: grid, matching: find.text('15')));
+    await tester.pumpAndSettle();
+    expect(find.byType(DayEditorSheet), findsOneWidget);
+  });
 
   testWidgets('horizontal carousel swipe changes month with snap',
       (tester) async {

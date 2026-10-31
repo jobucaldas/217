@@ -471,6 +471,13 @@ class _CalendarScreenState extends State<CalendarScreen>
     _animateMonthTo(target, commitDelta: commit);
   }
 
+  /// A drag that never ends (the recognizer was disposed or lost the
+  /// arena) must not leave the grid ignoring taps.
+  void _onMonthDragCancel() {
+    if (!_monthDragging || _wheelDragging) return;
+    _animateMonthTo(0, commitDelta: 0);
+  }
+
   /// Horizontal two-finger touchpad swipes on web arrive as scroll signals
   /// (native touchpads send pan/zoom, which the drag recognizer handles).
   /// Mouse wheels and vertical scrolls never change the month.
@@ -933,6 +940,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                         onHorizontalDragStart: _onMonthDragStart,
                         onHorizontalDragUpdate: _onMonthDragUpdate,
                         onHorizontalDragEnd: (d) => _onMonthDragEnd(d, pageW),
+                        onHorizontalDragCancel: _onMonthDragCancel,
                         child: ClipRect(
                           key: const ValueKey('month-carousel'),
                           child: IgnorePointer(
@@ -1003,7 +1011,9 @@ class _CalendarScreenState extends State<CalendarScreen>
                         ),
                       ),
                     );
-                    if (!showNote) return carousel;
+                    // Same tree whether or not the note shows: swapping it
+                    // mid-swipe would rebuild the GestureDetector and drop
+                    // the drag.
                     return Stack(
                       fit: StackFit.expand,
                       children: [
@@ -1011,9 +1021,16 @@ class _CalendarScreenState extends State<CalendarScreen>
                         Positioned(
                           left: 16,
                           right: 16,
-                          top: gridBottom + 4,
+                          top: math.min(
+                            gridBottom + 4,
+                            constraints.maxHeight - 8,
+                          ),
                           bottom: 8,
-                          child: DayNotePanel(notes: selectedNotes),
+                          child: Visibility(
+                            visible: showNote,
+                            maintainState: true,
+                            child: DayNotePanel(notes: selectedNotes),
+                          ),
                         ),
                       ],
                     );
