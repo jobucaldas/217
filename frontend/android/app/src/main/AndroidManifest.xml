@@ -45,7 +45,7 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="com.caldasstudios.a217" />
+                <data android:scheme="com.caldasstudios.app217" />
             </intent-filter>
         </activity>
         <meta-data

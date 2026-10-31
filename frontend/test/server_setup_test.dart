@@ -19,7 +19,7 @@ import 'package:a217/src/theme/contrast.dart';
 AppConfig _noServer() => AppConfig(
       apiBaseUrl: '',
       workosClientId: 'client_build',
-      redirectUri: 'com.caldasstudios.a217://auth/callback',
+      redirectUri: 'com.caldasstudios.app217://auth/callback',
     );
 
 /// Fake 217 servers keyed by host; anything else is unreachable.

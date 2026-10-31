@@ -19,11 +19,15 @@ const workosAPIDefault = "https://api.workos.com"
 
 // NativeAuthRedirectURI is the Android AuthKit callback registered for this app.
 // Custom schemes are not exclusive across apps, so this allowlist is not a substitute for PKCE.
-const NativeAuthRedirectURI = "com.caldasstudios.a217://auth/callback"
+const NativeAuthRedirectURI = "com.caldasstudios.app217://auth/callback"
 
-// LegacyNativeAuthRedirectURI is the pre-rename Android callback, still accepted
-// so installed builds of the old application ID keep working.
-const LegacyNativeAuthRedirectURI = "com.jobucaldas.a217://auth/callback"
+// LegacyNativeAuthRedirectURIs are Android callbacks of earlier application IDs
+// (com.jobucaldas.a217, com.caldasstudios.a217), still accepted so installed
+// builds of those IDs keep working while their redirect URIs stay registered.
+var LegacyNativeAuthRedirectURIs = []string{
+	"com.jobucaldas.a217://auth/callback",
+	"com.caldasstudios.a217://auth/callback",
+}
 
 // DesktopAuthRedirectURI is the loopback callback the Windows and Linux apps listen on
 // while the system browser completes AuthKit (RFC 8252 section 7.3).
@@ -31,7 +35,15 @@ const DesktopAuthRedirectURI = "http://localhost:21717/auth/callback"
 
 // IsNativeRedirectURI reports whether uri is a callback registered for a native client.
 func IsNativeRedirectURI(uri string) bool {
-	return uri == NativeAuthRedirectURI || uri == LegacyNativeAuthRedirectURI || uri == DesktopAuthRedirectURI
+	if uri == NativeAuthRedirectURI || uri == DesktopAuthRedirectURI {
+		return true
+	}
+	for _, legacy := range LegacyNativeAuthRedirectURIs {
+		if uri == legacy {
+			return true
+		}
+	}
+	return false
 }
 
 // WorkOSOAuth is an AuthKit authorization-code client using PKCE.

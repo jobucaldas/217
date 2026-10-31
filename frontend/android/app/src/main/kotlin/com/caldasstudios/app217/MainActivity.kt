@@ -1,4 +1,4 @@
-package com.caldasstudios.a217
+package com.caldasstudios.app217
 
 import android.content.Intent
 import android.net.Uri
@@ -12,7 +12,7 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         // Share sheet (lib/src/platform/share_sheet.dart).
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.caldasstudios.a217/intents")
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.caldasstudios.app217/intents")
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "shareText" -> {
