@@ -174,7 +174,10 @@ class _CalendarScreenState extends State<CalendarScreen>
   /// alerts are replanned from it).
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed && mounted) _load();
+    if (state == AppLifecycleState.resumed && mounted) {
+      unawaited(widget.api.syncPending());
+      _load();
+    }
   }
 
   @override
@@ -749,6 +752,7 @@ class _CalendarScreenState extends State<CalendarScreen>
       appBar: AppBar(
         title: Text(widget.strings.brand),
         actions: [
+          _SyncStatus(api: widget.api, strings: widget.strings),
           InboxButton(
             api: widget.api,
             strings: widget.strings,
@@ -1876,4 +1880,37 @@ class _MarkButton extends StatelessWidget {
       selectedIcon: Icon(selectedIcon),
     );
   }
+}
+
+/// Offline, or day edits still waiting for the server; tap to send them now.
+class _SyncStatus extends StatelessWidget {
+  const _SyncStatus({required this.api, required this.strings});
+
+  final ApiClient api;
+  final Strings strings;
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+        listenable: Listenable.merge([api.offline, api.pendingWrites]),
+        builder: (context, _) {
+          final pending = api.pendingWrites.value;
+          if (!api.offline.value && pending == 0) {
+            return const SizedBox.shrink();
+          }
+          return IconButton(
+            key: const ValueKey('sync-status'),
+            tooltip: api.offline.value
+                ? strings.offlineStatus(pending)
+                : strings.pendingSync(pending),
+            onPressed: () => unawaited(api.syncPending()),
+            icon: Badge(
+              isLabelVisible: pending > 0,
+              label: Text('$pending'),
+              child: Icon(api.offline.value
+                  ? Icons.cloud_off_outlined
+                  : Icons.cloud_upload_outlined),
+            ),
+          );
+        },
+      );
 }

@@ -44,8 +44,11 @@ Browser (same origin) cookie flow:
  / → Flutter web → GET /api/auth/workos (JSON + binding cookie) → AuthKit → /api/auth/workos/callback → cookie → /
 
 Android deep-link PKCE:
-  Flutter → AuthKit → com.caldasstudios.app217://… → POST /api/auth/workos/exchange → Bearer
+  Flutter → AuthKit → com.caldasstudios.app217://… → POST /api/auth/workos/exchange (+ Keystore public key) → Bearer
+Android renewal (no sign-in): POST /api/auth/device/challenge → Keystore signs → POST /api/auth/device/session → Bearer
 ```
+
+Offline-first client: `ApiClient` keeps the last session, months, cycle and alert prefs per account in `LocalStore` (`frontend/lib/src/offline/`: SQLCipher SQLite on Android, memory elsewhere) and queues day edits in its outbox, sent in order by `syncPending()` (edit, resume, first request back online). Sign-out/account switch/server change clear it.
 
 ```
 ┌──────────────┐                 ┌─────────┐
@@ -64,7 +67,9 @@ Android deep-link PKCE:
 ### Auth
 - `GET /api/auth/workos` — browser AuthKit start
 - `GET /api/auth/workos/callback` — browser callback; the redirect URI is chosen at login from the request host (`X-Forwarded-Host`/`Host`) if it is in `APP_BASE_URL` + `APP_ALLOWED_ORIGINS`, else `APP_BASE_URL`, and stored with the attempt (sealed) for the exchange and final redirect
-- `POST /api/auth/workos/exchange` — native PKCE exchange
+- `POST /api/auth/workos/exchange` — native PKCE exchange; optional `device_public_key` (base64 PKIX P-256) → `device_key_id`
+- `POST /api/auth/device/challenge` — `{key_id}` → single-use `{challenge}` (2 min)
+- `POST /api/auth/device/session` — `{key_id, challenge, signature}` (SHA256withECDSA over `217 device session v1\n<key_id>\n<challenge>`) → Bearer; logout revokes the key
 - `GET /api/auth/session` — cookie or Bearer
 - `POST /api/auth/logout`
 
@@ -101,6 +106,8 @@ Android deep-link PKCE:
 - APK: `docker compose run --rm apk`
 
 ## Remaining gaps
+- Offline: cycle predictions are the last ones the server sent (no on-device recomputation); share, role, consent and alert settings need the server; desktop/web keep the offline copy in memory only and sign in again when the session ends
+- Accounts signed in before device keys must sign in once more to get one
 - Live WorkOS sign-in / authenticated calendar not verified in CI
 - Reminder delivery on native Android (previous Web Push/PWA path) not ported
 - Partner alerts are local Android notifications planned from the last sync (app open/resume); no server push, so a pill logged after his last sync can still trigger that day's alert. Web shows the toggles but cannot deliver.

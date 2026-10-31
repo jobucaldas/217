@@ -156,6 +156,8 @@ Download from [GitHub Releases](https://github.com/jobucaldas/217/releases/tag/n
 
 The native apps ship **no built-in server**. On first launch they ask for yours: type its address (`217.example.com`) or paste an invite link (`https://217.example.com/?invite=CODE`), then **Connect**. They sign in with the WorkOS client ID your server reports, so one download works with any server. Release builds need `https://`. To switch servers, sign out and tap **Server: …** on the sign-in screen (switching signs you out).
 
+**Staying signed in, offline.** On Android, sign-in creates a P-256 key in the Android Keystore (StrongBox when the phone has one); the server keeps only its public half. When the session runs out the app signs a one-time challenge with it and gets a new one, so you sign in again only after signing out, deleting the account, or 180 days without opening the app. The app also keeps the calendar on the phone and opens offline: day edits are saved at once and sent, in order, once the server is reachable again (a cloud icon shows how many are waiting). Signing out sends what it can and erases the rest from the phone.
+
 Every push to `main` publishes the apps and images as `nightly` (rolling) and as an immutable `YYYYMMDDHHMMSS_<shortsha>` release.
 
 ## Security
@@ -171,7 +173,7 @@ Every push to `main` publishes the apps and images as `nightly` (rolling) and as
 
 The `certs` service writes a private CA and the `postgres` / `backend` certificates to the `certs` volume on every start, reissuing them before they expire (restart the stack afterwards); the CA key is discarded. Running your own way? `server -init-tls DIR` (`-postgres-hosts`, `-backend-hosts`, `-postgres-uid`, `-backend-uid`) writes the same files, `TLS_CERT_FILE` / `TLS_KEY_FILE` make the API serve HTTPS, and an `https://` `BACKEND_UPSTREAM` with `SSL_CERT_DIR` pointing at the CA makes Caddy verify it.
 
-**At rest.** The API seals personal data with AES-256-GCM before it reaches PostgreSQL: emails, names, every day entry (taken, notes, intimacy, period), messages between owner and partner, invite codes, push subscriptions and sign-in secrets. Each value is bound to its row, so it cannot be moved to another user. Lookups use keyed HMAC digests, never the plaintext. What stays readable in the database: ids, dates of logged days, roles, share status, who sent a message and when, reminder times and timestamps. Session tokens are stored as SHA-256 digests; client IP addresses and user agents are not stored.
+**At rest.** The API seals personal data with AES-256-GCM before it reaches PostgreSQL: emails, names, every day entry (taken, notes, intimacy, period), messages between owner and partner, invite codes, push subscriptions and sign-in secrets. Each value is bound to its row, so it cannot be moved to another user. Lookups use keyed HMAC digests, never the plaintext. What stays readable in the database: ids, dates of logged days, roles, share status, who sent a message and when, reminder times and timestamps. Session tokens are stored as SHA-256 digests and device keys as public keys only; client IP addresses and user agents are not stored. On Android the app's copy of the calendar lives in an SQLCipher-encrypted SQLite file whose random key is kept in Keystore-backed storage; app backups are off.
 
 **Rotating the key.** Put the current key in `DATA_ENCRYPTION_KEY_PREVIOUS` (comma-separate several), a new one in `DATA_ENCRYPTION_KEY`, restart: the API reseals everything on start. Running several API instances? Do it as a coordinated restart, never a rolling one: stop all of them, start one with the new settings (it reseals before it serves), then start the rest. Drop the old key the same way. The API checks every stored value's key at start and refuses to run with a key that cannot open them.
 
@@ -190,7 +192,7 @@ The `certs` service writes a private CA and the `postgres` / `backend` certifica
 | Access and portability | Settings → **Download my data**: everything held about the account as JSON (`GET /api/account/export`) |
 | Correction | Any day can be edited or cleared |
 | Erasure, withdrawing consent | Settings → **Delete account** removes the account and all its data (also without `WORKOS_API_KEY`, which only decides whether the WorkOS sign-in identity goes too). A departing partner leaves the owner's share revoked |
-| Minimization and retention | No IP addresses or user agents are stored. Expired sessions and sign-in attempts, reminder deliveries older than 30 days and shares revoked over 30 days ago are purged hourly |
+| Minimization and retention | No IP addresses or user agents are stored. Expired sessions and sign-in attempts, device keys unused for 180 days, reminder deliveries older than 30 days and shares revoked over 30 days ago are purged hourly |
 | No third parties | Fonts ship with the app; the web engine's fallback fonts are fetched by the server (`/gstatic/`), so browsers never contact Google. Sign-in goes through WorkOS, named in the notice |
 | Security | See [Security](#security) |
 
