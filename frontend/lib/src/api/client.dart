@@ -142,6 +142,7 @@ class ApiClient {
 
   Future<void> _dropLocalData() async {
     _userId = null;
+    _calendarGeneration++;
     pendingWrites.value = 0;
     await _local.clearAll();
   }
@@ -182,6 +183,9 @@ class ApiClient {
 
   String? _role;
 
+  /// Moves whenever the calendar kept on the device is cleared or changes.
+  int _calendarGeneration = 0;
+
   /// Months and predictions kept here belong to one calendar: the owner's
   /// own, or the one a partner follows. When that changes (joined another
   /// owner, share revoked, role switched) the old copy goes.
@@ -191,6 +195,7 @@ class ApiClient {
         : 'own';
     final known = await _local.readDoc(userId, 'calendar');
     if (known == calendar) return;
+    _calendarGeneration++;
     if (known != null) await _local.clearCalendar(userId);
     await _local.writeDoc(userId, 'calendar', calendar);
   }
@@ -685,12 +690,13 @@ class ApiClient {
   /// Offline, the last predictions seen on this device.
   Future<CycleInfo> getCycle(String today) => _orCached(
         () async {
+          final scope = _scope;
           final response =
               await _send('GET', _uri('/api/cycle', {'today': today}));
           if (response.statusCode != 200) {
             throw ApiException('cycle', response);
           }
-          await _keepDoc('cycle', response.body);
+          await _keepDoc(scope, 'cycle', response.body);
           return CycleInfo.fromJson(
               jsonDecode(response.body) as Map<String, dynamic>);
         },
@@ -702,19 +708,31 @@ class ApiClient {
         },
       );
 
-  /// Saves a server answer for the signed-in account.
-  Future<void> _keepDoc(String key, String body) async {
-    final userId = _userId;
-    if (userId != null) await _local.writeDoc(userId, key, body);
+  /// Which account and calendar a request was sent for; taken before the
+  /// request so a late answer is never kept for another one.
+  ({String? userId, int calendar}) get _scope =>
+      (userId: _userId, calendar: _calendarGeneration);
+
+  bool _isCurrent(({String? userId, int calendar}) scope) =>
+      scope.userId != null &&
+      scope.userId == _userId &&
+      scope.calendar == _calendarGeneration;
+
+  /// Saves a server answer, if it is still for the account and calendar on
+  /// the device.
+  Future<void> _keepDoc(
+      ({String? userId, int calendar}) scope, String key, String body) async {
+    if (_isCurrent(scope)) await _local.writeDoc(scope.userId!, key, body);
   }
 
   Future<PartnerAlertPreference> getPartnerAlerts() => _orCached(
         () async {
+          final scope = _scope;
           final response = await _send('GET', _uri('/api/partner-alerts'));
           if (response.statusCode != 200) {
             throw ApiException('partner alerts', response);
           }
-          await _keepDoc('partner_alerts', response.body);
+          await _keepDoc(scope, 'partner_alerts', response.body);
           return PartnerAlertPreference.fromJson(
             jsonDecode(response.body) as Map<String, dynamic>,
           );
@@ -731,6 +749,7 @@ class ApiClient {
   Future<PartnerAlertPreference> savePartnerAlerts(
     PartnerAlertPreference pref,
   ) async {
+    final scope = _scope;
     final response = await _send(
       'PUT',
       _uri('/api/partner-alerts'),
@@ -739,7 +758,7 @@ class ApiClient {
     if (response.statusCode != 200) {
       throw ApiException('save partner alerts', response);
     }
-    await _keepDoc('partner_alerts', response.body);
+    await _keepDoc(scope, 'partner_alerts', response.body);
     return PartnerAlertPreference.fromJson(
       jsonDecode(response.body) as Map<String, dynamic>,
     );
@@ -749,7 +768,8 @@ class ApiClient {
   /// offline, as last seen on this device.
   Future<List<Entry>> listEntries(int year, int month) => _orCached(
         () async {
-          final userId = _userId;
+          final scope = _scope;
+          final userId = scope.userId;
           final writes = _queueChanges;
           final response = await _send(
             'GET',
@@ -765,7 +785,7 @@ class ApiClient {
           final entries = (decoded['entries'] as List<dynamic>? ?? const [])
               .map((e) => Entry.fromJson(e as Map<String, dynamic>))
               .toList();
-          if (userId == null || userId != _userId) return entries;
+          if (userId == null || !_isCurrent(scope)) return entries;
           if (writes != _queueChanges) {
             // An edit was queued or sent meanwhile: this answer may predate
             // it. The device's copy has every edit; the next load refreshes.
@@ -924,16 +944,17 @@ class ApiClient {
 
   Future<ReminderPreference?> getReminderPreference() => _orCached(
         () async {
+          final scope = _scope;
           final response =
               await _send('GET', _uri('/api/reminders/preferences'));
           if (response.statusCode == 404) {
-            await _keepDoc('reminder', 'null');
+            await _keepDoc(scope, 'reminder', 'null');
             return null;
           }
           if (response.statusCode != 200) {
             throw ApiException('reminder preference', response);
           }
-          await _keepDoc('reminder', response.body);
+          await _keepDoc(scope, 'reminder', response.body);
           return ReminderPreference.fromJson(
               jsonDecode(response.body) as Map<String, dynamic>);
         },
@@ -952,6 +973,7 @@ class ApiClient {
     bool repeatEnabled = false,
     int repeatMinutes = 15,
   }) async {
+    final scope = _scope;
     final response = await _send(
       'PUT',
       _uri('/api/reminders/preferences'),
@@ -966,7 +988,7 @@ class ApiClient {
     if (response.statusCode != 200) {
       throw ApiException('save reminder', response);
     }
-    await _keepDoc('reminder', response.body);
+    await _keepDoc(scope, 'reminder', response.body);
     return ReminderPreference.fromJson(
         jsonDecode(response.body) as Map<String, dynamic>);
   }
