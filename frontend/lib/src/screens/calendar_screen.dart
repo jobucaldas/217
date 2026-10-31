@@ -216,16 +216,25 @@ class _CalendarScreenState extends State<CalendarScreen>
       };
       final today = _today;
       final todayMonth = _monthKey(today);
-      if (!fresh.containsKey(todayMonth)) {
+      // The summary's day must be as fresh as the grid: read its month too
+      // when the view has moved away from it.
+      final selected = _selected;
+      final selectedMonth = selected == null ? null : _monthKey(selected);
+      for (final month in [
+        today,
+        if (selected != null) selected,
+      ]) {
+        if (fresh.containsKey(_monthKey(month))) continue;
         try {
-          final list = await widget.api.listEntries(today.year, today.month);
+          final list = await widget.api.listEntries(month.year, month.month);
           if (!mounted || generation != _loadGeneration) return;
-          fresh[todayMonth] = {for (final e in list) e.date: e};
+          fresh[_monthKey(month)] = {for (final e in list) e.date: e};
         } catch (err) {
           if (!mounted || generation != _loadGeneration) return;
           if (_handleConsentFailure(err)) return;
-          // Keep what we have for today: _todayEntry is never older than
-          // the cached month (edits and reads update both).
+          // Today keeps _todayEntry, which is never older than the cached
+          // month (edits and reads update both). A selected day whose month
+          // could not be read falls back to today below.
         }
       }
       final todayFresh = fresh[todayMonth];
@@ -245,6 +254,11 @@ class _CalendarScreenState extends State<CalendarScreen>
       setState(() {
         // Today's month included, so its grid matches _todayEntry.
         _monthCache.addAll(fresh);
+        if (selectedMonth != null &&
+            _selected == selected &&
+            !fresh.containsKey(selectedMonth)) {
+          _selected = null;
+        }
         _showCachedMonths();
         _todayEntry = todayEntry;
       });
@@ -903,7 +917,12 @@ class _CalendarScreenState extends State<CalendarScreen>
                     // The note goes in the room the grid leaves below itself,
                     // when there is enough for a line or two.
                     final noteRoom = constraints.maxHeight - gridBottom - 12;
-                    final showNote = selectedNotes.isNotEmpty && noteRoom >= 52;
+                    // Hidden while months slide: the incoming month may be
+                    // a week taller than the room measured for this one.
+                    final showNote = selectedNotes.isNotEmpty &&
+                        noteRoom >= 52 &&
+                        !_monthDragging &&
+                        !_monthSnap.isAnimating;
                     // Web touchpad swipes arrive as scroll signals; native
                     // touchpad pan/zoom reaches the horizontal drag below.
                     final carousel = Listener(
