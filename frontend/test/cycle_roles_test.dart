@@ -488,9 +488,10 @@ void main() {
           findsWidgets,
         );
       }
-      // Legend explains both marks.
+      // Legend explains both marks; today's tags repeat PMS.
       expect(find.text('Period'), findsOneWidget);
-      expect(find.text('Expected PMS'), findsOneWidget);
+      expect(find.text('Expected PMS'), findsNWidgets(2));
+      expect(find.byKey(const ValueKey('day-tag-pms')), findsOneWidget);
     });
 
     testWidgets(

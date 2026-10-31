@@ -219,6 +219,8 @@ class Strings {
       _t('Record today', 'Registrar hoje', 'Registrar hoy');
   String get updateToday =>
       _t('Update today', 'Atualizar hoje', 'Actualizar hoy');
+  String updateDay(String day) =>
+      _t('Update $day', 'Atualizar $day', 'Actualizar $day');
 
   // Reminders
   String get remindersOff =>
@@ -515,6 +517,8 @@ class Strings {
   // Cycle / PMS
   String get periodLabel => _t('Period', 'Menstruação', 'Regla');
   String get legendPeriod => periodLabel;
+  String get predictedPeriod =>
+      _t('Predicted period', 'Menstruação prevista', 'Regla prevista');
   String get legendPms =>
       _t('Expected PMS', 'TPM prevista', 'SPM previsto');
   String cycleNext(String period, String pms) => _t(

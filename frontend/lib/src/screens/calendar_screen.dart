@@ -15,7 +15,7 @@ import '../theme/app_theme.dart';
 import 'dialog_actions.dart';
 import 'reminder_hint.dart';
 import 'share_screens.dart';
-import 'today_nudge.dart';
+import 'day_summary.dart';
 
 class CalendarScreen extends StatefulWidget {
   const CalendarScreen({
@@ -107,6 +107,9 @@ class _CalendarScreenState extends State<CalendarScreen>
   Entry? _todayEntry;
   String? _error;
 
+  /// Day the bottom summary describes; null follows today.
+  DateTime? _selected;
+
   /// Pixel drag offset: negative = finger left (peek next month).
   double _dragPx = 0;
   bool _monthDragging = false;
@@ -127,6 +130,11 @@ class _CalendarScreenState extends State<CalendarScreen>
   }
 
   String get _todayKey => DateFormat('yyyy-MM-dd').format(_today);
+
+  DateTime get _selectedDay {
+    final selected = _selected;
+    return selected == null || selected.isAfter(_today) ? _today : selected;
+  }
 
   DateTime get _prevMonth => DateTime(_month.year, _month.month - 1);
   DateTime get _nextMonth => DateTime(_month.year, _month.month + 1);
@@ -199,29 +207,39 @@ class _CalendarScreenState extends State<CalendarScreen>
         ),
       ]);
       if (!mounted || generation != _loadGeneration) return;
-      final map = {for (final e in results[0]) e.date: e};
-      final prevMap = {for (final e in results[1]) e.date: e};
-      final nextMap = {for (final e in results[2]) e.date: e};
-      Entry? todayEntry;
+      // Every month read here is fresh; today's month is one of the three
+      // unless the view is two or more months away, then it is read too.
+      final fresh = <String, Map<String, Entry>>{
+        _monthKey(_month): {for (final e in results[0]) e.date: e},
+        _monthKey(_prevMonth): {for (final e in results[1]) e.date: e},
+        _monthKey(_nextMonth): {for (final e in results[2]) e.date: e},
+      };
       final today = _today;
-      if (_month.year == today.year && _month.month == today.month) {
-        todayEntry = map[_todayKey];
-      } else {
+      final todayMonth = _monthKey(today);
+      // The summary's day must be as fresh as the grid: read its month too
+      // when the view has moved away from it.
+      final selected = _selected;
+      final selectedMonth = selected == null ? null : _monthKey(selected);
+      for (final month in [
+        today,
+        if (selected != null) selected,
+      ]) {
+        if (fresh.containsKey(_monthKey(month))) continue;
         try {
-          final list = await widget.api.listEntries(today.year, today.month);
+          final list = await widget.api.listEntries(month.year, month.month);
           if (!mounted || generation != _loadGeneration) return;
-          for (final e in list) {
-            if (e.date == _todayKey) {
-              todayEntry = e;
-              break;
-            }
-          }
+          fresh[_monthKey(month)] = {for (final e in list) e.date: e};
         } catch (err) {
           if (!mounted || generation != _loadGeneration) return;
           if (_handleConsentFailure(err)) return;
-          todayEntry = _todayEntry;
+          // Today keeps _todayEntry, which is never older than the cached
+          // month (edits and reads update both). A selected day whose month
+          // could not be read falls back to today below.
         }
       }
+      final todayFresh = fresh[todayMonth];
+      final todayEntry =
+          todayFresh != null ? todayFresh[_todayKey] : _todayEntry;
       if (!mounted || generation != _loadGeneration) return;
       if (_pendingWrites > 0) {
         _reloadAfterWrites = true;
@@ -234,9 +252,13 @@ class _CalendarScreenState extends State<CalendarScreen>
       }
       _confirmed.clear();
       setState(() {
-        _monthCache[_monthKey(_prevMonth)] = prevMap;
-        _monthCache[_monthKey(_month)] = map;
-        _monthCache[_monthKey(_nextMonth)] = nextMap;
+        // Today's month included, so its grid matches _todayEntry.
+        _monthCache.addAll(fresh);
+        if (selectedMonth != null &&
+            _selected == selected &&
+            !fresh.containsKey(selectedMonth)) {
+          _selected = null;
+        }
         _showCachedMonths();
         _todayEntry = todayEntry;
       });
@@ -449,6 +471,13 @@ class _CalendarScreenState extends State<CalendarScreen>
     _animateMonthTo(target, commitDelta: commit);
   }
 
+  /// A drag that never ends (the recognizer was disposed or lost the
+  /// arena) must not leave the grid ignoring taps.
+  void _onMonthDragCancel() {
+    if (!_monthDragging || _wheelDragging) return;
+    _animateMonthTo(0, commitDelta: 0);
+  }
+
   /// Horizontal two-finger touchpad swipes on web arrive as scroll signals
   /// (native touchpads send pan/zoom, which the drag recognizer handles).
   /// Mouse wheels and vertical scrolls never change the month.
@@ -526,6 +555,9 @@ class _CalendarScreenState extends State<CalendarScreen>
     });
   }
 
+  static bool _isSameDay(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
+
   static String _monthKey(DateTime month) => '${month.year}-${month.month}';
 
   /// Points the three visible grids at the cached months (empty when a month
@@ -536,9 +568,12 @@ class _CalendarScreenState extends State<CalendarScreen>
     _nextEntries = _monthCache[_monthKey(_nextMonth)] ?? const {};
   }
 
+  /// Today comes from [_todayEntry]: every successful load and every edit
+  /// set it, so it is never older than the cached month (a failed extra
+  /// read of today's month leaves both as they were).
   Entry? _visibleEntry(String key) {
-    final cached = _monthCache[_monthKey(DateTime.parse(key))]?[key];
-    return cached ?? (key == _todayKey ? _todayEntry : null);
+    if (key == _todayKey) return _todayEntry;
+    return _monthCache[_monthKey(DateTime.parse(key))]?[key];
   }
 
   void _setLocal(String key, Entry? entry) {
@@ -628,12 +663,15 @@ class _CalendarScreenState extends State<CalendarScreen>
     }
   }
 
+  /// Selects [day] for the summary; on an editable calendar, also opens
+  /// its editor.
   Future<void> _openDay(DateTime day) async {
+    setState(() => _selected = _isSameDay(day, _today) ? null : day);
     if (!widget.share.canEditCalendar) {
       return;
     }
     final key = DateFormat('yyyy-MM-dd').format(day);
-    final existing = key == _todayKey ? _todayEntry : _entries[key];
+    final existing = _visibleEntry(key);
     // Persist via onCommit — not the sheet's pop value. Nested note-dialog
     // → sheet pop races on web and can drop the result (note/heart "save"
     // that only sticks after Taken/Missed re-tap).
@@ -676,8 +714,10 @@ class _CalendarScreenState extends State<CalendarScreen>
             ? App217Colors.statusTaken(brightness, widget.palette)
             : App217Colors.statusMissed(brightness, widget.palette));
     final humanDate = DateFormat.MMMMd(locale).format(_today);
-    final nudgeVisible =
-        TodayNudge.isVisible(_todayEntry) && widget.share.canEditCalendar;
+    final selectedDay = _selectedDay;
+    final selectedKey = DateFormat('yyyy-MM-dd').format(selectedDay);
+    final selectedEntry = _visibleEntry(selectedKey);
+    final selectedNotes = selectedEntry?.notes.trim() ?? '';
     final pmsColor = App217Colors.pms(brightness, widget.palette);
     final periodColor = App217Colors.period(brightness, widget.palette);
     final todayKind = _cycle.kindOf(_today);
@@ -876,9 +916,23 @@ class _CalendarScreenState extends State<CalendarScreen>
                 child: LayoutBuilder(
                   builder: (context, constraints) {
                     final pageW = constraints.maxWidth;
+                    final gridBottom = _MonthGrid.contentHeight(
+                      _month,
+                      constraints.biggest,
+                      bottomInset: 12,
+                    );
+                    // The note goes in the room the grid leaves below itself,
+                    // when there is enough for a line or two.
+                    final noteRoom = constraints.maxHeight - gridBottom - 12;
+                    // Hidden while months slide: the incoming month may be
+                    // a week taller than the room measured for this one.
+                    final showNote = selectedNotes.isNotEmpty &&
+                        noteRoom >= 52 &&
+                        !_monthDragging &&
+                        !_monthSnap.isAnimating;
                     // Web touchpad swipes arrive as scroll signals; native
                     // touchpad pan/zoom reaches the horizontal drag below.
-                    return Listener(
+                    final carousel = Listener(
                       behavior: HitTestBehavior.opaque,
                       onPointerSignal: (e) => _onMonthPointerSignal(e, pageW),
                       child: GestureDetector(
@@ -886,6 +940,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                         onHorizontalDragStart: _onMonthDragStart,
                         onHorizontalDragUpdate: _onMonthDragUpdate,
                         onHorizontalDragEnd: (d) => _onMonthDragEnd(d, pageW),
+                        onHorizontalDragCancel: _onMonthDragCancel,
                         child: ClipRect(
                           key: const ValueKey('month-carousel'),
                           child: IgnorePointer(
@@ -909,6 +964,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                                         widget.strings.weekdayInitials,
                                     palette: widget.palette,
                                     bottomInset: 12,
+                                    selected: selectedDay,
                                   ),
                                 ),
                                 Transform.translate(
@@ -927,6 +983,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                                         widget.strings.weekdayInitials,
                                     palette: widget.palette,
                                     bottomInset: 12,
+                                    selected: selectedDay,
                                   ),
                                 ),
                                 Transform.translate(
@@ -945,6 +1002,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                                         widget.strings.weekdayInitials,
                                     palette: widget.palette,
                                     bottomInset: 12,
+                                    selected: selectedDay,
                                   ),
                                 ),
                               ],
@@ -953,8 +1011,42 @@ class _CalendarScreenState extends State<CalendarScreen>
                         ),
                       ),
                     );
+                    // Same tree whether or not the note shows: swapping it
+                    // mid-swipe would rebuild the GestureDetector and drop
+                    // the drag.
+                    return Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        carousel,
+                        Positioned(
+                          left: 16,
+                          right: 16,
+                          top: math.min(
+                            gridBottom + 4,
+                            constraints.maxHeight - 8,
+                          ),
+                          bottom: 8,
+                          child: Visibility(
+                            visible: showNote,
+                            maintainState: true,
+                            child: DayNotePanel(notes: selectedNotes),
+                          ),
+                        ),
+                      ],
+                    );
                   },
                 ),
+              ),
+              DaySummaryBar(
+                strings: widget.strings,
+                day: selectedDay,
+                isToday: _isSameDay(selectedDay, _today),
+                entry: selectedEntry,
+                cycleKind: _cycle.kindOf(selectedDay),
+                palette: widget.palette,
+                onEdit: widget.share.canEditCalendar
+                    ? () => _openDay(selectedDay)
+                    : null,
               ),
             ],
           ),
@@ -1004,12 +1096,6 @@ class _CalendarScreenState extends State<CalendarScreen>
                 onDismiss: widget.onDismissReminderHint!,
               ),
             ),
-          if (nudgeVisible)
-            TodayNudge(
-              strings: widget.strings,
-              todayEntry: _todayEntry,
-              onRecord: () => _openDay(_today),
-            ),
         ],
       ),
     );
@@ -1035,31 +1121,12 @@ class _LegendDot extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final Widget mark;
-    if (icon != null) {
-      mark = Icon(icon, size: 14, color: color);
-    } else if (dashed) {
-      mark = CustomPaint(
-        size: const Size(14, 14),
-        painter: DashedRingPainter(
-          color: color,
-          radius: 4,
-          strokeWidth: 1.4,
-          dash: 2.5,
-          gap: 2.5,
-        ),
-      );
-    } else {
-      mark = Container(
-        width: 12,
-        height: 12,
-        decoration: BoxDecoration(
-          color: outlined ? Colors.transparent : color,
-          shape: BoxShape.circle,
-          border: Border.all(color: color, width: 1.5),
-        ),
-      );
-    }
+    final mark = DayMark(
+      color: color,
+      outlined: outlined,
+      dashed: dashed,
+      icon: icon,
+    );
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -1088,7 +1155,29 @@ class _MonthGrid extends StatelessWidget {
     required this.palette,
     required this.bottomInset,
     this.cycle = CycleInfo.empty,
+    this.selected,
   });
+
+  /// Grid padding, weekday row and week rows: how far down [month] reaches
+  /// in a page of [size]. Mirrors the layout in [build].
+  static double contentHeight(
+    DateTime month,
+    Size size, {
+    required double bottomInset,
+  }) {
+    final rows = _rowCount(month);
+    final rowsHeight = size.height - 4 - bottomInset - _weekdayRowHeight;
+    final rowHeight = math.min(rowsHeight / rows, (size.width - 24) / 7 * 1.15);
+    return 4 + _weekdayRowHeight + rowHeight * rows;
+  }
+
+  static const double _weekdayRowHeight = 28;
+
+  static int _rowCount(DateTime month) {
+    final leading = DateTime(month.year, month.month, 1).weekday % 7;
+    final days = DateTime(month.year, month.month + 1, 0).day;
+    return ((leading + days) / 7).ceil();
+  }
 
   final DateTime month;
   final DateTime today;
@@ -1100,12 +1189,15 @@ class _MonthGrid extends StatelessWidget {
   final AppPalette palette;
   final double bottomInset;
 
+  /// Day described by the summary bar; outlined when it is not today.
+  final DateTime? selected;
+
   @override
   Widget build(BuildContext context) {
     final first = DateTime(month.year, month.month, 1);
     final daysInMonth = DateTime(month.year, month.month + 1, 0).day;
     final leading = first.weekday % 7; // Sunday-first
-    final rowCount = ((leading + daysInMonth) / 7).ceil();
+    final rowCount = _rowCount(month);
 
     Widget slot(int index) {
       if (index < leading || index >= leading + daysInMonth) {
@@ -1121,6 +1213,10 @@ class _MonthGrid extends StatelessWidget {
         cycleKind: cycle.kindOf(date),
         onTap: onDayTap,
         palette: palette,
+        selected: selected != null &&
+            selected!.year == date.year &&
+            selected!.month == date.month &&
+            selected!.day == date.day,
       );
     }
 
@@ -1132,7 +1228,7 @@ class _MonthGrid extends StatelessWidget {
       child: Column(
         children: [
           SizedBox(
-            height: 28,
+            height: _weekdayRowHeight,
             child: Row(
               children: [
                 for (final label in weekdayLabels)
@@ -1201,10 +1297,12 @@ class _DayCell extends StatelessWidget {
     required this.onTap,
     required this.palette,
     this.cycleKind = CycleDayKind.none,
+    this.selected = false,
   });
 
   final DateTime day;
   final DateTime today;
+  final bool selected;
   final String todayLabel;
   final Entry? entry;
   final CycleDayKind cycleKind;
@@ -1266,8 +1364,10 @@ class _DayCell extends StatelessWidget {
             border: Border.all(
               color: isToday
                   ? scheme.primary
-                  : scheme.outline.withValues(alpha: 0.55),
-              width: isToday ? 2.2 : 1,
+                  : selected
+                      ? scheme.onSurface
+                      : scheme.outline.withValues(alpha: 0.55),
+              width: isToday || selected ? 2.2 : 1,
             ),
           ),
           child: FittedBox(
@@ -1334,50 +1434,6 @@ class _DayCell extends StatelessWidget {
       ),
     );
   }
-}
-
-/// Dashed rounded-rect outline hugging the widget's bounds.
-class DashedRingPainter extends CustomPainter {
-  const DashedRingPainter({
-    required this.color,
-    required this.radius,
-    this.strokeWidth = 2,
-    this.dash = 4,
-    this.gap = 3,
-  });
-
-  final Color color;
-  final double radius;
-  final double strokeWidth;
-  final double dash;
-  final double gap;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final rect = (Offset.zero & size).deflate(strokeWidth / 2);
-    final path = Path()
-      ..addRRect(RRect.fromRectAndRadius(rect, Radius.circular(radius)));
-    final paint = Paint()
-      ..color = color
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = strokeWidth
-      ..strokeCap = StrokeCap.round;
-    for (final metric in path.computeMetrics()) {
-      var d = 0.0;
-      while (d < metric.length) {
-        canvas.drawPath(metric.extractPath(d, d + dash), paint);
-        d += dash + gap;
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(DashedRingPainter old) =>
-      old.color != color ||
-      old.radius != radius ||
-      old.strokeWidth != strokeWidth ||
-      old.dash != dash ||
-      old.gap != gap;
 }
 
 class DayEditResult {

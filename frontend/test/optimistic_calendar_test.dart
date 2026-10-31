@@ -115,8 +115,8 @@ void main() {
   testWidgets('Taken shows at once, before the server answers', (tester) async {
     final api = _SlowApi()..writeGate = Completer<void>();
     await _pumpCalendar(tester, api);
-    // Header status and legend.
-    expect(find.text('Open'), findsNWidgets(2));
+    // Header status, legend and today's tag.
+    expect(find.text('Open'), findsNWidgets(3));
     final listCallsBefore = api.listCalls;
 
     await _tapTakenOnToday(tester);
@@ -146,7 +146,7 @@ void main() {
     await _tapTakenOnToday(tester);
     await tester.pumpAndSettle();
 
-    expect(find.text('Open'), findsNWidgets(2));
+    expect(find.text('Open'), findsNWidgets(3));
     expect(find.byKey(const ValueKey('calendar-error')), findsOneWidget);
   });
 
@@ -236,7 +236,7 @@ void main() {
     api.writeGate!.complete();
     await tester.pumpAndSettle();
 
-    expect(find.text('Open'), findsNWidgets(2));
+    expect(find.text('Open'), findsNWidgets(3));
     expect(find.byKey(const ValueKey('calendar-error')), findsOneWidget);
   });
 

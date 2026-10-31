@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
+import 'package:intl/intl.dart';
 
 import 'package:a217/src/api/client.dart';
 import 'package:a217/src/config.dart';
@@ -424,22 +425,16 @@ void main() {
   }
 
   testWidgets(
-    'record-today chip is a Positioned overlay (grid keeps 12px inset)',
+    'update-today button sits under the grid and opens today; tags and note show',
     (tester) async {
       const size = Size(390, 844);
       await tester.binding.setSurfaceSize(size);
       addTearDown(() => tester.binding.setSurfaceSize(null));
 
-      const gridPadding = EdgeInsets.fromLTRB(12, 4, 12, 12);
-      final reservedForFab = find.byWidgetPredicate(
-        (w) =>
-            w is Padding &&
-            w.padding == const EdgeInsets.fromLTRB(12, 4, 12, 72),
-      );
-      final overlayInset = find.byWidgetPredicate(
-        (w) => w is Padding && w.padding == gridPadding,
-      );
-
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day)
+          .toIso8601String()
+          .substring(0, 10);
       await tester.pumpWidget(
         MaterialApp(
           theme: buildApp217Theme(
@@ -449,7 +444,9 @@ void main() {
           home: MediaQuery(
             data: const MediaQueryData(size: size),
             child: CalendarScreen(
-              api: _FakeCalendarApi(),
+              api: _FakeCalendarApi([
+                Entry(date: today, taken: true, notes: 'Felt fine', heart: true),
+              ]),
               user: const User(
                 id: 'u1',
                 email: 'shot@example.invalid',
@@ -464,18 +461,91 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.byIcon(Icons.add), findsOneWidget);
+      final button = find.byKey(const ValueKey('update-day-button'));
       expect(find.text('Update today'), findsOneWidget);
-      expect(find.byType(Positioned), findsWidgets);
-      // Carousel keeps three month pages; each uses the 12px bottom inset.
-      expect(overlayInset, findsNWidgets(3));
+      expect(find.byKey(const ValueKey('day-tag-heart')), findsOneWidget);
+      expect(find.byKey(const ValueKey('day-tag-note')), findsOneWidget);
+      expect(find.text('Felt fine'), findsOneWidget);
+      final carousel = find.byKey(const ValueKey('month-carousel'));
       expect(
-        reservedForFab,
-        findsNothing,
-        reason: 'chip must not inflate month-grid bottomInset',
+        tester.getTopLeft(button).dy,
+        greaterThanOrEqualTo(tester.getBottomLeft(carousel).dy),
       );
+      // Month pages keep their 12px inset.
+      expect(
+        find.byWidgetPredicate(
+          (w) =>
+              w is Padding &&
+              w.padding == const EdgeInsets.fromLTRB(12, 4, 12, 12),
+        ),
+        findsNWidgets(3),
+      );
+
+      await tester.tap(button);
+      await tester.pumpAndSettle();
+      expect(find.byType(DayEditorSheet), findsOneWidget);
     },
   );
+
+  testWidgets('swipe with a note showing changes month; days stay tappable',
+      (tester) async {
+    const size = Size(390, 844);
+    await tester.binding.setSurfaceSize(size);
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day)
+        .toIso8601String()
+        .substring(0, 10);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildApp217Theme(
+          brightness: Brightness.light,
+          palette: AppPalette.blue,
+        ),
+        home: MediaQuery(
+          data: const MediaQueryData(size: size),
+          child: CalendarScreen(
+            api: _FakeCalendarApi([
+              Entry(date: today, taken: true, notes: 'Felt fine'),
+            ]),
+            user: const User(
+              id: 'u1',
+              email: 'shot@example.invalid',
+              name: 'Shot',
+            ),
+            strings: const Strings(AppLanguage.en),
+            onOpenSettings: () {},
+            palette: AppPalette.blue,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Felt fine'), findsOneWidget);
+
+    // Finger drag (not fling) so the gesture spans several frames.
+    final carousel = find.byKey(const ValueKey('month-carousel'));
+    final gesture = await tester.startGesture(tester.getCenter(carousel));
+    for (var i = 0; i < 10; i++) {
+      await gesture.moveBy(const Offset(30, 0));
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    final prev = DateTime(now.year, now.month - 1);
+    final grid = find.byKey(ValueKey('${prev.year}-${prev.month}'));
+    expect(
+      find.text(DateFormat.yMMMM('en_US').format(prev)),
+      findsOneWidget,
+    );
+    expect(find.text('Felt fine'), findsOneWidget);
+
+    await tester.tap(find.descendant(of: grid, matching: find.text('15')));
+    await tester.pumpAndSettle();
+    expect(find.byType(DayEditorSheet), findsOneWidget);
+  });
 
   testWidgets('horizontal carousel swipe changes month with snap',
       (tester) async {
@@ -505,7 +575,6 @@ void main() {
         ),
       ),
     );
-    // Chip settle bounce (~860ms) + load.
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 900));
     await tester.pumpAndSettle();
