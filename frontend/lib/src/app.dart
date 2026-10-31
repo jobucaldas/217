@@ -142,6 +142,8 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     final user = _user;
     if (!mounted || !_foreground || user == null || !user.hasRole) return;
     if (_consentRequired || (user.isPartner && !_share.isActive)) return;
+    // An open conversation refreshes (and marks read) on its own.
+    if (InboxScreen.isOpen) return;
     final epoch = _accountEpoch;
     try {
       final messages = await _api.listInbox();
@@ -171,12 +173,27 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
             await showMessageNotification(title: text.title, body: text.body);
           }
         }
-        final newest = newestReceived(messages, upTo);
-        if (newest != null && newest != upTo) {
+        // An empty first check still sets the starting point, so the
+        // first message that arrives later is announced.
+        final newest = newestReceived(messages, upTo) ??
+            DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
+        if (newest != upTo) {
           await _prefs.saveMessagesNotifiedUpTo(userId, newest);
         }
       } catch (_) {}
     });
+  }
+
+  /// Message notifications are on by default, so the permission (Android
+  /// 13+) is asked once, the first time the user opens Messages: a moment
+  /// where a prompt about messages makes sense.
+  Future<void> _askMessagePermissionOnce() async {
+    if (!_messageNotifs || !supportsLocalReminders) return;
+    try {
+      if (await _prefs.messagePermissionAsked()) return;
+      await _prefs.saveMessagePermissionAsked();
+      await requestNotificationPermission();
+    } catch (_) {}
   }
 
   Future<void> _setMessageNotifs(bool enabled) async {
@@ -362,6 +379,8 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
 
   Future<void> _cancelAllNotifications() {
     unawaited(_cancelDailyReminder());
+    // A message shown for this account must not outlive its session.
+    unawaited(cancelMessageNotification());
     return _cancelPartnerAlerts();
   }
 
@@ -896,7 +915,10 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
       onOpenSettings: _openSettings,
       cycleRefreshSignal: _stageChanges,
       onShareChanged: (share) => setState(() => _share = share),
-      onInboxSynced: (messages) => _onMessagesSynced(_user!.id, messages),
+      onInboxSynced: (messages) {
+        unawaited(_askMessagePermissionOnce());
+        _onMessagesSynced(_user!.id, messages);
+      },
       partnerAlertSyncQueue: _partnerAlertSyncQueue,
       onOwnerReminderResync: _user!.isOwner ? _syncOwnerReminder : null,
       sessionGeneration: () => _sessionGeneration,

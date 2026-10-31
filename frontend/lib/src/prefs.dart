@@ -21,6 +21,7 @@ class AppearancePrefs {
   static const autoUpdateKey = 'auto_update';
   static const messageNotificationsKey = 'message_notifications';
   static const messagesNotifiedKeyPrefix = 'messages_notified_';
+  static const messagePermissionAskedKey = 'message_permission_asked';
 
   Future<({ThemeMode mode, AppPalette palette})> load() async {
     final modeRaw = await _storage.read(key: themeModeKey);
@@ -80,6 +81,13 @@ class AppearancePrefs {
 
   Future<void> saveMessageNotifications(bool enabled) =>
       _storage.write(key: messageNotificationsKey, value: enabled ? '1' : '0');
+
+  /// Whether the notification permission was already asked for messages.
+  Future<bool> messagePermissionAsked() async =>
+      await _storage.read(key: messagePermissionAskedKey) == '1';
+
+  Future<void> saveMessagePermissionAsked() =>
+      _storage.write(key: messagePermissionAskedKey, value: '1');
 
   /// Server time of the newest message already announced or seen by
   /// [userId] on this device, so a message is never notified twice.

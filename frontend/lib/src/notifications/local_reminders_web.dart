@@ -58,3 +58,5 @@ Future<bool> showMessageNotification({
     false;
 
 Future<bool> requestNotificationPermission() async => false;
+
+Future<void> cancelMessageNotification() async {}

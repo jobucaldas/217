@@ -46,6 +46,9 @@ Future<bool> showMessageNotification({
 }) =>
     impl.showMessageNotification(title: title, body: body);
 
+/// Dismisses the "new message" notification (sign-out, account deletion).
+Future<void> cancelMessageNotification() => impl.cancelMessageNotification();
+
 /// Asks for the notification permission (Android 13+). True when granted or
 /// not needed; false when denied or unsupported.
 Future<bool> requestNotificationPermission() =>

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -554,16 +556,30 @@ class InboxScreen extends StatefulWidget {
   final bool canSend;
   final ValueChanged<List<InboxMessage>>? onSynced;
 
+  static int _open = 0;
+
+  /// A conversation is on screen (it refreshes and marks read itself).
+  static bool get isOpen => _open > 0;
+
   @override
   State<InboxScreen> createState() => _InboxScreenState();
 }
 
-class _InboxScreenState extends State<InboxScreen> {
+class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
+  /// While the conversation is open it refreshes itself this often, so a
+  /// reply shows up without leaving the screen.
+  static const _refreshEvery = Duration(seconds: 20);
+
   final _compose = TextEditingController();
   bool _loading = true;
   bool _sending = false;
   String? _error;
   List<InboxMessage> _messages = const [];
+  Timer? _refresh;
+  int _loadGeneration = 0;
+
+  /// Sent from this screen; kept on view if a slower refresh misses them.
+  final Map<String, InboxMessage> _sent = {};
 
   /// Highlighted for this visit, though already marked read on the server.
   final Set<String> _newIds = {};
@@ -571,32 +587,47 @@ class _InboxScreenState extends State<InboxScreen> {
   @override
   void initState() {
     super.initState();
+    InboxScreen._open++;
+    WidgetsBinding.instance.addObserver(this);
     _compose.addListener(() => setState(() {}));
+    _refresh = Timer.periodic(_refreshEvery, (_) => _load());
     _load();
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) _load();
+  }
+
+  @override
   void dispose() {
+    InboxScreen._open--;
+    WidgetsBinding.instance.removeObserver(this);
+    _refresh?.cancel();
     _compose.dispose();
     super.dispose();
   }
 
   Future<void> _load() async {
+    final generation = ++_loadGeneration;
     setState(() {
-      _loading = _messages.isEmpty;
-      _error = null;
+      _loading = _messages.isEmpty && _error == null && _loading;
     });
     try {
       var messages = await widget.api.listInbox();
       final unread = messages.where((m) => m.isUnread).toList();
+      final marked = <String>{};
       if (unread.isNotEmpty) {
-        _newIds.addAll(unread.map((m) => m.id));
-        await Future.wait(unread
-            .map((m) => widget.api.markInboxNoteRead(m.id).catchError((_) {})));
+        await Future.wait(unread.map((m) => widget.api
+            .markInboxNoteRead(m.id)
+            .then((_) => marked.add(m.id))
+            .catchError((_) => false)));
         final now = DateTime.now().toUtc();
+        // Only what the server confirmed counts as read; the rest stays
+        // unread (badge included) and is retried on the next refresh.
         messages = [
           for (final m in messages)
-            m.isUnread
+            marked.contains(m.id)
                 ? InboxMessage(
                     id: m.id,
                     body: m.body,
@@ -608,17 +639,26 @@ class _InboxScreenState extends State<InboxScreen> {
                 : m,
         ];
       }
-      if (!mounted) return;
+      if (!mounted || generation != _loadGeneration) return;
+      final ids = {for (final m in messages) m.id};
+      final merged = [
+        ...messages,
+        for (final m in _sent.values)
+          if (!ids.contains(m.id)) m,
+      ]..sort((a, b) => b.createdAt.compareTo(a.createdAt));
       setState(() {
-        _messages = messages;
+        _newIds.addAll(unread.map((m) => m.id));
+        _messages = merged;
         _loading = false;
+        _error = null;
       });
       widget.onSynced?.call(messages);
     } catch (err) {
-      if (!mounted) return;
+      if (!mounted || generation != _loadGeneration) return;
       setState(() {
         _loading = false;
-        _error = friendlyError(widget.strings, err);
+        // A failed background refresh keeps the conversation on screen.
+        if (_messages.isEmpty) _error = friendlyError(widget.strings, err);
       });
     }
   }
@@ -631,8 +671,9 @@ class _InboxScreenState extends State<InboxScreen> {
       final sent = await widget.api.sendMessage(body);
       if (!mounted) return;
       _compose.clear();
+      _sent[sent.id] = sent;
       setState(() {
-        _messages = [sent, ..._messages];
+        _messages = [sent, ..._messages.where((m) => m.id != sent.id)];
         _sending = false;
       });
     } catch (err) {
@@ -666,10 +707,24 @@ class _InboxScreenState extends State<InboxScreen> {
         ),
       );
     } else if (_messages.isEmpty) {
-      body = Center(
-        child: Text(
-          widget.strings.inboxEmpty,
-          style: text.bodyLarge?.copyWith(color: scheme.onSurfaceVariant),
+      body = RefreshIndicator(
+        onRefresh: _load,
+        child: LayoutBuilder(
+          builder: (context, constraints) => ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            children: [
+              SizedBox(
+                height: constraints.maxHeight,
+                child: Center(
+                  child: Text(
+                    widget.strings.inboxEmpty,
+                    style: text.bodyLarge
+                        ?.copyWith(color: scheme.onSurfaceVariant),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       );
     } else {

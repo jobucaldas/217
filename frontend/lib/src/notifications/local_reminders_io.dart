@@ -313,3 +313,11 @@ Future<bool> requestNotificationPermission() async {
     return false;
   }
 }
+
+Future<void> cancelMessageNotification() async {
+  if (!supportsLocalReminders) return;
+  try {
+    await _ensureReady(requestPermission: false);
+    await _plugin.cancel(_messageNotifId);
+  } catch (_) {}
+}
