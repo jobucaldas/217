@@ -203,6 +203,8 @@ class _SettingsPageState extends State<SettingsPage> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
         children: [
+          if (widget.onLogout != null)
+            _SyncNotice(api: widget.api, strings: widget.strings),
           if (widget.onLogout != null && !widget.consentPending) ...[
             _SettingsSection(
               children: [
@@ -668,6 +670,114 @@ class _SettingsSection extends StatelessWidget {
       child: Column(
         children: children,
       ),
+    );
+  }
+}
+
+/// Offline, or day edits not yet on the server (the dot on the calendar's
+/// settings button points here).
+class _SyncNotice extends StatefulWidget {
+  const _SyncNotice({required this.api, required this.strings});
+
+  final ApiClient api;
+  final Strings strings;
+
+  @override
+  State<_SyncNotice> createState() => _SyncNoticeState();
+}
+
+class _SyncNoticeState extends State<_SyncNotice> {
+  bool _syncing = false;
+
+  Future<void> _sync() async {
+    setState(() => _syncing = true);
+    try {
+      // A session refresh first: it also tells whether the server is back.
+      await widget.api.currentSession();
+      await widget.api.syncPending();
+    } catch (_) {
+      // Still offline: the notice stays.
+    } finally {
+      if (mounted) setState(() => _syncing = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final api = widget.api;
+    return ListenableBuilder(
+      listenable: Listenable.merge([api.offline, api.pendingWrites]),
+      builder: (context, _) {
+        final offline = api.offline.value;
+        final pending = api.pendingWrites.value;
+        if (!offline && pending == 0) return const SizedBox.shrink();
+        final scheme = Theme.of(context).colorScheme;
+        final text = Theme.of(context).textTheme;
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 16),
+          child: Material(
+            key: const ValueKey('settings-sync-notice'),
+            color: scheme.secondaryContainer,
+            borderRadius: BorderRadius.circular(16),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 8, 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        offline ? Icons.wifi_off_rounded : Icons.sync_rounded,
+                        size: 20,
+                        color: scheme.onSecondaryContainer,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          offline
+                              ? widget.strings.syncOfflineTitle
+                              : widget.strings.syncPendingTitle,
+                          style: text.titleSmall?.copyWith(
+                            color: scheme.onSecondaryContainer,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(30, 4, 8, 0),
+                    child: Text(
+                      widget.strings.syncNoticeBody(offline, pending),
+                      style: text.bodyMedium?.copyWith(
+                        color: scheme.onSecondaryContainer,
+                      ),
+                    ),
+                  ),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton.icon(
+                      style: TextButton.styleFrom(
+                        foregroundColor: scheme.onSecondaryContainer,
+                      ),
+                      onPressed: _syncing ? null : _sync,
+                      icon: _syncing
+                          ? const SizedBox.square(
+                              dimension: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.refresh_rounded, size: 18),
+                      label: Text(
+                        offline ? widget.strings.retry : widget.strings.syncNow,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }

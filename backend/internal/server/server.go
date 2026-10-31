@@ -180,6 +180,8 @@ func Run(cfg Config) error {
 	mux.HandleFunc("GET /api/auth/workos", h.StartWorkOSOAuth)
 	mux.HandleFunc("GET /api/auth/workos/callback", h.WorkOSOAuthCallback)
 	mux.HandleFunc("POST /api/auth/workos/exchange", h.ExchangeWorkOS)
+	mux.HandleFunc("POST /api/auth/device/challenge", h.DeviceChallenge)
+	mux.HandleFunc("POST /api/auth/device/session", h.DeviceSession)
 
 	mux.HandleFunc("GET /api/entries", h.ConsentMiddleware(h.ListEntries))
 	mux.HandleFunc("GET /api/entries/{date}", h.ConsentMiddleware(h.GetEntry))

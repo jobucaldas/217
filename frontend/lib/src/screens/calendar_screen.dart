@@ -174,7 +174,10 @@ class _CalendarScreenState extends State<CalendarScreen>
   /// alerts are replanned from it).
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed && mounted) _load();
+    if (state == AppLifecycleState.resumed && mounted) {
+      unawaited(widget.api.syncPending());
+      _load();
+    }
   }
 
   @override
@@ -758,7 +761,18 @@ class _CalendarScreenState extends State<CalendarScreen>
           IconButton(
             tooltip: widget.strings.settings,
             onPressed: widget.onOpenSettings,
-            icon: const Icon(Icons.settings_outlined),
+            // Dot: offline or day edits waiting; Settings says which.
+            icon: ListenableBuilder(
+              listenable: Listenable.merge(
+                [widget.api.offline, widget.api.pendingWrites],
+              ),
+              builder: (context, _) => Badge(
+                key: const ValueKey('settings-sync-dot'),
+                isLabelVisible: widget.api.offline.value ||
+                    widget.api.pendingWrites.value > 0,
+                child: const Icon(Icons.settings_outlined),
+              ),
+            ),
           ),
         ],
       ),
