@@ -3,7 +3,6 @@ package store
 import (
 	"database/sql"
 	"fmt"
-	"strings"
 
 	"217/backend/internal/model"
 	"github.com/google/uuid"
@@ -84,9 +83,7 @@ func (s *PGStore) buildShareState(user *model.User) (*model.ShareState, error) {
 			 LIMIT 1`, user.ID,
 		).Scan(&share.ID, &share.OwnerID, &partnerID, &invite, &share.Status, &share.CreatedAt, &share.UpdatedAt)
 		if err == sql.ErrNoRows {
-			_ = s.db.QueryRow(
-				`SELECT COUNT(*) FROM partner_notes WHERE owner_id = $1 AND read_at IS NULL`, user.ID,
-			).Scan(&state.UnreadNotes)
+			state.UnreadNotes = s.unreadMessages(user.ID)
 			return state, nil
 		}
 		if err != nil {
@@ -103,9 +100,7 @@ func (s *PGStore) buildShareState(user *model.User) (*model.ShareState, error) {
 				state.PartnerName = partner.Name
 			}
 		}
-		_ = s.db.QueryRow(
-			`SELECT COUNT(*) FROM partner_notes WHERE owner_id = $1 AND read_at IS NULL`, user.ID,
-		).Scan(&state.UnreadNotes)
+		state.UnreadNotes = s.unreadMessages(user.ID)
 		return state, nil
 	}
 
@@ -135,6 +130,7 @@ func (s *PGStore) buildShareState(user *model.User) (*model.ShareState, error) {
 	}
 	state.Status = share.Status
 	state.CanEditCalendar = false
+	state.UnreadNotes = s.unreadMessages(user.ID)
 	if owner, err := s.GetUserByID(share.OwnerID); err == nil {
 		state.OwnerName = owner.Name
 		state.OwnerEmail = owner.Email
@@ -320,142 +316,6 @@ func (s *PGStore) CalendarSubjectID(userID string) (string, error) {
 	return ownerID, nil
 }
 
-func (s *PGStore) ListInboxNotes(ownerID string) ([]*model.PartnerNote, error) {
-	rows, err := s.db.Query(
-		`SELECT n.id, n.owner_id, n.partner_id, n.body_sealed, n.created_at, n.read_at
-		 FROM partner_notes n
-		 WHERE n.owner_id = $1
-		 ORDER BY n.created_at DESC`, ownerID,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("listing inbox: %w", err)
-	}
-	out := make([]*model.PartnerNote, 0)
-	for rows.Next() {
-		note := &model.PartnerNote{}
-		var readAt sql.NullTime
-		var body []byte
-		if err := rows.Scan(&note.ID, &note.OwnerID, &note.PartnerID, &body, &note.CreatedAt, &readAt); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		if note.Body, err = s.kr.OpenString(body, noteCtx(note.ID, note.OwnerID, note.PartnerID)); err != nil {
-			rows.Close()
-			return nil, fmt.Errorf("opening partner note %s: %w", note.ID, err)
-		}
-		if readAt.Valid {
-			t := readAt.Time
-			note.ReadAt = &t
-		}
-		out = append(out, note)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	senders := map[string]*model.User{}
-	for _, note := range out {
-		if _, ok := senders[note.PartnerID]; !ok {
-			senders[note.PartnerID], _ = s.GetUserByID(note.PartnerID)
-		}
-		if from := senders[note.PartnerID]; from != nil {
-			note.FromName, note.FromEmail = from.Name, from.Email
-		}
-	}
-	return out, nil
-}
-
-func (s *PGStore) CreatePartnerNote(partnerID, body string) (*model.PartnerNote, error) {
-	body = strings.TrimSpace(body)
-	if body == "" {
-		return nil, fmt.Errorf("note body required")
-	}
-	if len(body) > 2000 {
-		return nil, fmt.Errorf("note too long")
-	}
-	user, err := s.GetUserByID(partnerID)
-	if err != nil {
-		return nil, err
-	}
-	if model.NormalizeRole(user.Role) != model.RolePartner {
-		return nil, fmt.Errorf("only partners can leave inbox notes")
-	}
-	var ownerID string
-	var ownerConsent int
-	err = s.db.QueryRow(
-		`SELECT s.owner_id, u.consent_version FROM calendar_shares s
-		 JOIN users u ON u.id = s.owner_id
-		 WHERE s.partner_id = $1 AND s.status = 'active' LIMIT 1`, partnerID,
-	).Scan(&ownerID, &ownerConsent)
-	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("share inactive")
-	}
-	if err != nil {
-		return nil, err
-	}
-	if ownerConsent < model.ConsentVersion {
-		return nil, fmt.Errorf("calendar owner consent required")
-	}
-	note := &model.PartnerNote{}
-	id := uuid.NewString() // chosen here: the seal is bound to it
-	err = s.db.QueryRow(
-		`INSERT INTO partner_notes (id, owner_id, partner_id, body_sealed)
-		 VALUES ($1, $2, $3, $4)
-		 RETURNING id, owner_id, partner_id, created_at`,
-		id, ownerID, partnerID, s.kr.SealString(body, noteCtx(id, ownerID, partnerID)),
-	).Scan(&note.ID, &note.OwnerID, &note.PartnerID, &note.CreatedAt)
-	if err != nil {
-		return nil, fmt.Errorf("creating partner note: %w", err)
-	}
-	note.Body = body
-	note.FromName = user.Name
-	note.FromEmail = user.Email
-	return note, nil
-}
-
-func (s *PGStore) ListSentPartnerNotes(partnerID string) ([]*model.PartnerNote, error) {
-	rows, err := s.db.Query(
-		`SELECT id, owner_id, partner_id, body_sealed, created_at, read_at
-		 FROM partner_notes WHERE partner_id = $1 ORDER BY created_at DESC`, partnerID,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("listing sent notes: %w", err)
-	}
-	defer rows.Close()
-	out := make([]*model.PartnerNote, 0)
-	for rows.Next() {
-		note := &model.PartnerNote{}
-		var readAt sql.NullTime
-		var body []byte
-		if err := rows.Scan(&note.ID, &note.OwnerID, &note.PartnerID, &body, &note.CreatedAt, &readAt); err != nil {
-			return nil, err
-		}
-		if note.Body, err = s.kr.OpenString(body, noteCtx(note.ID, note.OwnerID, note.PartnerID)); err != nil {
-			return nil, fmt.Errorf("opening partner note %s: %w", note.ID, err)
-		}
-		if readAt.Valid {
-			note.ReadAt = &readAt.Time
-		}
-		out = append(out, note)
-	}
-	return out, rows.Err()
-}
-
-func (s *PGStore) MarkInboxNoteRead(ownerID, noteID string) error {
-	res, err := s.db.Exec(
-		`UPDATE partner_notes SET read_at = COALESCE(read_at, NOW())
-		 WHERE id = $1 AND owner_id = $2`, noteID, ownerID,
-	)
-	if err != nil {
-		return fmt.Errorf("marking note read: %w", err)
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return fmt.Errorf("note not found")
-	}
-	return nil
-}
-
 func (s *PGStore) SetRole(userID, role string) (*model.User, error) {
 	role = model.NormalizeRole(role)
 	if role == "" {
@@ -530,31 +390,6 @@ func (s *PGStore) ListAccountSubscriptions(userID string) ([]model.ExportPushSub
 			return nil, err
 		}
 		out = append(out, model.ExportPushSubscription{Endpoint: payload.Endpoint})
-	}
-	return out, rows.Err()
-}
-
-func (s *PGStore) ListReceivedPartnerNotes(userID string) ([]*model.PartnerNote, error) {
-	rows, err := s.db.Query(`SELECT n.id,n.owner_id,n.partner_id,n.body_sealed,n.created_at,n.read_at FROM partner_notes n WHERE n.owner_id=$1 ORDER BY n.created_at DESC`, userID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []*model.PartnerNote{}
-	for rows.Next() {
-		n := &model.PartnerNote{}
-		var sealed []byte
-		var read sql.NullTime
-		if err := rows.Scan(&n.ID, &n.OwnerID, &n.PartnerID, &sealed, &n.CreatedAt, &read); err != nil {
-			return nil, err
-		}
-		if n.Body, err = s.kr.OpenString(sealed, noteCtx(n.ID, n.OwnerID, n.PartnerID)); err != nil {
-			return nil, err
-		}
-		if read.Valid {
-			n.ReadAt = &read.Time
-		}
-		out = append(out, n)
 	}
 	return out, rows.Err()
 }

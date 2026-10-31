@@ -140,7 +140,7 @@ func TestExportHasEverythingAboutTheCaller(t *testing.T) {
 	if _, err := s.AcceptShare(partner.ID, share.InviteCode); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CreatePartnerNote(partner.ID, "hello"); err != nil {
+	if _, err := s.SendMessage(partner.ID, "hello"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.UpsertPartnerAlerts(partner.ID, model.PartnerAlertPreference{PMSEnabled: true, PMSTime: "09:00", PillEnabled: true, PillTime: "21:00"}); err != nil {
@@ -164,7 +164,7 @@ func TestExportHasEverythingAboutTheCaller(t *testing.T) {
 	}
 	mine := export(owner.ID)
 	if mine.User.Email != "owner@example.com" || len(mine.Entries) != 2 || mine.Entries[0].Date != "2025-01-15" ||
-		len(mine.NotesReceived) != 1 || mine.NotesReceived[0].Body != "hello" || mine.Share.PartnerEmail != "partner@example.com" {
+		len(mine.MessagesReceived) != 1 || mine.MessagesReceived[0].Body != "hello" || mine.Share.PartnerEmail != "partner@example.com" {
 		t.Fatalf("owner export incomplete: %+v", mine)
 	}
 	if _, err := s.UpsertPartnerAlerts(partner.ID, model.PartnerAlertPreference{PMSEnabled: true, PMSTime: "09:00", PillEnabled: true, PillTime: "21:00"}); err != nil {
@@ -181,7 +181,7 @@ func TestExportHasEverythingAboutTheCaller(t *testing.T) {
 	}
 	// The revoked share and preferences remain in the export after a role change.
 	theirs := export(partner.ID)
-	if len(theirs.Entries) != 0 || len(theirs.NotesSent) != 1 || theirs.PartnerAlerts == nil || len(theirs.PushSubscriptions) != 1 || len(theirs.Shares) != 1 {
+	if len(theirs.Entries) != 0 || len(theirs.MessagesSent) != 1 || theirs.PartnerAlerts == nil || len(theirs.PushSubscriptions) != 1 || len(theirs.Shares) != 1 {
 		t.Fatalf("role-switched export incomplete or leaked entries: %+v", theirs)
 	}
 }

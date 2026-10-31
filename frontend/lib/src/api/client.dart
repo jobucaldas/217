@@ -366,27 +366,29 @@ class ApiClient {
         jsonDecode(response.body) as Map<String, dynamic>);
   }
 
-  Future<List<PartnerNote>> listInbox() async {
+  /// Messages the user sent or received, newest first.
+  Future<List<InboxMessage>> listInbox() async {
     final response = await _send('GET', _uri('/api/inbox'));
     if (response.statusCode != 200) {
       throw ApiException('inbox', response);
     }
     final decoded = jsonDecode(response.body) as Map<String, dynamic>;
     return (decoded['notes'] as List<dynamic>? ?? const [])
-        .map((e) => PartnerNote.fromJson(e as Map<String, dynamic>))
+        .map((e) => InboxMessage.fromJson(e as Map<String, dynamic>))
         .toList();
   }
 
-  Future<PartnerNote> createPartnerNote(String body) async {
+  /// Sends a message to the other person of the active share.
+  Future<InboxMessage> sendMessage(String body) async {
     final response = await _send(
       'POST',
-      _uri('/api/partner-notes'),
+      _uri('/api/messages'),
       body: {'body': body},
     );
     if (response.statusCode != 201 && response.statusCode != 200) {
-      throw ApiException('partner note', response);
+      throw ApiException('message', response);
     }
-    return PartnerNote.fromJson(
+    return InboxMessage.fromJson(
         jsonDecode(response.body) as Map<String, dynamic>);
   }
 

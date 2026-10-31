@@ -19,6 +19,9 @@ class AppearancePrefs {
   static const fabSideKey = 'today_fab_side';
   static const fabBottomKey = 'today_fab_bottom';
   static const autoUpdateKey = 'auto_update';
+  static const messageNotificationsKey = 'message_notifications';
+  static const messagesNotifiedKeyPrefix = 'messages_notified_';
+  static const messagePermissionAskedKey = 'message_permission_asked';
 
   Future<({ThemeMode mode, AppPalette palette})> load() async {
     final modeRaw = await _storage.read(key: themeModeKey);
@@ -71,6 +74,31 @@ class AppearancePrefs {
 
   Future<void> saveAutoUpdate(bool enabled) =>
       _storage.write(key: autoUpdateKey, value: enabled ? '1' : '0');
+
+  /// Local "new message" notifications. On unless the user turned them off.
+  Future<bool> messageNotificationsEnabled() async =>
+      await _storage.read(key: messageNotificationsKey) != '0';
+
+  Future<void> saveMessageNotifications(bool enabled) =>
+      _storage.write(key: messageNotificationsKey, value: enabled ? '1' : '0');
+
+  /// Whether the notification permission was already asked for messages.
+  Future<bool> messagePermissionAsked() async =>
+      await _storage.read(key: messagePermissionAskedKey) == '1';
+
+  Future<void> saveMessagePermissionAsked() =>
+      _storage.write(key: messagePermissionAskedKey, value: '1');
+
+  /// Server time of the newest message already announced or seen by
+  /// [userId] on this device, so a message is never notified twice.
+  Future<DateTime?> messagesNotifiedUpTo(String userId) async =>
+      DateTime.tryParse(
+          await _storage.read(key: messagesNotifiedKeyPrefix + userId) ?? '');
+
+  Future<void> saveMessagesNotifiedUpTo(String userId, DateTime at) =>
+      _storage.write(
+          key: messagesNotifiedKeyPrefix + userId,
+          value: at.toUtc().toIso8601String());
 
   /// Magnetic today FAB: `right` (default) or `left`, plus bottom inset in logical px.
   Future<({bool right, double bottom})> loadFabPosition() async {

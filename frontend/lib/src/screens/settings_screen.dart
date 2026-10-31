@@ -44,6 +44,8 @@ class SettingsPage extends StatefulWidget {
     this.consentPending = false,
     this.autoUpdate = false,
     this.onAutoUpdateChanged,
+    this.messageNotifications = true,
+    this.onMessageNotificationsChanged,
     this.expandServer = false,
   });
 
@@ -79,6 +81,10 @@ class SettingsPage extends StatefulWidget {
   /// Android only: whether the app looks for a newer APK when it opens.
   final bool autoUpdate;
   final ValueChanged<bool>? onAutoUpdateChanged;
+
+  /// Android only: local notification when a new message is found.
+  final bool messageNotifications;
+  final ValueChanged<bool>? onMessageNotificationsChanged;
 
   /// Open with the self-hosted server field already expanded.
   final bool expandServer;
@@ -255,6 +261,16 @@ class _SettingsPageState extends State<SettingsPage> {
                     subtitle: Text(widget.strings.autoUpdateSubtitle),
                     value: widget.autoUpdate,
                     onChanged: widget.onAutoUpdateChanged,
+                  ),
+                ],
+                if (isAndroidPlatform && (widget.user?.hasRole ?? false)) ...[
+                  const Divider(height: 1, indent: 16, endIndent: 16),
+                  SwitchListTile(
+                    key: const ValueKey('settings-message-notifications'),
+                    title: Text(widget.strings.messageNotifsTitle),
+                    subtitle: Text(widget.strings.messageNotifsSubtitle),
+                    value: widget.messageNotifications,
+                    onChanged: widget.onMessageNotificationsChanged,
                   ),
                 ],
               ],

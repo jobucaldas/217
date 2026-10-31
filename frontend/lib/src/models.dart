@@ -61,6 +61,19 @@ class ShareState {
   final bool canEditCalendar;
   final int unreadNotes;
 
+  /// Same share with a fresh unread message count.
+  ShareState withUnread(int unread) => ShareState(
+        status: status,
+        inviteCode: inviteCode,
+        inviteUrl: inviteUrl,
+        partnerEmail: partnerEmail,
+        partnerName: partnerName,
+        ownerName: ownerName,
+        ownerEmail: ownerEmail,
+        canEditCalendar: canEditCalendar,
+        unreadNotes: unread,
+      );
+
   bool get isNone => status == 'none' || status.isEmpty;
   bool get isOpen => status == 'open';
   bool get isActive => status == 'active';
@@ -117,13 +130,15 @@ class SessionSnapshot {
   }
 }
 
-class PartnerNote {
-  const PartnerNote({
+/// A message between the calendar owner and her linked partner, either way.
+class InboxMessage {
+  const InboxMessage({
     required this.id,
     required this.body,
     required this.createdAt,
     this.fromName = '',
     this.fromEmail = '',
+    this.fromMe = false,
     this.readAt,
   });
 
@@ -132,18 +147,25 @@ class PartnerNote {
   final DateTime createdAt;
   final String fromName;
   final String fromEmail;
+
+  /// Written by the signed-in user (shown on the right, never "unread").
+  final bool fromMe;
   final DateTime? readAt;
 
-  bool get isUnread => readAt == null;
+  /// Received and not opened yet.
+  bool get isUnread => !fromMe && readAt == null;
 
-  factory PartnerNote.fromJson(Map<String, dynamic> json) {
-    return PartnerNote(
+  String get fromLabel => fromName.trim().isNotEmpty ? fromName : fromEmail;
+
+  factory InboxMessage.fromJson(Map<String, dynamic> json) {
+    return InboxMessage(
       id: json['id'] as String,
       body: (json['body'] as String?) ?? '',
       createdAt: DateTime.tryParse((json['created_at'] as String?) ?? '') ??
           DateTime.fromMillisecondsSinceEpoch(0),
       fromName: (json['from_name'] as String?) ?? '',
       fromEmail: (json['from_email'] as String?) ?? '',
+      fromMe: json['from_me'] as bool? ?? false,
       readAt: json['read_at'] == null
           ? null
           : DateTime.tryParse(json['read_at'] as String),

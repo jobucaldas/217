@@ -9,5 +9,8 @@ String friendlyError(Strings strings, Object error) {
   if (error.message == 'calendar owner consent required') {
     return strings.sharedCalendarOwnerConsentRequired;
   }
+  if (error.message == 'partner consent required') {
+    return strings.partnerConsentRequired;
+  }
   return strings.genericError;
 }

@@ -4,6 +4,7 @@ import 'local_reminders_stub.dart'
     if (dart.library.html) 'local_reminders_web.dart'
     if (dart.library.io) 'local_reminders_io.dart' as impl;
 
+export 'message_alerts.dart';
 export 'owner_reminder_repeat_plan.dart';
 export 'partner_alert_plan.dart';
 export 'reminder_schedule.dart';
@@ -36,3 +37,19 @@ Future<LocalReminderSyncResult> syncLocalDailyReminder({
 /// Replaces all scheduled partner alerts with [alerts]. Never throws.
 Future<LocalReminderSyncStatus> syncPartnerAlerts(List<PlannedAlert> alerts) =>
     impl.syncPartnerAlerts(alerts);
+
+/// Shows (or replaces) the "new message" notification now. Never prompts for
+/// permission and never throws: without permission nothing is shown.
+Future<bool> showMessageNotification({
+  required String title,
+  required String body,
+}) =>
+    impl.showMessageNotification(title: title, body: body);
+
+/// Dismisses the "new message" notification (sign-out, account deletion).
+Future<void> cancelMessageNotification() => impl.cancelMessageNotification();
+
+/// Asks for the notification permission (Android 13+). True when granted or
+/// not needed; false when denied or unsupported.
+Future<bool> requestNotificationPermission() =>
+    impl.requestNotificationPermission();

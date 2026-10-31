@@ -57,7 +57,7 @@ class App217 extends StatefulWidget {
   State<App217> createState() => _App217State();
 }
 
-class _App217State extends State<App217> {
+class _App217State extends State<App217> with WidgetsBindingObserver {
   late final ApiClient _api = (widget.api ?? ApiClient(widget.config))
     ..onConsentRequired = _onOwnConsentRequired;
   late final AppearancePrefs _prefs = AppearancePrefs();
@@ -80,6 +80,16 @@ class _App217State extends State<App217> {
   /// Android opt-in: look for a newer APK when the signed-in shell opens.
   bool _autoUpdate = false;
   bool _updateChecked = false;
+
+  /// Local "new message" notifications (Android); on unless turned off.
+  bool _messageNotifs = true;
+
+  /// No server push: messages are checked on open/resume and every
+  /// [_messagePollEvery] while the app is in the foreground.
+  static const _messagePollEvery = Duration(minutes: 2);
+  Timer? _messagePoll;
+  bool _foreground = true;
+  Future<void> _messageChain = Future.value();
 
   /// Whether the daily reminder is on; null until known (no bubble then).
   bool? _remindersOn;
@@ -115,7 +125,81 @@ class _App217State extends State<App217> {
   void initState() {
     super.initState();
     _api.onConsentRequired = _onOwnConsentRequired;
+    WidgetsBinding.instance.addObserver(this);
+    _messagePoll = Timer.periodic(_messagePollEvery, (_) => _checkMessages());
     _bootstrap();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _foreground = state == AppLifecycleState.resumed;
+    if (_foreground) unawaited(_checkMessages());
+  }
+
+  /// Fetches the inbox: refreshes the unread badge and notifies messages
+  /// that arrived since the last check. Best effort, silent on failure.
+  Future<void> _checkMessages() async {
+    final user = _user;
+    if (!mounted || !_foreground || user == null || !user.hasRole) return;
+    if (_consentRequired || (user.isPartner && !_share.isActive)) return;
+    // An open conversation refreshes (and marks read) on its own.
+    if (InboxScreen.isOpen) return;
+    final epoch = _accountEpoch;
+    try {
+      final messages = await _api.listInbox();
+      if (!mounted || epoch != _accountEpoch || _user?.id != user.id) return;
+      await _onMessagesSynced(user.id, messages, notify: true);
+    } catch (_) {}
+  }
+
+  /// One sync at a time, so the same message is never announced twice.
+  Future<void> _onMessagesSynced(
+    String userId,
+    List<InboxMessage> messages, {
+    bool notify = false,
+  }) {
+    final unread = messages.where((m) => m.isUnread).length;
+    if (_user?.id == userId && unread != _share.unreadNotes) {
+      setState(() => _share = _share.withUnread(unread));
+    }
+    return _messageChain = _messageChain.then((_) async {
+      try {
+        final upTo = await _prefs.messagesNotifiedUpTo(userId);
+        // First check on this device: start from here, no backlog alert.
+        if (notify && upTo != null && _messageNotifs && _user?.id == userId) {
+          final fresh = unannouncedMessages(messages, upTo);
+          if (fresh.isNotEmpty) {
+            final text = messageNotificationText(_strings, fresh);
+            await showMessageNotification(title: text.title, body: text.body);
+          }
+        }
+        // An empty first check still sets the starting point, so the
+        // first message that arrives later is announced.
+        final newest = newestReceived(messages, upTo) ??
+            DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
+        if (newest != upTo) {
+          await _prefs.saveMessagesNotifiedUpTo(userId, newest);
+        }
+      } catch (_) {}
+    });
+  }
+
+  /// Message notifications are on by default, so the permission (Android
+  /// 13+) is asked once, the first time the user opens Messages: a moment
+  /// where a prompt about messages makes sense.
+  Future<void> _askMessagePermissionOnce() async {
+    if (!_messageNotifs || !supportsLocalReminders) return;
+    try {
+      if (await _prefs.messagePermissionAsked()) return;
+      await _prefs.saveMessagePermissionAsked();
+      await requestNotificationPermission();
+    } catch (_) {}
+  }
+
+  Future<void> _setMessageNotifs(bool enabled) async {
+    setState(() => _messageNotifs = enabled);
+    await _prefs.saveMessageNotifications(enabled);
+    if (enabled) await requestNotificationPermission();
   }
 
   @override
@@ -126,6 +210,8 @@ class _App217State extends State<App217> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _messagePoll?.cancel();
     _changes.dispose();
     _stageChanges.dispose();
     if (widget.updateClient == null) _updateHttp.close();
@@ -142,6 +228,7 @@ class _App217State extends State<App217> {
       final language = await _prefs.loadLanguage();
       final hintGone = await _prefs.reminderHintDismissed();
       final autoUpdate = await _prefs.autoUpdateEnabled();
+      final messageNotifs = await _prefs.messageNotificationsEnabled();
       if (!mounted) return;
       setState(() {
         _themeMode = appearance.mode;
@@ -149,6 +236,7 @@ class _App217State extends State<App217> {
         _language = language ?? _deviceLanguage();
         _reminderHintDismissed = hintGone;
         _autoUpdate = autoUpdate;
+        _messageNotifs = messageNotifs;
       });
     } catch (_) {
       // Keep defaults.
@@ -181,6 +269,7 @@ class _App217State extends State<App217> {
     if (user != null && !_consentRequired) {
       unawaited(_loadRemindersState());
       unawaited(_maybeCheckForUpdate());
+      unawaited(_checkMessages());
       await _offerPendingInvite();
     }
   }
@@ -290,6 +379,8 @@ class _App217State extends State<App217> {
 
   Future<void> _cancelAllNotifications() {
     unawaited(_cancelDailyReminder());
+    // A message shown for this account must not outlive its session.
+    unawaited(cancelMessageNotification());
     return _cancelPartnerAlerts();
   }
 
@@ -332,6 +423,7 @@ class _App217State extends State<App217> {
   Future<void> _onConsented(SessionSnapshot session) async {
     _applySession(session);
     unawaited(_restoreOwnerReminderAfterConsent(session));
+    unawaited(_checkMessages());
     await _offerPendingInvite();
   }
 
@@ -519,6 +611,7 @@ class _App217State extends State<App217> {
       SnackBar(content: Text(_strings.joinedCalendar)),
     );
     await _refreshSession();
+    unawaited(_checkMessages());
   }
 
   void _applySession(SessionSnapshot session) {
@@ -633,6 +726,7 @@ class _App217State extends State<App217> {
         if (!_consentRequired) {
           unawaited(_loadRemindersState());
           unawaited(_maybeCheckForUpdate());
+          unawaited(_checkMessages());
           await _offerPendingInvite();
         }
       } else {
@@ -714,6 +808,8 @@ class _App217State extends State<App217> {
             consentPending: _consentRequired,
             autoUpdate: _autoUpdate,
             onAutoUpdateChanged: _setAutoUpdate,
+            messageNotifications: _messageNotifs,
+            onMessageNotificationsChanged: _setMessageNotifs,
             expandServer: expandServer,
           ),
         ),
@@ -819,6 +915,10 @@ class _App217State extends State<App217> {
       onOpenSettings: _openSettings,
       cycleRefreshSignal: _stageChanges,
       onShareChanged: (share) => setState(() => _share = share),
+      onInboxSynced: (messages) {
+        unawaited(_askMessagePermissionOnce());
+        _onMessagesSynced(_user!.id, messages);
+      },
       partnerAlertSyncQueue: _partnerAlertSyncQueue,
       onOwnerReminderResync: _user!.isOwner ? _syncOwnerReminder : null,
       sessionGeneration: () => _sessionGeneration,

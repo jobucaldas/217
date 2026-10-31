@@ -12,6 +12,8 @@ import 'reminder_schedule.dart';
 const _channelId = 'intake_daily';
 const _partnerChannelId = 'partner_alerts';
 const _notifId = 21701;
+const _messagesChannelId = 'messages';
+const _messageNotifId = 21750;
 
 final FlutterLocalNotificationsPlugin _plugin =
     FlutterLocalNotificationsPlugin();
@@ -260,4 +262,62 @@ Future<LocalReminderSyncStatus> syncPartnerAlerts(
   } catch (_) {
     return LocalReminderSyncStatus.failed;
   }
+}
+
+Future<bool> showMessageNotification({
+  required String title,
+  required String body,
+}) async {
+  if (!supportsLocalReminders) return false;
+  try {
+    await _ensureReady(requestPermission: false);
+    // Private: the lock screen shows that a message came, not its text.
+    const details = NotificationDetails(
+      android: AndroidNotificationDetails(
+        _messagesChannelId,
+        'Messages',
+        channelDescription: 'New messages from your partner',
+        importance: Importance.high,
+        priority: Priority.high,
+        visibility: NotificationVisibility.private,
+      ),
+      iOS: DarwinNotificationDetails(),
+    );
+    await _plugin.show(_messageNotifId, title, body, details);
+    return true;
+  } on MissingPluginException {
+    return false;
+  } catch (_) {
+    return false;
+  }
+}
+
+Future<bool> requestNotificationPermission() async {
+  if (!supportsLocalReminders) return false;
+  try {
+    await _ensureReady(requestPermission: false);
+    final android = _plugin.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
+    if (android != null) {
+      return await android.requestNotificationsPermission() ?? true;
+    }
+    final ios = _plugin.resolvePlatformSpecificImplementation<
+        IOSFlutterLocalNotificationsPlugin>();
+    if (ios != null) {
+      return await ios.requestPermissions(alert: true, sound: true) ?? false;
+    }
+    return true;
+  } on MissingPluginException {
+    return false;
+  } catch (_) {
+    return false;
+  }
+}
+
+Future<void> cancelMessageNotification() async {
+  if (!supportsLocalReminders) return;
+  try {
+    await _ensureReady(requestPermission: false);
+    await _plugin.cancel(_messageNotifId);
+  } catch (_) {}
 }

@@ -62,9 +62,9 @@ func TestAccountDeleteAndShareHTTP(t *testing.T) {
 		t.Fatalf("partner upsert expected 403, got %d", upsertW.Code)
 	}
 
-	noteReq := authedRequest(http.MethodPost, "/api/partner-notes", partnerCookie, []byte(`{"body":"hi"}`))
+	noteReq := authedRequest(http.MethodPost, "/api/messages", partnerCookie, []byte(`{"body":"hi"}`))
 	noteW := httptest.NewRecorder()
-	h.AuthMiddleware(h.CreatePartnerNote)(noteW, noteReq)
+	h.AuthMiddleware(h.SendMessage)(noteW, noteReq)
 	if noteW.Code != http.StatusCreated {
 		t.Fatalf("note: %d %s", noteW.Code, noteW.Body.String())
 	}
@@ -74,6 +74,27 @@ func TestAccountDeleteAndShareHTTP(t *testing.T) {
 	h.AuthMiddleware(h.ListInbox)(inboxW, inboxReq)
 	if inboxW.Code != http.StatusOK || !strings.Contains(inboxW.Body.String(), "hi") {
 		t.Fatalf("inbox: %d %s", inboxW.Code, inboxW.Body.String())
+	}
+
+	// The owner answers once the partner agreed to the notice too.
+	replyReq := authedRequest(http.MethodPost, "/api/messages", ownerCookie, []byte(`{"body":"hello back"}`))
+	replyW := httptest.NewRecorder()
+	h.AuthMiddleware(h.SendMessage)(replyW, replyReq)
+	if replyW.Code != http.StatusForbidden {
+		t.Fatalf("reply before partner consent: %d %s", replyW.Code, replyW.Body.String())
+	}
+	if _, err := s.RecordConsent(partner.ID, model.ConsentVersion); err != nil {
+		t.Fatal(err)
+	}
+	replyW = httptest.NewRecorder()
+	h.AuthMiddleware(h.SendMessage)(replyW, authedRequest(http.MethodPost, "/api/messages", ownerCookie, []byte(`{"body":"hello back"}`)))
+	if replyW.Code != http.StatusCreated {
+		t.Fatalf("reply: %d %s", replyW.Code, replyW.Body.String())
+	}
+	partnerInboxW := httptest.NewRecorder()
+	h.AuthMiddleware(h.ListInbox)(partnerInboxW, authedRequest(http.MethodGet, "/api/inbox", partnerCookie, nil))
+	if partnerInboxW.Code != http.StatusOK || !strings.Contains(partnerInboxW.Body.String(), `"body":"hello back","created_at"`) {
+		t.Fatalf("partner inbox: %d %s", partnerInboxW.Code, partnerInboxW.Body.String())
 	}
 
 	revokeReq := authedRequest(http.MethodPost, "/api/share/revoke", ownerCookie, nil)

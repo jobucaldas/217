@@ -64,15 +64,16 @@ type Store interface {
 	GetPartnerAlerts(userID string) (*model.PartnerAlertPreference, error)
 	UpsertPartnerAlerts(userID string, pref model.PartnerAlertPreference) (*model.PartnerAlertPreference, error)
 
-	// Partner → owner inbox notes
-	ListInboxNotes(ownerID string) ([]*model.PartnerNote, error)
-	ListReceivedPartnerNotes(userID string) ([]*model.PartnerNote, error)
-	CreatePartnerNote(partnerID, body string) (*model.PartnerNote, error)
-	// ListSentPartnerNotes returns the notes a partner wrote (export).
-	ListSentPartnerNotes(partnerID string) ([]*model.PartnerNote, error)
+	// Messages between an owner and her linked partner, both directions.
+	// ListMessages returns every message the user sent or received, newest
+	// first (inbox and export).
+	ListMessages(userID string) ([]*model.Message, error)
+	// SendMessage writes to the other side of the user's active share.
+	SendMessage(senderID, body string) (*model.Message, error)
+	// MarkMessageRead marks a message the user received as read.
+	MarkMessageRead(userID, messageID string) error
 	ListAccountShares(userID string) ([]*model.CalendarShare, error)
 	ListAccountSubscriptions(userID string) ([]model.ExportPushSubscription, error)
-	MarkInboxNoteRead(ownerID, noteID string) error
 
 	Close() error
 }

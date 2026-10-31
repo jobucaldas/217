@@ -60,15 +60,15 @@ func TestShareInviteAcceptRevokeAndInbox(t *testing.T) {
 		t.Fatalf("expected owner entries via partner subject, got %d err=%v", len(entries), err)
 	}
 
-	note, err := s.CreatePartnerNote(partner.ID, "thinking of you")
+	note, err := s.SendMessage(partner.ID, "thinking of you")
 	if err != nil {
 		t.Fatal(err)
 	}
-	inbox, err := s.ListInboxNotes(owner.ID)
+	inbox, err := s.ListMessages(owner.ID)
 	if err != nil || len(inbox) != 1 || inbox[0].Body != "thinking of you" {
 		t.Fatalf("inbox=%v err=%v", inbox, err)
 	}
-	if err := s.MarkInboxNoteRead(owner.ID, note.ID); err != nil {
+	if err := s.MarkMessageRead(owner.ID, note.ID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -313,7 +313,7 @@ func TestReminderTargetsRequireCurrentConsent(t *testing.T) {
 	})
 }
 
-func TestSentNotesListedForTheirAuthor(t *testing.T) {
+func TestMessagesGoBothWays(t *testing.T) {
 	forEachStore(t, func(t *testing.T, name string, s Store) {
 		owner, _ := s.LinkWorkOSIdentity("so-"+name, "so-"+name+"@example.com", "O", true)
 		partner, _ := s.LinkWorkOSIdentity("sp-"+name, "sp-"+name+"@example.com", "P", true)
@@ -323,19 +323,57 @@ func TestSentNotesListedForTheirAuthor(t *testing.T) {
 		if _, err := s.RecordConsent(owner.ID, model.ConsentVersion); err != nil {
 			t.Fatal(err)
 		}
+		if _, err := s.SendMessage(owner.ID, "nobody linked"); err == nil || err.Error() != "share inactive" {
+			t.Fatalf("owner without partner: err=%v", err)
+		}
 		share, _ := s.EnableShare(owner.ID)
 		if _, err := s.AcceptShare(partner.ID, share.InviteCode); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := s.CreatePartnerNote(partner.ID, "for you"); err != nil {
+		if _, err := s.SendMessage(partner.ID, "for you"); err != nil {
 			t.Fatal(err)
 		}
-		sent, err := s.ListSentPartnerNotes(partner.ID)
-		if err != nil || len(sent) != 1 || sent[0].Body != "for you" {
-			t.Fatalf("sent notes: %+v %v", sent, err)
+		if _, err := s.SendMessage(owner.ID, "back"); err != nil && err.Error() != "partner consent required" {
+			t.Fatal(err)
 		}
-		if mine, _ := s.ListSentPartnerNotes(owner.ID); len(mine) != 0 {
-			t.Fatalf("owner wrote no notes, got %+v", mine)
+		if _, err := s.RecordConsent(partner.ID, model.ConsentVersion); err != nil {
+			t.Fatal(err)
+		}
+		reply, err := s.SendMessage(owner.ID, "and back to you")
+		if err != nil || reply.Sender != model.RoleOwner || !reply.FromMe {
+			t.Fatalf("owner reply: %+v %v", reply, err)
+		}
+
+		theirs, err := s.ListMessages(partner.ID)
+		if err != nil || len(theirs) != 2 {
+			t.Fatalf("partner messages: %+v %v", theirs, err)
+		}
+		var got *model.Message
+		for _, m := range theirs {
+			if m.ID == reply.ID {
+				got = m
+			} else if !m.FromMe || m.Body != "for you" {
+				t.Fatalf("partner's own message: %+v", m)
+			}
+		}
+		if got == nil || got.FromMe || got.Body != "and back to you" || got.FromName != "O" {
+			t.Fatalf("partner received: %+v", got)
+		}
+		if st, _ := s.GetShareState(partner.ID); st.UnreadNotes != 1 {
+			t.Fatalf("partner unread=%d want 1", st.UnreadNotes)
+		}
+		if st, _ := s.GetShareState(owner.ID); st.UnreadNotes != 1 {
+			t.Fatalf("owner unread=%d want 1", st.UnreadNotes)
+		}
+		// Only the recipient marks a message read.
+		if err := s.MarkMessageRead(owner.ID, reply.ID); err == nil {
+			t.Fatal("sender marked their own message read")
+		}
+		if err := s.MarkMessageRead(partner.ID, reply.ID); err != nil {
+			t.Fatal(err)
+		}
+		if st, _ := s.GetShareState(partner.ID); st.UnreadNotes != 0 {
+			t.Fatalf("partner unread after read=%d", st.UnreadNotes)
 		}
 	})
 }
@@ -371,7 +409,7 @@ func TestSharingRequiresOwnerConsent(t *testing.T) {
 		if _, err := s.RecordConsent(owner.ID, model.ConsentVersion-1); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := s.CreatePartnerNote(partner.ID, "hi"); err == nil || err.Error() != "calendar owner consent required" {
+		if _, err := s.SendMessage(partner.ID, "hi"); err == nil || err.Error() != "calendar owner consent required" {
 			t.Fatalf("note without owner consent: err=%v", err)
 		}
 	})

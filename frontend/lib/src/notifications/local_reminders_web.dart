@@ -49,3 +49,14 @@ Future<LocalReminderSyncStatus> syncPartnerAlerts(
   List<PlannedAlert> alerts,
 ) async =>
     LocalReminderSyncStatus.unsupported;
+
+/// Web pages get no message notifications (the badge still updates).
+Future<bool> showMessageNotification({
+  required String title,
+  required String body,
+}) async =>
+    false;
+
+Future<bool> requestNotificationPermission() async => false;
+
+Future<void> cancelMessageNotification() async {}

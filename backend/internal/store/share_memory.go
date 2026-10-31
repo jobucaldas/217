@@ -99,9 +99,9 @@ func (s *MemoryStore) DeleteUser(userID string) error {
 			}
 		}
 	}
-	for id, note := range s.partnerNotes {
+	for id, note := range s.messages {
 		if note.OwnerID == userID || note.PartnerID == userID {
-			delete(s.partnerNotes, id)
+			delete(s.messages, id)
 		}
 	}
 	return nil
@@ -145,19 +145,6 @@ func (s *MemoryStore) PurgeExpired(now time.Time) error {
 	return nil
 }
 
-func (s *MemoryStore) ListSentPartnerNotes(partnerID string) ([]*model.PartnerNote, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	out := make([]*model.PartnerNote, 0)
-	for _, n := range s.partnerNotes {
-		if n.PartnerID == partnerID {
-			c := *n
-			out = append(out, &c)
-		}
-	}
-	return out, nil
-}
-
 func (s *MemoryStore) findUserLocked(userID string) *model.User {
 	for _, u := range s.users {
 		if u.ID == userID {
@@ -199,16 +186,6 @@ func (s *MemoryStore) latestShareForPartnerLocked(partnerID string) *model.Calen
 	return latest
 }
 
-func (s *MemoryStore) unreadNotesLocked(ownerID string) int {
-	n := 0
-	for _, note := range s.partnerNotes {
-		if note.OwnerID == ownerID && note.ReadAt == nil {
-			n++
-		}
-	}
-	return n
-}
-
 func (s *MemoryStore) shareStateLocked(user *model.User) *model.ShareState {
 	role := model.NormalizeRole(user.Role)
 	state := &model.ShareState{
@@ -221,13 +198,13 @@ func (s *MemoryStore) shareStateLocked(user *model.User) *model.ShareState {
 	if role == model.RoleOwner {
 		live := s.liveShareForOwnerLocked(user.ID)
 		if live == nil {
-			state.UnreadNotes = s.unreadNotesLocked(user.ID)
+			state.UnreadNotes = s.unreadMessagesLocked(user.ID)
 			return state
 		}
 		state.Status = live.Status
 		state.InviteCode = live.InviteCode
 		state.CanEditCalendar = true
-		state.UnreadNotes = s.unreadNotesLocked(user.ID)
+		state.UnreadNotes = s.unreadMessagesLocked(user.ID)
 		if live.PartnerID != "" {
 			if partner := s.findUserLocked(live.PartnerID); partner != nil {
 				state.PartnerEmail = partner.Email
@@ -245,6 +222,7 @@ func (s *MemoryStore) shareStateLocked(user *model.User) *model.ShareState {
 			return state
 		}
 		state.Status = latest.Status
+		state.UnreadNotes = s.unreadMessagesLocked(user.ID)
 		if owner := s.findUserLocked(latest.OwnerID); owner != nil {
 			state.OwnerName = owner.Name
 			state.OwnerEmail = owner.Email
@@ -254,6 +232,7 @@ func (s *MemoryStore) shareStateLocked(user *model.User) *model.ShareState {
 	}
 	state.Status = live.Status
 	state.CanEditCalendar = false
+	state.UnreadNotes = s.unreadMessagesLocked(user.ID)
 	if owner := s.findUserLocked(live.OwnerID); owner != nil {
 		state.OwnerName = owner.Name
 		state.OwnerEmail = owner.Email
@@ -381,89 +360,6 @@ func (s *MemoryStore) CalendarSubjectID(userID string) (string, error) {
 	return live.OwnerID, nil
 }
 
-func (s *MemoryStore) ListInboxNotes(ownerID string) ([]*model.PartnerNote, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	user := s.findUserLocked(ownerID)
-	if user == nil {
-		return nil, fmt.Errorf("user not found")
-	}
-	out := make([]*model.PartnerNote, 0)
-	for _, note := range s.partnerNotes {
-		if note.OwnerID != ownerID {
-			continue
-		}
-		copy := *note
-		if partner := s.findUserLocked(note.PartnerID); partner != nil {
-			copy.FromName = partner.Name
-			copy.FromEmail = partner.Email
-		}
-		out = append(out, &copy)
-	}
-	// newest first
-	for i := 0; i < len(out); i++ {
-		for j := i + 1; j < len(out); j++ {
-			if out[j].CreatedAt.After(out[i].CreatedAt) {
-				out[i], out[j] = out[j], out[i]
-			}
-		}
-	}
-	return out, nil
-}
-
-func (s *MemoryStore) CreatePartnerNote(partnerID, body string) (*model.PartnerNote, error) {
-	body = strings.TrimSpace(body)
-	if body == "" {
-		return nil, fmt.Errorf("note body required")
-	}
-	if len(body) > 2000 {
-		return nil, fmt.Errorf("note too long")
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	partner := s.findUserLocked(partnerID)
-	if partner == nil {
-		return nil, fmt.Errorf("user not found")
-	}
-	if model.NormalizeRole(partner.Role) != model.RolePartner {
-		return nil, fmt.Errorf("only partners can leave inbox notes")
-	}
-	live := s.liveShareForPartnerLocked(partnerID)
-	if live == nil || live.Status != model.ShareActive {
-		return nil, fmt.Errorf("share inactive")
-	}
-	if !s.findUserLocked(live.OwnerID).HasConsent() {
-		return nil, fmt.Errorf("calendar owner consent required")
-	}
-	now := time.Now().UTC()
-	note := &model.PartnerNote{
-		ID:        generateID(),
-		OwnerID:   live.OwnerID,
-		PartnerID: partnerID,
-		Body:      body,
-		CreatedAt: now,
-		FromName:  partner.Name,
-		FromEmail: partner.Email,
-	}
-	s.partnerNotes[note.ID] = note
-	copy := *note
-	return &copy, nil
-}
-
-func (s *MemoryStore) MarkInboxNoteRead(ownerID, noteID string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	note, ok := s.partnerNotes[noteID]
-	if !ok || note.OwnerID != ownerID {
-		return fmt.Errorf("note not found")
-	}
-	if note.ReadAt == nil {
-		now := time.Now().UTC()
-		note.ReadAt = &now
-	}
-	return nil
-}
-
 func (s *MemoryStore) SetRole(userID, role string) (*model.User, error) {
 	role = model.NormalizeRole(role)
 	if role == "" {
@@ -508,19 +404,6 @@ func (s *MemoryStore) ListAccountSubscriptions(userID string) ([]model.ExportPus
 	for _, sub := range s.subscriptions {
 		if sub.UserID == userID {
 			out = append(out, model.ExportPushSubscription{Endpoint: sub.Endpoint})
-		}
-	}
-	return out, nil
-}
-
-func (s *MemoryStore) ListReceivedPartnerNotes(userID string) ([]*model.PartnerNote, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	out := []*model.PartnerNote{}
-	for _, n := range s.partnerNotes {
-		if n.OwnerID == userID {
-			c := *n
-			out = append(out, &c)
 		}
 	}
 	return out, nil

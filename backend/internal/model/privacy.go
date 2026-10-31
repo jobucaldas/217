@@ -18,8 +18,8 @@ type AccountExport struct {
 	User              *User                    `json:"user"`
 	Share             *ShareState              `json:"share"`
 	Entries           []*Entry                 `json:"entries"`
-	NotesReceived     []*PartnerNote           `json:"partner_notes_received"`
-	NotesSent         []*PartnerNote           `json:"partner_notes_sent"`
+	MessagesReceived  []*Message               `json:"messages_received"`
+	MessagesSent      []*Message               `json:"messages_sent"`
 	Reminder          *ReminderPreference      `json:"reminder_preference"`
 	PartnerAlerts     *PartnerAlertPreference  `json:"partner_alerts,omitempty"`
 	PushSubscriptions []ExportPushSubscription `json:"push_subscriptions"`
