@@ -114,8 +114,7 @@ class _ConsentServer {
 void main() {
   setUp(() => FlutterSecureStorage.setMockInitialValues({}));
 
-  testWidgets('consent screen gates the app until agreed',
-      (tester) async {
+  testWidgets('consent screen gates the app until agreed', (tester) async {
     FlutterSecureStorage.setMockInitialValues({'pending_invite': 'ABCD1234'});
     final server = _ConsentServer();
     final api = server.client();
@@ -292,7 +291,7 @@ void main() {
     await tester.pumpAndSettle();
     // Reminders, sharing, role and stage need data the server refuses yet.
     expect(find.text(const Strings(AppLanguage.en).reminders), findsNothing);
-    expect(find.byKey(const ValueKey('stage-cycling')), findsNothing);
+    expect(find.byKey(const ValueKey('stage-dropdown')), findsNothing);
     expect(find.byKey(const ValueKey('settings-switch-partner')), findsNothing);
     final download = find.text('Download my data');
     await tester.scrollUntilVisible(
@@ -321,12 +320,17 @@ void main() {
 
     // The operator publishes a new notice; the next save is refused.
     server.consented = false;
-    final stage = find.byKey(const ValueKey('stage-menopause'));
+    final stage = find.byKey(const ValueKey('stage-dropdown'));
     await tester.scrollUntilVisible(stage, 200, scrollable: _settingsList);
-    await tester.tap(stage);
+    await tester.ensureVisible(stage);
+    await tester.pumpAndSettle();
+    await tester
+        .tap(find.descendant(of: stage, matching: find.byType(TextField)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Menopause').last);
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const ValueKey('stage-menopause')), findsNothing);
+    expect(find.byKey(const ValueKey('stage-dropdown')), findsNothing);
     expect(find.byType(ConsentScreen), findsOneWidget);
   });
 
