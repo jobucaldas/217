@@ -667,7 +667,7 @@ func TestWorkOSExchangeReturnsBearerSession(t *testing.T) {
 		Subject: "workos-mobile-1", Email: "mobile@example.com", EmailVerified: true, Name: "Mobile",
 	}}
 	h.SetOAuthProvider(provider)
-	body := []byte(`{"code":"auth-code","code_verifier":"verifier","redirect_uri":"com.caldasstudios.a217://auth/callback"}`)
+	body := []byte(`{"code":"auth-code","code_verifier":"verifier","redirect_uri":"com.caldasstudios.app217://auth/callback"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/workos/exchange", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
