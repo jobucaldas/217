@@ -43,7 +43,7 @@ func TestPredictAveragesCyclesAndPeriodLength(t *testing.T) {
 	}
 	first := info.Predictions[0]
 	if first.PeriodStart != "2026-10-29" || first.PeriodEnd != "2026-11-01" ||
-		first.PMSStart != "2026-10-24" || first.PMSEnd != "2026-10-28" {
+		first.PMSStart != "2026-10-22" || first.PMSEnd != "2026-10-28" {
 		t.Fatalf("first prediction: %+v", first)
 	}
 	if len(info.Predictions) != Predictions || info.Predictions[1].PeriodStart != "2026-11-28" {
@@ -56,7 +56,7 @@ func TestPredictSingleLoggedPeriodUsesDefaultCycle(t *testing.T) {
 	if !info.Estimated || info.CycleLength != 28 || info.PeriodLength != 5 {
 		t.Fatalf("unexpected: %+v", info)
 	}
-	if info.Predictions[0].PeriodStart != "2026-10-18" || info.Predictions[0].PMSStart != "2026-10-13" {
+	if info.Predictions[0].PeriodStart != "2026-10-18" || info.Predictions[0].PMSStart != "2026-10-11" {
 		t.Fatalf("prediction: %+v", info.Predictions[0])
 	}
 }

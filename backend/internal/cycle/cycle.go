@@ -11,8 +11,9 @@ import (
 const (
 	DefaultCycleLength  = 28
 	DefaultPeriodLength = 5
-	// PMSDays is how many days before a predicted period count as the PMS window.
-	PMSDays = 5
+	// PMSDays is how many days before a predicted period count as the expected
+	// PMS window. It is an estimate: symptoms vary person to person.
+	PMSDays = 7
 	// Predictions is how many upcoming cycles are returned.
 	Predictions = 3
 	// HistoryDays bounds how far back logged period days are read.
