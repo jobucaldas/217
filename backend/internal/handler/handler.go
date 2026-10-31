@@ -321,7 +321,8 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if token, ok := h.sessionTokenFromRequest(r); ok {
-		if err := h.store.DeleteSession(token); err != nil {
+		// A device key ends with the session: signing out means signing in again.
+		if err := h.store.DeleteSessionAndDevice(token); err != nil {
 			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "could not log out; retry"})
 			return
 		}
@@ -389,13 +390,20 @@ func (h *Handler) StartWorkOSOAuth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"auth_url": authURL})
 }
 
-func (h *Handler) createSessionForUser(w http.ResponseWriter, r *http.Request, user *model.User) (string, error) {
+// createSessionForUser opens a session; with deviceKeyID it is bound to
+// that device key (Bearer clients that renew it themselves).
+func (h *Handler) createSessionForUser(w http.ResponseWriter, r *http.Request, user *model.User, deviceKeyID string) (string, error) {
 	sessionToken, err := generateRandom(32)
 	if err != nil {
 		return "", err
 	}
 	expires := time.Now().UTC().Add(h.sessionDuration)
-	if err := h.store.CreateSession(user.ID, sessionToken, expires); err != nil {
+	if deviceKeyID != "" {
+		err = h.store.CreateDeviceSession(user.ID, deviceKeyID, sessionToken, expires)
+	} else {
+		err = h.store.CreateSession(user.ID, sessionToken, expires)
+	}
+	if err != nil {
 		return "", err
 	}
 	http.SetCookie(w, h.sessionCookieValue(sessionToken, expires))
@@ -455,7 +463,7 @@ func (h *Handler) WorkOSOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if _, err := h.createSessionForUser(w, r, user); err != nil {
+	if _, err := h.createSessionForUser(w, r, user, ""); err != nil {
 		log.Printf("create session failed: %v", err)
 		http.Error(w, `{"error":"cannot create session"}`, http.StatusInternalServerError)
 		return
@@ -485,10 +493,22 @@ func (h *Handler) ExchangeWorkOS(w http.ResponseWriter, r *http.Request) {
 		Code         string `json:"code"`
 		CodeVerifier string `json:"code_verifier"`
 		RedirectURI  string `json:"redirect_uri"`
+		// Optional: base64 PKIX P-256 key from the Android Keystore, so the
+		// app can renew its session later (see device.go).
+		DevicePublicKey string `json:"device_public_key"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Code == "" || body.CodeVerifier == "" {
 		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
 		return
+	}
+	var devicePublicKey []byte
+	if body.DevicePublicKey != "" {
+		key, err := parseDevicePublicKey(body.DevicePublicKey)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		devicePublicKey = key
 	}
 	if !auth.IsNativeRedirectURI(body.RedirectURI) {
 		http.Error(w, `{"error":"invalid redirect uri"}`, http.StatusBadRequest)
@@ -512,7 +532,15 @@ func (h *Handler) ExchangeWorkOS(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	sessionToken, err := h.createSessionForUser(w, r, user)
+	var deviceKeyID string
+	if devicePublicKey != nil {
+		if deviceKeyID, err = h.store.CreateDeviceKey(user.ID, devicePublicKey); err != nil {
+			log.Printf("create device key failed: %v", err)
+			http.Error(w, `{"error":"cannot create session"}`, http.StatusInternalServerError)
+			return
+		}
+	}
+	sessionToken, err := h.createSessionForUser(w, r, user, deviceKeyID)
 	if err != nil {
 		log.Printf("create session failed: %v", err)
 		http.Error(w, `{"error":"cannot create session"}`, http.StatusInternalServerError)
@@ -520,6 +548,9 @@ func (h *Handler) ExchangeWorkOS(w http.ResponseWriter, r *http.Request) {
 	}
 	payload := h.sessionPayload(user)
 	payload["session_token"] = sessionToken
+	if deviceKeyID != "" {
+		payload["device_key_id"] = deviceKeyID
+	}
 	writeJSON(w, http.StatusOK, payload)
 }
 

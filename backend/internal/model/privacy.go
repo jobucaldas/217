@@ -24,4 +24,5 @@ type AccountExport struct {
 	PartnerAlerts     *PartnerAlertPreference  `json:"partner_alerts,omitempty"`
 	PushSubscriptions []ExportPushSubscription `json:"push_subscriptions"`
 	Shares            []*CalendarShare         `json:"shares"`
+	Devices           []DeviceKey              `json:"devices"`
 }
