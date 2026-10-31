@@ -236,9 +236,6 @@ class Strings {
         'Configura un recordatorio diario en Ajustes > Recordatorio.',
       );
   String get reminderHintDismiss => _t('Got it', 'Entendi', 'Entendido');
-  String get legendTaken => taken;
-  String get legendMissed => missed;
-  String get legendUnrecorded => unrecorded;
   String get takenLabel => _t('Taken', 'Tomei', 'La tomé');
   String get missedLabel => _t('Missed', 'Perdi', 'La olvidé');
   String get reminders => _t('Reminder', 'Lembrete', 'Recordatorio');
@@ -516,26 +513,21 @@ class Strings {
 
   // Cycle / PMS
   String get periodLabel => _t('Period', 'Menstruação', 'Regla');
-  String get legendPeriod => periodLabel;
   String get predictedPeriod =>
       _t('Predicted period', 'Menstruação prevista', 'Regla prevista');
-  String get legendPms =>
-      _t('Expected PMS', 'TPM prevista', 'SPM previsto');
-  String cycleNext(String period, String pms) => _t(
-        'Next period ~$period · Expected PMS from ~$pms',
-        'Próxima menstruação ~$period · TPM prevista a partir de ~$pms',
-        'Próxima regla ~$period · SPM previsto desde ~$pms',
+  String get expectedPms => _t('Expected PMS', 'TPM prevista', 'SPM previsto');
+  String cyclePmsFrom(String pms) => _t(
+        'Expected PMS from ~$pms',
+        'TPM prevista a partir de ~$pms',
+        'SPM previsto desde ~$pms',
       );
-  String cycleNextNoPms(String period) => _t(
+  String cycleNextPeriod(String period) => _t(
         'Next period ~$period',
         'Próxima menstruação ~$period',
         'Próxima regla ~$period',
       );
-  String cyclePmsNow(String period) => _t(
-        'PMS likely now · period ~$period',
-        'Provável TPM agora · menstruação ~$period',
-        'Posible SPM ahora · regla ~$period',
-      );
+  String get cyclePmsLikelyNow =>
+      _t('PMS likely now', 'Provável TPM agora', 'Posible SPM ahora');
   String get cyclePeriodNow => _t(
         'Period expected around now',
         'Menstruação prevista para agora',

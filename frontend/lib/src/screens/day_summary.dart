@@ -62,6 +62,7 @@ class DaySummaryBar extends StatelessWidget {
     required this.cycleKind,
     required this.palette,
     this.onEdit,
+    this.isFuture = false,
   });
 
   final Strings strings;
@@ -74,6 +75,10 @@ class DaySummaryBar extends StatelessWidget {
   /// Null on read-only calendars: tags only, no button.
   final VoidCallback? onEdit;
 
+  /// Future days show only what is expected. The button stays (so the grid
+  /// keeps its height) but is disabled: nothing can be logged ahead of time.
+  final bool isFuture;
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -85,14 +90,14 @@ class DaySummaryBar extends StatelessWidget {
     final loggedPeriod = entry?.period ?? false;
 
     final tags = <Widget>[
-      if (taken == null)
+      if (taken == null && !isFuture)
         _DayTag(
           key: const ValueKey('day-tag-status'),
           label: strings.unrecorded,
           color: scheme.onSurfaceVariant,
           mark: DayMark(color: scheme.onSurfaceVariant, outlined: true),
         )
-      else
+      else if (taken != null)
         _DayTag(
           key: const ValueKey('day-tag-status'),
           label: taken ? strings.taken : strings.missed,
@@ -122,7 +127,7 @@ class DaySummaryBar extends StatelessWidget {
       if (cycleKind == CycleDayKind.pms)
         _DayTag(
           key: const ValueKey('day-tag-pms'),
-          label: strings.legendPms,
+          label: strings.expectedPms,
           color: App217Colors.pms(brightness, palette),
           mark: DayMark(
             color: App217Colors.pms(brightness, palette),
@@ -151,7 +156,9 @@ class DaySummaryBar extends StatelessWidget {
         ),
     ];
 
+    // Keyed by day: tags open on one day start closed on the next.
     final tagWrap = Wrap(
+      key: ValueKey(day),
       spacing: 6,
       runSpacing: 6,
       crossAxisAlignment: WrapCrossAlignment.center,
@@ -179,7 +186,7 @@ class DaySummaryBar extends StatelessWidget {
         ? null
         : FilledButton.icon(
             key: const ValueKey('update-day-button'),
-            onPressed: onEdit,
+            onPressed: isFuture ? null : onEdit,
             // The theme's full-width minimum would not fit beside the tags.
             style: compact
                 ? FilledButton.styleFrom(minimumSize: const Size(0, 48))
@@ -222,9 +229,9 @@ class DaySummaryBar extends StatelessWidget {
   }
 }
 
-/// Rounded tag tinted with the mark's colour; the label stays on-surface ink
-/// so it reads in both themes.
-class _DayTag extends StatelessWidget {
+/// Rounded tag tinted with the mark's colour, showing only the mark until
+/// tapped; the label then stays on-surface ink so it reads in both themes.
+class _DayTag extends StatefulWidget {
   const _DayTag({
     super.key,
     required this.label,
@@ -237,33 +244,67 @@ class _DayTag extends StatelessWidget {
   final Widget mark;
 
   @override
+  State<_DayTag> createState() => _DayTagState();
+}
+
+class _DayTagState extends State<_DayTag> {
+  bool _open = false;
+
+  @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(
+    final color = widget.color;
+    return Semantics(
+      button: true,
+      label: widget.label,
+      expanded: _open,
+      excludeSemantics: true,
+      child: Material(
         color: Color.alphaBlend(color.withValues(alpha: 0.14), scheme.surface),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withValues(alpha: 0.5)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          mark,
-          const SizedBox(width: 6),
-          // Never wider than the space the tag row gives it.
-          Flexible(
-            child: Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context)
-                  .textTheme
-                  .labelLarge
-                  ?.copyWith(color: scheme.onSurface),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(color: color.withValues(alpha: 0.5)),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () => setState(() => _open = !_open),
+          child: AnimatedSize(
+            duration: const Duration(milliseconds: 150),
+            alignment: Alignment.centerLeft,
+            child: ConstrainedBox(
+              // At least a 32px touch target while closed.
+              constraints: const BoxConstraints(minWidth: 36, minHeight: 32),
+              child: Padding(
+                padding: EdgeInsets.symmetric(
+                  horizontal: _open ? 10 : 0,
+                  vertical: 5,
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    widget.mark,
+                    if (_open) ...[
+                      const SizedBox(width: 6),
+                      // Never wider than the space the tag row gives it.
+                      Flexible(
+                        child: Text(
+                          widget.label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context)
+                              .textTheme
+                              .labelLarge
+                              ?.copyWith(color: scheme.onSurface),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
             ),
           ),
-        ],
+        ),
       ),
     );
   }
@@ -272,9 +313,16 @@ class _DayTag extends StatelessWidget {
 /// The selected day's note, drawn in the room the month grid leaves below
 /// itself. Display only: swipes pass through to the month carousel.
 class DayNotePanel extends StatelessWidget {
-  const DayNotePanel({super.key, required this.notes});
+  const DayNotePanel({
+    super.key,
+    required this.notes,
+    this.alignment = Alignment.topCenter,
+  });
 
   final String notes;
+
+  /// Where the panel sits in the room it is given.
+  final AlignmentGeometry alignment;
 
   @override
   Widget build(BuildContext context) {
@@ -285,14 +333,14 @@ class DayNotePanel extends StatelessWidget {
       child: LayoutBuilder(
         builder: (context, constraints) {
           // Same text scaling the Text below gets from the device setting.
-          final lineHeight = MediaQuery.textScalerOf(context)
-                  .scale(style?.fontSize ?? 17) *
-              (style?.height ?? 1.4);
+          final lineHeight =
+              MediaQuery.textScalerOf(context).scale(style?.fontSize ?? 17) *
+                  (style?.height ?? 1.4);
           // 24px of vertical padding inside the panel.
           final maxLines =
               ((constraints.maxHeight - 24) / lineHeight).floor().clamp(1, 12);
           return Align(
-            alignment: Alignment.topCenter,
+            alignment: alignment,
             child: Container(
               key: const ValueKey('day-note'),
               width: double.infinity,

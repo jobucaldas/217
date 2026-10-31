@@ -115,8 +115,8 @@ void main() {
   testWidgets('Taken shows at once, before the server answers', (tester) async {
     final api = _SlowApi()..writeGate = Completer<void>();
     await _pumpCalendar(tester, api);
-    // Header status, legend and today's tag.
-    expect(find.text('Open'), findsNWidgets(3));
+    // Header status; today's tag shows only its mark until tapped.
+    expect(find.text('Open'), findsOneWidget);
     final listCallsBefore = api.listCalls;
 
     await _tapTakenOnToday(tester);
@@ -124,12 +124,12 @@ void main() {
 
     // Sheet closed and today's status flipped while the POST is still held.
     expect(api.stored, isEmpty);
-    expect(find.text('Open'), findsOneWidget);
+    expect(find.text('Open'), findsNothing);
 
     api.writeGate!.complete();
     await tester.pumpAndSettle();
     expect(api.stored.values.single.taken, isTrue);
-    expect(find.text('Open'), findsOneWidget);
+    expect(find.text('Open'), findsNothing);
     // Saved entries are not fetched again, only the predictions.
     expect(api.listCalls, listCallsBefore);
     expect(api.cycleCalls, greaterThan(1));
@@ -146,7 +146,7 @@ void main() {
     await _tapTakenOnToday(tester);
     await tester.pumpAndSettle();
 
-    expect(find.text('Open'), findsNWidgets(3));
+    expect(find.text('Open'), findsOneWidget);
     expect(find.byKey(const ValueKey('calendar-error')), findsOneWidget);
   });
 
@@ -156,7 +156,7 @@ void main() {
     await _pumpCalendar(tester, api);
     await _tapTakenOnToday(tester);
     await tester.pumpAndSettle();
-    expect(find.text('Open'), findsOneWidget);
+    expect(find.text('Open'), findsNothing);
 
     api.listGate = Completer<void>();
     await tester.tap(find.byTooltip('Next month'));
@@ -165,7 +165,7 @@ void main() {
     await tester.pumpAndSettle();
 
     // Both refreshes are held; the month comes from memory.
-    expect(find.text('Open'), findsOneWidget);
+    expect(find.text('Open'), findsNothing);
     api.listGate!.complete();
     await tester.pumpAndSettle();
   });
@@ -189,7 +189,7 @@ void main() {
     gate.complete();
     await tester.pumpAndSettle();
 
-    expect(find.text('Open'), findsOneWidget);
+    expect(find.text('Open'), findsNothing);
   });
 
   testWidgets('a refresh started during a save cannot undo it afterwards',
@@ -215,7 +215,7 @@ void main() {
     gate.complete();
     await tester.pumpAndSettle();
 
-    expect(find.text('Open'), findsOneWidget);
+    expect(find.text('Open'), findsNothing);
   });
 
   testWidgets('a failed save is undone even when the refetch fails too',
@@ -231,12 +231,12 @@ void main() {
     api.listError = TimeoutException('offline');
     await _tapTakenOnToday(tester);
     await tester.pumpAndSettle();
-    expect(find.text('Open'), findsOneWidget);
+    expect(find.text('Open'), findsNothing);
 
     api.writeGate!.complete();
     await tester.pumpAndSettle();
 
-    expect(find.text('Open'), findsNWidgets(3));
+    expect(find.text('Open'), findsOneWidget);
     expect(find.byKey(const ValueKey('calendar-error')), findsOneWidget);
   });
 
