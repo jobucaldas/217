@@ -169,10 +169,12 @@ class DaySummaryBar extends StatelessWidget {
         ...tags,
       ],
     );
-    // Short or wide windows (landscape, desktop) put the button beside the
-    // tags so the month grid keeps its height.
+    // Wide windows, and short ones with room across (landscape), put the
+    // button beside the tags so the month grid keeps its height. Narrow
+    // windows stack them: beside a button the tags would not fit.
     final size = MediaQuery.sizeOf(context);
-    final compact = size.width >= 600 || size.height < 600;
+    final compact =
+        size.width >= 600 || (size.height < 600 && size.width >= 480);
     final button = onEdit == null
         ? null
         : FilledButton.icon(
@@ -249,12 +251,17 @@ class _DayTag extends StatelessWidget {
         children: [
           mark,
           const SizedBox(width: 6),
-          Text(
-            label,
-            style: Theme.of(context)
-                .textTheme
-                .labelLarge
-                ?.copyWith(color: scheme.onSurface),
+          // Never wider than the space the tag row gives it.
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context)
+                  .textTheme
+                  .labelLarge
+                  ?.copyWith(color: scheme.onSurface),
+            ),
           ),
         ],
       ),
