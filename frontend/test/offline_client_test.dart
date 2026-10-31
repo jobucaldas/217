@@ -92,7 +92,7 @@ void main() {
       AppConfig(
         apiBaseUrl: 'https://api.example',
         workosClientId: 'client',
-        redirectUri: 'com.jobucaldas.a217://auth/callback',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
       ),
       httpClient: server.client,
       localStore: MemoryLocalStore(),

@@ -7,7 +7,7 @@ import "time"
 const DeviceKeyIdleRetention = 180 * 24 * time.Hour
 
 // MaxDeviceKeysPerUser caps registered devices; the oldest goes first.
-const MaxDeviceKeysPerUser = 10
+const MaxDeviceKeysPerUser = 5
 
 // DeviceKey is a signed-in device that can renew its own session (export).
 type DeviceKey struct {
