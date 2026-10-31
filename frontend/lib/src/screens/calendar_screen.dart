@@ -1048,7 +1048,7 @@ class _LegendDot extends StatelessWidget {
   final String label;
   final bool outlined;
 
-  /// Dashed rounded square, as drawn around PMS days.
+  /// Dashed rounded square, as drawn around expected PMS days.
   final bool dashed;
   final IconData? icon;
 
@@ -1060,7 +1060,13 @@ class _LegendDot extends StatelessWidget {
     } else if (dashed) {
       mark = CustomPaint(
         size: const Size(14, 14),
-        painter: DashedRingPainter(color: color, radius: 4, strokeWidth: 1.6),
+        painter: DashedRingPainter(
+          color: color,
+          radius: 4,
+          strokeWidth: 1.4,
+          dash: 2.5,
+          gap: 2.5,
+        ),
       );
     } else {
       mark = Container(
@@ -1257,15 +1263,18 @@ class _DayCell extends StatelessWidget {
     return InkWell(
       onTap: isFuture ? null : () => onTap(day),
       borderRadius: BorderRadius.circular(12),
-      // PMS days: dashed ring in the gap around the cell, so it reads on
-      // top of Taken/Missed fills and next to today's solid border.
+      // Expected PMS days: a light, sparsely dashed ring in the gap around
+      // the cell (an estimate, like the outlined predicted-period drop), so
+      // it reads on top of Taken/Missed fills and next to today's border.
       child: CustomPaint(
         key: isPms ? ValueKey('pms-${day.month}-${day.day}') : null,
         foregroundPainter: isPms
             ? DashedRingPainter(
                 color: App217Colors.pms(brightness, palette),
                 radius: 14,
-                strokeWidth: 2,
+                strokeWidth: 1.5,
+                dash: 3,
+                gap: 4,
               )
             : null,
         child: Container(
@@ -1385,7 +1394,9 @@ class DashedRingPainter extends CustomPainter {
   bool shouldRepaint(DashedRingPainter old) =>
       old.color != color ||
       old.radius != radius ||
-      old.strokeWidth != strokeWidth;
+      old.strokeWidth != strokeWidth ||
+      old.dash != dash ||
+      old.gap != gap;
 }
 
 class DayEditResult {

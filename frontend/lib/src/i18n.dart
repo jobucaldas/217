@@ -486,11 +486,12 @@ class Strings {
   // Cycle / PMS
   String get periodLabel => _t('Period', 'Menstruação', 'Regla');
   String get legendPeriod => periodLabel;
-  String get legendPms => _t('PMS', 'TPM', 'SPM');
+  String get legendPms =>
+      _t('Expected PMS', 'TPM prevista', 'SPM previsto');
   String cycleNext(String period, String pms) => _t(
-        'Next period ~$period · PMS from $pms',
-        'Próxima menstruação ~$period · TPM a partir de $pms',
-        'Próxima regla ~$period · SPM desde $pms',
+        'Next period ~$period · Expected PMS from ~$pms',
+        'Próxima menstruação ~$period · TPM prevista a partir de ~$pms',
+        'Próxima regla ~$period · SPM previsto desde ~$pms',
       );
   String cycleNextNoPms(String period) => _t(
         'Next period ~$period',
@@ -546,11 +547,12 @@ class Strings {
         'SPM y píldora no registrada',
       );
   String get pmsAlertTitle =>
-      _t('PMS heads-up', 'Aviso de TPM', 'Aviso de SPM');
+      _t('Expected PMS heads-up', 'Aviso de TPM prevista',
+          'Aviso de SPM previsto');
   String get pmsAlertBody => _t(
-        'On the day her PMS is predicted to start',
-        'No dia em que a TPM dela deve começar',
-        'El día en que se prevé que empiece su SPM',
+        'On the day her expected PMS window starts (an estimate)',
+        'No dia em que a TPM prevista dela começa (uma estimativa)',
+        'El día en que empieza su SPM previsto (una estimación)',
       );
   String get pillAlertTitle => _t(
         'Pill not logged',
@@ -599,14 +601,14 @@ class Strings {
   String partnerName(String name) =>
       name.trim().isEmpty ? _t('She', 'Ela', 'Ella') : name.trim();
   String get pmsNotifTitle => _t(
-        'PMS may start today',
-        'A TPM pode começar hoje',
-        'El SPM puede empezar hoy',
+        'Expected PMS may start today',
+        'A TPM prevista pode começar hoje',
+        'El SPM previsto puede empezar hoy',
       );
   String pmsNotifBody(String name, String period) => _t(
-        '${partnerName(name)}: PMS days predicted from today, period ~$period.',
-        '${partnerName(name)}: TPM prevista a partir de hoje, menstruação ~$period.',
-        '${partnerName(name)}: SPM previsto desde hoy, regla ~$period.',
+        '${partnerName(name)}: expected PMS from today (an estimate), period ~$period.',
+        '${partnerName(name)}: TPM prevista a partir de hoje (uma estimativa), menstruação ~$period.',
+        '${partnerName(name)}: SPM previsto desde hoy (una estimación), regla ~$period.',
       );
   String get pillNotifTitle => _t(
         'Pill not logged yet',

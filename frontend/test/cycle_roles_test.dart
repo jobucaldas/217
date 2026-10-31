@@ -490,7 +490,7 @@ void main() {
       }
       // Legend explains both marks.
       expect(find.text('Period'), findsOneWidget);
-      expect(find.text('PMS'), findsOneWidget);
+      expect(find.text('Expected PMS'), findsOneWidget);
     });
 
     testWidgets(
@@ -769,7 +769,7 @@ void main() {
       ));
       await tester.pumpAndSettle();
 
-      expect(find.text('PMS heads-up'), findsOneWidget);
+      expect(find.text('Expected PMS heads-up'), findsOneWidget);
       expect(find.text('Pill not logged'), findsOneWidget);
       expect(find.text('09:00'), findsOneWidget);
       expect(find.text('21:00'), findsOneWidget);
@@ -795,7 +795,7 @@ void main() {
       expect(scheduled.length, 2);
 
       final scheme =
-          Theme.of(tester.element(find.text('PMS heads-up'))).colorScheme;
+          Theme.of(tester.element(find.text('Expected PMS heads-up'))).colorScheme;
       final time = tester.widget<Text>(find.text('09:00'));
       expect(meetsBodyContrast(time.style!.color!, scheme.surface), isTrue);
     });

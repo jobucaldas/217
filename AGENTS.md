@@ -8,7 +8,7 @@ Android-first Flutter app for tracking anticonceptional intake via a calendar UI
 Roles are picked once after first sign-in (`users.role` is NULL until then):
 - **owner** — takes the pill; logs Taken/Missed, notes, intimacy and period days; creates the invite. Never joins another calendar.
 - **partner** — joins one owner's calendar read-only via invite; gets optional PMS and pill-not-logged alerts (separate toggles + times).
-Switching role is refused while a calendar is shared. Period days drive cycle/PMS predictions (`backend/internal/cycle`), drawn on both calendars (dashed amber ring = PMS, pink drop = period, outlined drop = predicted period).
+Switching role is refused while a calendar is shared. Period days drive cycle/PMS predictions (`backend/internal/cycle`), drawn on both calendars (dashed amber ring = expected PMS, the 7 days before a predicted period; pink drop = period, outlined drop = predicted period).
 Owners can record cycling, perimenopause, or menopause; menopause suppresses PMS, while perimenopause keeps PMS when period days are logged.
 
 ## Tech Stack
