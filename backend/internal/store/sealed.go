@@ -30,8 +30,15 @@ func userStageCtx(userID string) string { return "users.stage|" + canonID(userID
 func entryCtx(userID, date string) string {
 	return "entries|" + canonID(userID) + "|" + date
 }
-func noteCtx(noteID, ownerID, partnerID string) string {
-	return "partner_notes|" + canonID(noteID) + "|" + canonID(ownerID) + "|" + canonID(partnerID)
+
+// Messages the owner wrote use their own prefix, so a body cannot be passed
+// off as written by the other person by flipping the sender column.
+func noteCtx(noteID, ownerID, partnerID, sender string) string {
+	prefix := "partner_notes|"
+	if sender == model.RoleOwner {
+		prefix = "partner_notes.owner|"
+	}
+	return prefix + canonID(noteID) + "|" + canonID(ownerID) + "|" + canonID(partnerID)
 }
 func inviteCtx(shareID, ownerID string) string {
 	return "calendar_shares.invite|" + canonID(shareID) + "|" + canonID(ownerID)
@@ -228,7 +235,7 @@ func sealExistingRows(tx *sql.Tx, kr *fieldcrypt.Keyring) error {
 		return fmt.Errorf("reading partner notes: %w", err)
 	}
 	for _, r := range notes {
-		if _, err := tx.Exec(`UPDATE partner_notes SET body_sealed = $2 WHERE id = $1`, r.id, kr.SealString(r.c, noteCtx(r.id, r.a, r.b))); err != nil {
+		if _, err := tx.Exec(`UPDATE partner_notes SET body_sealed = $2 WHERE id = $1`, r.id, kr.SealString(r.c, noteCtx(r.id, r.a, r.b, model.RolePartner))); err != nil {
 			return fmt.Errorf("sealing partner note: %w", err)
 		}
 	}
@@ -329,8 +336,8 @@ func (s *PGStore) checkKey() error {
 // rewrote meanwhile keeps that newer value, and the next start reseals it.
 func (s *PGStore) reseal() error {
 	type sealedRow struct {
-		id, a, b string
-		x, y     []byte
+		id, a, b, c string
+		x, y        []byte
 	}
 	stale := func(query string, scan func(*sql.Rows, *sealedRow) error) ([]sealedRow, error) {
 		rows, err := s.db.Query(query)
@@ -408,13 +415,13 @@ func (s *PGStore) reseal() error {
 		}
 	}
 
-	notes, err := stale(`SELECT id, owner_id, partner_id, body_sealed FROM partner_notes`,
-		func(rs *sql.Rows, r *sealedRow) error { return rs.Scan(&r.id, &r.a, &r.b, &r.x) })
+	notes, err := stale(`SELECT id, owner_id, partner_id, sender, body_sealed FROM partner_notes`,
+		func(rs *sql.Rows, r *sealedRow) error { return rs.Scan(&r.id, &r.a, &r.b, &r.c, &r.x) })
 	if err != nil {
 		return fmt.Errorf("reading partner notes: %w", err)
 	}
 	for _, r := range notes {
-		ctx := noteCtx(r.id, r.a, r.b)
+		ctx := noteCtx(r.id, r.a, r.b, r.c)
 		plain, err := s.kr.Open(r.x, ctx)
 		if err != nil {
 			return fmt.Errorf("opening partner note %s: %w", r.id, err)

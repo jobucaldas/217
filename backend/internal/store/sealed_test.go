@@ -154,7 +154,7 @@ func TestSealExistingRowsDropsPlaintext(t *testing.T) {
 	if err != nil || state.InviteCode != "INVITEXY" || state.PartnerName != "Bo Secret" {
 		t.Fatalf("share after sealing: %+v %v", state, err)
 	}
-	notes, err := s.ListInboxNotes(owner)
+	notes, err := s.ListMessages(owner)
 	if err != nil || len(notes) != 1 || notes[0].Body != "love note body" || notes[0].FromEmail != "bf@example.com" {
 		t.Fatalf("notes after sealing: %+v %v", notes, err)
 	}
@@ -204,13 +204,13 @@ func TestSwappedNoteSealsDoNotOpen(t *testing.T) {
 	if _, err := s.AcceptShare(partner.ID, share.InviteCode); err != nil {
 		t.Fatal(err)
 	}
-	first, _ := s.CreatePartnerNote(partner.ID, "first")
-	second, _ := s.CreatePartnerNote(partner.ID, "second")
+	first, _ := s.SendMessage(partner.ID, "first")
+	second, _ := s.SendMessage(partner.ID, "second")
 	// Same owner and partner: only the note id tells the seals apart.
 	if _, err := s.db.Exec(`UPDATE partner_notes SET body_sealed = (SELECT body_sealed FROM partner_notes WHERE id = $1) WHERE id = $2`, first.ID, second.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.ListInboxNotes(owner.ID); err == nil {
+	if _, err := s.ListMessages(owner.ID); err == nil {
 		t.Fatal("a note body moved to another note still opened")
 	}
 }

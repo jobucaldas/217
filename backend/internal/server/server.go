@@ -202,7 +202,9 @@ func Run(cfg Config) error {
 	mux.HandleFunc("POST /api/share/accept", h.ConsentMiddleware(h.AcceptShare))
 	mux.HandleFunc("GET /api/inbox", h.ConsentMiddleware(h.ListInbox))
 	mux.HandleFunc("POST /api/inbox/{id}/read", h.ConsentMiddleware(h.MarkInboxNoteRead))
-	mux.HandleFunc("POST /api/partner-notes", h.ConsentMiddleware(h.CreatePartnerNote))
+	mux.HandleFunc("POST /api/messages", h.ConsentMiddleware(h.SendMessage))
+	// Older Android builds post partner notes here.
+	mux.HandleFunc("POST /api/partner-notes", h.ConsentMiddleware(h.SendMessage))
 
 	mux.HandleFunc("GET /api/reminders/preferences", h.ConsentMiddleware(h.GetReminderPreference))
 	mux.HandleFunc("PUT /api/reminders/preferences", h.ConsentMiddleware(h.UpsertReminderPreference))

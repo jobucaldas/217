@@ -36,16 +36,36 @@ type CalendarShare struct {
 	UpdatedAt  time.Time
 }
 
-// PartnerNote is a general note from partner to owner inbox.
-type PartnerNote struct {
+// Message is a note between a calendar owner and her linked partner, in
+// either direction. Sender is the role that wrote it (owner or partner).
+type Message struct {
 	ID        string     `json:"id"`
 	OwnerID   string     `json:"owner_id"`
 	PartnerID string     `json:"partner_id"`
+	Sender    string     `json:"sender"`
 	Body      string     `json:"body"`
 	CreatedAt time.Time  `json:"created_at"`
 	ReadAt    *time.Time `json:"read_at,omitempty"`
 	FromName  string     `json:"from_name,omitempty"`
 	FromEmail string     `json:"from_email,omitempty"`
+	// FromMe is true when the caller wrote the message (viewer-relative).
+	FromMe bool `json:"from_me"`
+}
+
+// SenderID is the user who wrote the message.
+func (m *Message) SenderID() string {
+	if m.Sender == RoleOwner {
+		return m.OwnerID
+	}
+	return m.PartnerID
+}
+
+// RecipientID is the user the message was written to.
+func (m *Message) RecipientID() string {
+	if m.Sender == RoleOwner {
+		return m.PartnerID
+	}
+	return m.OwnerID
 }
 
 // SessionPayload is returned by /api/auth/session and OAuth exchange.

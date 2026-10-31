@@ -78,14 +78,18 @@ func (h *Handler) ExportAccount(w http.ResponseWriter, r *http.Request) {
 		fail("entries", err)
 		return
 	}
-	out.NotesReceived = []*model.PartnerNote{}
-	if out.NotesReceived, err = h.store.ListReceivedPartnerNotes(userID); err != nil {
-		fail("inbox", err)
+	messages, err := h.store.ListMessages(userID)
+	if err != nil {
+		fail("messages", err)
 		return
 	}
-	if out.NotesSent, err = h.store.ListSentPartnerNotes(userID); err != nil {
-		fail("sent notes", err)
-		return
+	out.MessagesReceived, out.MessagesSent = []*model.Message{}, []*model.Message{}
+	for _, m := range messages {
+		if m.FromMe {
+			out.MessagesSent = append(out.MessagesSent, m)
+		} else {
+			out.MessagesReceived = append(out.MessagesReceived, m)
+		}
 	}
 	if out.Reminder, err = h.store.GetReminderPreference(userID); err != nil {
 		fail("reminder", err)
@@ -241,21 +245,20 @@ func (h *Handler) AcceptShare(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, state)
 }
 
+// ListInbox returns the caller's messages, sent and received, newest first.
 func (h *Handler) ListInbox(w http.ResponseWriter, r *http.Request) {
-	notes, err := h.store.ListInboxNotes(getUserID(r))
+	messages, err := h.store.ListMessages(getUserID(r))
 	if err != nil {
-		if strings.Contains(err.Error(), "only owners") {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
-			return
-		}
 		log.Printf("list inbox: %v", err)
 		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"notes": notes})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"notes": messages})
 }
 
-func (h *Handler) CreatePartnerNote(w http.ResponseWriter, r *http.Request) {
+// SendMessage writes to the other person of the caller's active share:
+// partner to owner, or owner to partner.
+func (h *Handler) SendMessage(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Body string `json:"body"`
 	}
@@ -263,36 +266,37 @@ func (h *Handler) CreatePartnerNote(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
 		return
 	}
-	note, err := h.store.CreatePartnerNote(getUserID(r), body.Body)
+	message, err := h.store.SendMessage(getUserID(r), body.Body)
 	if err != nil {
 		msg := err.Error()
 		switch {
-		case msg == "calendar owner consent required",
-			strings.Contains(msg, "only partners"), strings.Contains(msg, "share inactive"):
+		case msg == "calendar owner consent required", msg == "partner consent required",
+			strings.Contains(msg, "share inactive"):
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": msg})
 		case strings.Contains(msg, "required"), strings.Contains(msg, "too long"):
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": msg})
 		default:
-			log.Printf("create partner note: %v", err)
+			log.Printf("send message: %v", err)
 			http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
 		}
 		return
 	}
-	writeJSON(w, http.StatusCreated, note)
+	writeJSON(w, http.StatusCreated, message)
 }
 
+// MarkInboxNoteRead marks a message the caller received as read.
 func (h *Handler) MarkInboxNoteRead(w http.ResponseWriter, r *http.Request) {
-	noteID := r.PathValue("id")
-	if noteID == "" {
+	id := r.PathValue("id")
+	if id == "" {
 		http.Error(w, `{"error":"missing note id"}`, http.StatusBadRequest)
 		return
 	}
-	if err := h.store.MarkInboxNoteRead(getUserID(r), noteID); err != nil {
+	if err := h.store.MarkMessageRead(getUserID(r), id); err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "note not found"})
 			return
 		}
-		log.Printf("mark inbox note: %v", err)
+		log.Printf("mark message read: %v", err)
 		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
 		return
 	}
