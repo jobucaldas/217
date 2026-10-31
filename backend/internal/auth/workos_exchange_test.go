@@ -80,7 +80,12 @@ func TestWorkOSExchangeAgainstMockAuthKit(t *testing.T) {
 }
 
 func TestIsNativeRedirectURIAcceptsLegacyScheme(t *testing.T) {
-	for _, uri := range append([]string{NativeAuthRedirectURI, DesktopAuthRedirectURI}, LegacyNativeAuthRedirectURIs...) {
+	for _, uri := range []string{
+		NativeAuthRedirectURI,
+		DesktopAuthRedirectURI,
+		"com.jobucaldas.a217://auth/callback",
+		"com.caldasstudios.a217://auth/callback",
+	} {
 		if !IsNativeRedirectURI(uri) {
 			t.Errorf("%q should be accepted", uri)
 		}
