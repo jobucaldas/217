@@ -486,10 +486,10 @@ class Strings {
         'Ese código no funcionó. Revísalo e inténtalo de nuevo.',
       );
   String get joinCalendar => _t('Join', 'Entrar', 'Unirse');
-  String get readOnlyCalendar => _t(
-        'Read-only calendar',
-        'Calendário em modo leitura',
-        'Calendario de solo lectura',
+  String get partnerMode => _t(
+        'Partner Mode',
+        'Modo Parceiro',
+        'Modo Pareja',
       );
 
   // Roles: owner (takes the pill) vs partner (follows her calendar)

@@ -765,7 +765,19 @@ class _CalendarScreenState extends State<CalendarScreen>
 
     return Scaffold(
       appBar: AppBar(
-        title: Wordmark(widget.strings.brand),
+        title: widget.share.canEditCalendar
+            ? Wordmark(widget.strings.brand)
+            : Row(
+                children: [
+                  Wordmark(widget.strings.brand),
+                  const SizedBox(width: 10),
+                  Flexible(
+                    child: _PartnerModeLabel(
+                      label: widget.strings.partnerMode,
+                    ),
+                  ),
+                ],
+              ),
         actions: [
           InboxButton(
             api: widget.api,
@@ -796,17 +808,6 @@ class _CalendarScreenState extends State<CalendarScreen>
           Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (!widget.share.canEditCalendar)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
-                  child: Text(
-                    widget.strings.readOnlyCalendar,
-                    style: text.labelLarge?.copyWith(
-                      color: scheme.primary,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
                 child: Column(
@@ -1859,6 +1860,43 @@ class _MarkButton extends StatelessWidget {
       ),
       icon: Icon(icon),
       selectedIcon: Icon(selectedIcon),
+    );
+  }
+}
+
+/// "Partner mode" hint beside the brand in the partner's app bar: an eye icon
+/// and plain text that ellipsizes rather than pushing the action icons off
+/// narrow screens.
+class _PartnerModeLabel extends StatelessWidget {
+  const _PartnerModeLabel({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final fg = Theme.of(context).colorScheme.onSurfaceVariant;
+    return Tooltip(
+      message: label,
+      child: Row(
+        key: const ValueKey('partner-mode-label'),
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.visibility_outlined, size: 16, color: fg),
+          const SizedBox(width: 4),
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              softWrap: false,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    color: fg,
+                    fontWeight: FontWeight.w600,
+                  ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
