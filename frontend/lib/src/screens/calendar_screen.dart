@@ -132,8 +132,7 @@ class _CalendarScreenState extends State<CalendarScreen>
   String get _todayKey => DateFormat('yyyy-MM-dd').format(_today);
 
   DateTime get _selectedDay {
-    final selected = _selected;
-    return selected == null || selected.isAfter(_today) ? _today : selected;
+    return _selected ?? _today;
   }
 
   DateTime get _prevMonth => DateTime(_month.year, _month.month - 1);
@@ -664,10 +663,11 @@ class _CalendarScreenState extends State<CalendarScreen>
   }
 
   /// Selects [day] for the summary; on an editable calendar, also opens
-  /// its editor.
+  /// its editor. Future days are only selected: their tags show what is
+  /// expected, and nothing can be logged yet.
   Future<void> _openDay(DateTime day) async {
     setState(() => _selected = _isSameDay(day, _today) ? null : day);
-    if (!widget.share.canEditCalendar) {
+    if (!widget.share.canEditCalendar || day.isAfter(_today)) {
       return;
     }
     final key = DateFormat('yyyy-MM-dd').format(day);
@@ -724,25 +724,39 @@ class _CalendarScreenState extends State<CalendarScreen>
     final inPms = todayKind == CycleDayKind.pms;
     final next = _cycle.nextWindow(_today);
     final shortDay = DateFormat.MMMd(locale);
-    final String? cycleLine;
+    // One line per upcoming event, soonest first.
+    final cycleLines = <({bool pms, bool now, String text})>[];
     if (next == null) {
-      cycleLine = _cycle.note == 'pms_suppressed_menopause'
-          ? null
-          : widget.share.canEditCalendar
-              ? widget.strings.cycleHintOwner
-              : null;
+      if (_cycle.note != 'pms_suppressed_menopause' &&
+          widget.share.canEditCalendar) {
+        cycleLines
+            .add((pms: false, now: false, text: widget.strings.cycleHintOwner));
+      }
     } else if (inPms) {
-      cycleLine = widget.strings.cyclePmsNow(shortDay.format(next.periodStart));
+      cycleLines
+        ..add((pms: true, now: true, text: widget.strings.cyclePmsLikelyNow))
+        ..add((
+          pms: false,
+          now: false,
+          text:
+              widget.strings.cycleNextPeriod(shortDay.format(next.periodStart)),
+        ));
     } else if (todayKind == CycleDayKind.predictedPeriod) {
-      cycleLine = widget.strings.cyclePeriodNow;
-    } else if (next.pmsStart.year < 2) {
-      cycleLine =
-          widget.strings.cycleNextNoPms(shortDay.format(next.periodStart));
+      cycleLines
+          .add((pms: false, now: true, text: widget.strings.cyclePeriodNow));
     } else {
-      cycleLine = widget.strings.cycleNext(
-        shortDay.format(next.periodStart),
-        shortDay.format(next.pmsStart),
-      );
+      if (next.pmsStart.year >= 2) {
+        cycleLines.add((
+          pms: true,
+          now: false,
+          text: widget.strings.cyclePmsFrom(shortDay.format(next.pmsStart)),
+        ));
+      }
+      cycleLines.add((
+        pms: false,
+        now: false,
+        text: widget.strings.cycleNextPeriod(shortDay.format(next.periodStart)),
+      ));
     }
 
     return Scaffold(
@@ -807,29 +821,44 @@ class _CalendarScreenState extends State<CalendarScreen>
                   ],
                 ),
               ),
-              if (cycleLine != null)
+              if (cycleLines.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
-                  child: Row(
+                  child: Column(
                     key: const ValueKey('cycle-line'),
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(
-                        Icons.water_drop_outlined,
-                        size: 16,
-                        color: inPms ? pmsColor : periodColor,
-                      ),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          cycleLine,
-                          style: text.bodyMedium?.copyWith(
-                            color: inPms
-                                ? scheme.onSurface
-                                : scheme.onSurfaceVariant,
-                            fontWeight: inPms ? FontWeight.w600 : null,
+                      for (final line in cycleLines)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 1),
+                          child: Row(
+                            children: [
+                              SizedBox(
+                                width: 16,
+                                child: line.pms
+                                    ? DayMark(color: pmsColor, dashed: true)
+                                    : Icon(
+                                        Icons.water_drop_outlined,
+                                        size: 16,
+                                        color: periodColor,
+                                      ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  line.text,
+                                  style: text.bodyMedium?.copyWith(
+                                    color: line.now
+                                        ? scheme.onSurface
+                                        : scheme.onSurfaceVariant,
+                                    fontWeight:
+                                        line.now ? FontWeight.w600 : null,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                      ),
                     ],
                   ),
                 ),
@@ -852,40 +881,6 @@ class _CalendarScreenState extends State<CalendarScreen>
                     ],
                   ),
                 ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
-                child: Wrap(
-                  spacing: 14,
-                  runSpacing: 4,
-                  children: [
-                    _LegendDot(
-                      color:
-                          App217Colors.statusTaken(brightness, widget.palette),
-                      label: widget.strings.legendTaken,
-                    ),
-                    _LegendDot(
-                      color:
-                          App217Colors.statusMissed(brightness, widget.palette),
-                      label: widget.strings.legendMissed,
-                    ),
-                    _LegendDot(
-                      color: scheme.onSurfaceVariant,
-                      label: widget.strings.legendUnrecorded,
-                      outlined: true,
-                    ),
-                    _LegendDot(
-                      color: periodColor,
-                      label: widget.strings.legendPeriod,
-                      icon: Icons.water_drop,
-                    ),
-                    _LegendDot(
-                      color: pmsColor,
-                      label: widget.strings.legendPms,
-                      dashed: true,
-                    ),
-                  ],
-                ),
-              ),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 4),
                 child: Row(
@@ -922,7 +917,8 @@ class _CalendarScreenState extends State<CalendarScreen>
                       bottomInset: 12,
                     );
                     // The note goes in the room the grid leaves below itself,
-                    // when there is enough for a line or two.
+                    // when there is enough for a line or two, anchored right
+                    // above the tags so 5- and 6-week months do not move it.
                     final noteRoom = constraints.maxHeight - gridBottom - 12;
                     // Hidden while months slide: the incoming month may be
                     // a week taller than the room measured for this one.
@@ -1029,7 +1025,10 @@ class _CalendarScreenState extends State<CalendarScreen>
                           child: Visibility(
                             visible: showNote,
                             maintainState: true,
-                            child: DayNotePanel(notes: selectedNotes),
+                            child: DayNotePanel(
+                              notes: selectedNotes,
+                              alignment: Alignment.bottomCenter,
+                            ),
                           ),
                         ),
                       ],
@@ -1047,6 +1046,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                 onEdit: widget.share.canEditCalendar
                     ? () => _openDay(selectedDay)
                     : null,
+                isFuture: selectedDay.isAfter(_today),
               ),
             ],
           ),
@@ -1098,47 +1098,6 @@ class _CalendarScreenState extends State<CalendarScreen>
             ),
         ],
       ),
-    );
-  }
-}
-
-class _LegendDot extends StatelessWidget {
-  const _LegendDot({
-    required this.color,
-    required this.label,
-    this.outlined = false,
-    this.dashed = false,
-    this.icon,
-  });
-
-  final Color color;
-  final String label;
-  final bool outlined;
-
-  /// Dashed rounded square, as drawn around expected PMS days.
-  final bool dashed;
-  final IconData? icon;
-
-  @override
-  Widget build(BuildContext context) {
-    final mark = DayMark(
-      color: color,
-      outlined: outlined,
-      dashed: dashed,
-      icon: icon,
-    );
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        mark,
-        const SizedBox(width: 6),
-        Text(
-          label,
-          style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                color: Theme.of(context).colorScheme.onSurface,
-              ),
-        ),
-      ],
     );
   }
 }
@@ -1340,7 +1299,7 @@ class _DayCell extends StatelessWidget {
         bg == null ? App217Colors.period(brightness, palette) : onCell;
 
     return InkWell(
-      onTap: isFuture ? null : () => onTap(day),
+      onTap: () => onTap(day),
       borderRadius: BorderRadius.circular(12),
       // Expected PMS days: a light, sparsely dashed ring in the gap around
       // the cell (an estimate, like the outlined predicted-period drop), so
@@ -1386,46 +1345,58 @@ class _DayCell extends StatelessWidget {
                       fontSize: 15,
                     ),
                   ),
-                  if (isToday)
-                    Text(
-                      todayLabel,
-                      style: TextStyle(
-                        fontSize: 9,
-                        fontWeight: FontWeight.w800,
-                        color: bg == null ? scheme.primary : onCell,
-                      ),
-                    ),
-                  if (hasNote || hasHeart || loggedPeriod || predictedPeriod)
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (loggedPeriod)
-                          Icon(
-                            Icons.water_drop,
-                            key: ValueKey('period-${day.month}-${day.day}'),
-                            size: 11,
-                            color: periodColor,
-                          ),
-                        if (predictedPeriod)
-                          Icon(
-                            Icons.water_drop_outlined,
-                            key: ValueKey(
-                              'predicted-period-${day.month}-${day.day}',
-                            ),
-                            size: 11,
-                            color: periodColor,
-                          ),
-                        if ((loggedPeriod || predictedPeriod) &&
-                            (hasHeart || hasNote))
-                          const SizedBox(width: 2),
-                        if (hasHeart)
-                          Icon(Icons.favorite, size: 11, color: onCell),
-                        if (hasHeart && hasNote) const SizedBox(width: 2),
-                        if (hasNote)
-                          Icon(Icons.sticky_note_2_outlined,
-                              size: 11, color: onCell),
-                      ],
-                    ),
+                  // Fixed-height line under every number, so numbers sit at
+                  // the same height whether or not a day has marks. Today's
+                  // label gives way to its marks; the border still shows it.
+                  SizedBox(
+                    height: 12,
+                    child: hasNote ||
+                            hasHeart ||
+                            loggedPeriod ||
+                            predictedPeriod
+                        ? Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (loggedPeriod)
+                                Icon(
+                                  Icons.water_drop,
+                                  key: ValueKey(
+                                      'period-${day.month}-${day.day}'),
+                                  size: 11,
+                                  color: periodColor,
+                                ),
+                              if (predictedPeriod)
+                                Icon(
+                                  Icons.water_drop_outlined,
+                                  key: ValueKey(
+                                    'predicted-period-${day.month}-${day.day}',
+                                  ),
+                                  size: 11,
+                                  color: periodColor,
+                                ),
+                              if ((loggedPeriod || predictedPeriod) &&
+                                  (hasHeart || hasNote))
+                                const SizedBox(width: 2),
+                              if (hasHeart)
+                                Icon(Icons.favorite, size: 11, color: onCell),
+                              if (hasHeart && hasNote) const SizedBox(width: 2),
+                              if (hasNote)
+                                Icon(Icons.sticky_note_2_outlined,
+                                    size: 11, color: onCell),
+                            ],
+                          )
+                        : isToday
+                            ? Text(
+                                todayLabel,
+                                style: TextStyle(
+                                  fontSize: 9,
+                                  height: 1.2,
+                                  fontWeight: FontWeight.w800,
+                                  color: bg == null ? scheme.primary : onCell,
+                                ),
+                              )
+                            : null,
+                  ),
                 ],
               ),
             ),

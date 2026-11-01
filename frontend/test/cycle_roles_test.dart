@@ -488,10 +488,36 @@ void main() {
           findsWidgets,
         );
       }
-      // Legend explains both marks; today's tags repeat PMS.
-      expect(find.text('Period'), findsOneWidget);
-      expect(find.text('Expected PMS'), findsNWidgets(2));
-      expect(find.byKey(const ValueKey('day-tag-pms')), findsOneWidget);
+      // PMS and the next period get a line each.
+      expect(
+        find.descendant(
+            of: line, matching: find.textContaining('Next period ~')),
+        findsOneWidget,
+      );
+      // No legend: today's tags show their mark and reveal the label on tap.
+      final pmsTag = find.byKey(const ValueKey('day-tag-pms'));
+      expect(pmsTag, findsOneWidget);
+      expect(find.text('Expected PMS'), findsNothing);
+      await tester.tap(pmsTag);
+      await tester.pumpAndSettle();
+      expect(find.text('Expected PMS'), findsOneWidget);
+
+      // A future day is selectable and tells what is expected there.
+      if (inPeriod.month != today.month) {
+        await tester.tap(find.byTooltip('Next month'));
+        await tester.pumpAndSettle();
+      }
+      await tester.tap(find
+          .byKey(
+              ValueKey('predicted-period-${inPeriod.month}-${inPeriod.day}'))
+          .hitTestable());
+      await tester.pumpAndSettle();
+      final predicted = find.byKey(const ValueKey('day-tag-predicted-period'));
+      expect(predicted, findsOneWidget);
+      expect(find.byKey(const ValueKey('day-tag-status')), findsNothing);
+      await tester.tap(predicted);
+      await tester.pumpAndSettle();
+      expect(find.text('Predicted period'), findsOneWidget);
     });
 
     testWidgets(
