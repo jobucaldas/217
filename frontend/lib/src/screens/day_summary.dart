@@ -254,11 +254,13 @@ class _DayTagState extends State<_DayTag> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final color = widget.color;
+    void toggle() => setState(() => _open = !_open);
     return Semantics(
       button: true,
       label: widget.label,
       expanded: _open,
       excludeSemantics: true,
+      onTap: toggle,
       child: Material(
         color: Color.alphaBlend(color.withValues(alpha: 0.14), scheme.surface),
         shape: RoundedRectangleBorder(
@@ -267,7 +269,7 @@ class _DayTagState extends State<_DayTag> {
         ),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
-          onTap: () => setState(() => _open = !_open),
+          onTap: toggle,
           child: AnimatedSize(
             duration: const Duration(milliseconds: 150),
             alignment: Alignment.centerLeft,
