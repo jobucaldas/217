@@ -122,6 +122,9 @@ class _CalendarScreenState extends State<CalendarScreen>
   /// Share of the carousel the incoming month must cover before the header
   /// names it.
   static const _monthLabelSwitch = 0.6;
+
+  /// Body height from which the note is drawn above the day tags.
+  static const _inlineNoteMinBodyHeight = 640.0;
   Animation<double>? _monthSnapAnim;
 
   /// Web touchpad scroll has no end event: an idle gap ends the gesture,
@@ -744,6 +747,12 @@ class _CalendarScreenState extends State<CalendarScreen>
     final selectedKey = DateFormat('yyyy-MM-dd').format(selectedDay);
     final selectedEntry = _visibleEntry(selectedKey);
     final selectedNotes = selectedEntry?.notes.trim() ?? '';
+    // Below this much room under the app bar the note would squeeze the
+    // month grid, so it becomes a tag that opens it in a card.
+    final bodyHeight = MediaQuery.sizeOf(context).height -
+        MediaQuery.paddingOf(context).vertical -
+        kToolbarHeight;
+    final noteAsTag = bodyHeight < _inlineNoteMinBodyHeight;
     final pmsColor = App217Colors.pms(brightness, widget.palette);
     final periodColor = App217Colors.period(brightness, widget.palette);
     final todayKind = _cycle.kindOf(_today);
@@ -1048,6 +1057,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                     : null,
                 isFuture: selectedDay.isAfter(_today),
                 note: selectedNotes,
+                noteAsTag: noteAsTag,
               ),
             ],
           ),

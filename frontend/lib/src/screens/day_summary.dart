@@ -63,6 +63,7 @@ class DaySummaryBar extends StatelessWidget {
     this.onEdit,
     this.isFuture = false,
     this.note = '',
+    this.noteAsTag = false,
   });
 
   final Strings strings;
@@ -82,6 +83,9 @@ class DaySummaryBar extends StatelessWidget {
   /// The day's note, drawn above the tags so it keeps one fixed place at the
   /// bottom of the screen whatever the month shows.
   final String note;
+
+  /// Short screens: the note is not drawn; its tag opens it in a card.
+  final bool noteAsTag;
 
   @override
   Widget build(BuildContext context) {
@@ -152,6 +156,13 @@ class DaySummaryBar extends StatelessWidget {
         _DayTag(
           key: const ValueKey('day-tag-note'),
           label: strings.notes,
+          onPressed: noteAsTag
+              ? () => showDayNoteCard(
+                    context,
+                    title: strings.notes,
+                    notes: entry!.notes.trim(),
+                  )
+              : null,
           color: scheme.primary,
           mark: DayMark(
             color: scheme.primary,
@@ -209,17 +220,8 @@ class DaySummaryBar extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (note.isNotEmpty) ...[
-              // Fewer lines on short screens: the note must not squeeze the
-              // month grid.
-              DayNotePanel(
-                notes: note,
-                maxLines: size.height < 500
-                    ? 1
-                    : size.height < 700
-                        ? 2
-                        : 3,
-              ),
+            if (note.isNotEmpty && !noteAsTag) ...[
+              DayNotePanel(notes: note, maxLines: 3),
               const SizedBox(height: 8),
             ],
             _summary(compact, tagWrap, button),
@@ -264,11 +266,15 @@ class _DayTag extends StatefulWidget {
     required this.label,
     required this.color,
     required this.mark,
+    this.onPressed,
   });
 
   final String label;
   final Color color;
   final Widget mark;
+
+  /// Replaces the open/close toggle, e.g. to show something larger.
+  final VoidCallback? onPressed;
 
   @override
   State<_DayTag> createState() => _DayTagState();
@@ -281,11 +287,18 @@ class _DayTagState extends State<_DayTag> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final color = widget.color;
-    void toggle() => setState(() => _open = !_open);
+    void toggle() {
+      final onPressed = widget.onPressed;
+      if (onPressed != null) {
+        onPressed();
+      } else {
+        setState(() => _open = !_open);
+      }
+    }
     return Semantics(
       button: true,
       label: widget.label,
-      expanded: _open,
+      expanded: widget.onPressed == null ? _open : null,
       excludeSemantics: true,
       onTap: toggle,
       child: Material(
@@ -456,4 +469,51 @@ class DashedRingPainter extends CustomPainter {
       old.strokeWidth != strokeWidth ||
       old.dash != dash ||
       old.gap != gap;
+}
+
+/// Read-only note card, styled like the note dialog of the day editor.
+Future<void> showDayNoteCard(
+  BuildContext context, {
+  required String title,
+  required String notes,
+}) {
+  return showDialog<void>(
+    context: context,
+    useRootNavigator: true,
+    builder: (context) {
+      final scheme = Theme.of(context).colorScheme;
+      final textTheme = Theme.of(context).textTheme;
+      final fieldFill = Color.alphaBlend(
+        scheme.onSurface.withValues(alpha: 0.06),
+        scheme.surface,
+      );
+      return AlertDialog(
+        key: const ValueKey('day-note-card'),
+        backgroundColor: scheme.surface,
+        title: Text(
+          title,
+          style: textTheme.titleLarge?.copyWith(color: scheme.onSurface),
+        ),
+        content: SingleChildScrollView(
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: fieldFill,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: scheme.outline),
+            ),
+            child: Text(
+              notes,
+              style: textTheme.bodyLarge?.copyWith(
+                color: scheme.onSurface,
+                fontSize: 17,
+                height: 1.35,
+              ),
+            ),
+          ),
+        ),
+      );
+    },
+  );
 }

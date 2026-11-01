@@ -632,7 +632,7 @@ void main() {
     expect(tester.getTopLeft(note), noteTop);
   });
 
-  testWidgets('a long note does not squeeze the grid on short screens',
+  testWidgets('short screens show the note as a tag that opens a card',
       (tester) async {
     const size = Size(900, 400);
     await tester.binding.setSurfaceSize(size);
@@ -669,13 +669,16 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(tester.takeException(), isNull);
-    // One line only, so the grid keeps most of the screen.
-    expect(tester.getSize(find.byKey(const ValueKey('day-note'))).height,
-        lessThan(60));
+    // Short screen: no inline note, a tag opens it in a card.
+    expect(find.byKey(const ValueKey('day-note')), findsNothing);
     expect(
       tester.getSize(find.byKey(const ValueKey('month-carousel'))).height,
       greaterThan(150),
     );
+    await tester.tap(find.byKey(const ValueKey('day-tag-note')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('day-note-card')), findsOneWidget);
+    expect(find.textContaining('Long note.'), findsOneWidget);
   });
 
   testWidgets('horizontal carousel swipe changes month with snap',
