@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../i18n.dart';
 
-/// "Message notifications" switch, shown next to the pill notifications
+/// "Messages" switch, shown next to the pill notifications
 /// (owner reminders, partner alerts). Keeps its own copy of the value: the
 /// screen hosting it is pushed once and does not rebuild with app state.
 class MessageNotificationsTile extends StatefulWidget {
@@ -38,7 +38,6 @@ class _MessageNotificationsTileState extends State<MessageNotificationsTile> {
       child: SwitchListTile(
         key: const ValueKey('message-notifications-toggle'),
         title: Text(widget.strings.messageNotifsTitle),
-        subtitle: Text(widget.strings.messageNotifsSubtitle),
         value: _value,
         onChanged: (v) {
           setState(() => _value = v);

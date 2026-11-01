@@ -459,14 +459,9 @@ class Strings {
         '$count mensajes nuevos',
       );
   String get messageNotifsTitle => _t(
-        'Message notifications',
-        'Notificações de mensagens',
-        'Notificaciones de mensajes',
-      );
-  String get messageNotifsSubtitle => _t(
-        'Tells you about new messages, also with 217 closed (checked about every 15 minutes).',
-        'Avisa sobre mensagens novas, também com o 217 fechado (verifica a cada 15 minutos, aproximadamente).',
-        'Te avisa de mensajes nuevos, también con 217 cerrado (revisa cada 15 minutos, aproximadamente).',
+        'Messages',
+        'Mensagens',
+        'Mensajes',
       );
   String get partnerRevokedTitle => _t(
         'You are not invited to her 217 calendar',
@@ -603,7 +598,8 @@ class Strings {
       'El SPM no se cuenta mientras esté seleccionada la menopausia.');
 
   // Partner alerts
-  String get partnerAlerts => _t('Alerts', 'Avisos', 'Avisos');
+  String get partnerAlerts =>
+      _t('Notifications', 'Notificações', 'Notificaciones');
   String get partnerAlertsSubtitle => _t(
         'PMS and pill not logged',
         'TPM e pílula não registrada',
@@ -614,23 +610,15 @@ class Strings {
         'TPM, pílula não registrada e mensagens',
         'SPM, píldora no registrada y mensajes',
       );
-  String get pmsAlertTitle =>
-      _t('Expected PMS heads-up', 'Aviso de TPM prevista',
-          'Aviso de SPM previsto');
-  String get pmsAlertBody => _t(
-        'On the day her expected PMS window starts (an estimate)',
-        'No dia em que a TPM prevista dela começa (uma estimativa)',
-        'El día en que empieza su SPM previsto (una estimación)',
+  String get pmsAlertTitle => _t(
+        'PMS forecast',
+        'Previsão de TPM',
+        'Previsión de SPM',
       );
   String get pillAlertTitle => _t(
-        'Pill not logged',
-        'Pílula não registrada',
-        'Píldora no registrada',
-      );
-  String get pillAlertBody => _t(
-        "If today's pill isn't logged by this time",
-        'Se a pílula de hoje não estiver registrada até esse horário',
-        'Si la píldora de hoy no está registrada a esta hora',
+        'Medication Not Logged',
+        'Remédio Não Registrado',
+        'Medicamento No Registrado',
       );
   String get pillRepeatTitle => _t('Repeat', 'Repetir', 'Repetir');
   String get pillRepeatSubtitle => _t(
