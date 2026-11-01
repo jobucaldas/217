@@ -464,7 +464,8 @@ void main() {
       final button = find.byKey(const ValueKey('update-day-button'));
       expect(find.text('Update today'), findsOneWidget);
       expect(find.byKey(const ValueKey('day-tag-heart')), findsOneWidget);
-      expect(find.byKey(const ValueKey('day-tag-note')), findsOneWidget);
+      // The note is drawn inline, so its tag is left out.
+      expect(find.byKey(const ValueKey('day-tag-note')), findsNothing);
       expect(find.text('Felt fine'), findsOneWidget);
       final carousel = find.byKey(const ValueKey('month-carousel'));
       expect(
@@ -545,6 +546,183 @@ void main() {
     await tester.tap(find.descendant(of: grid, matching: find.text('15')));
     await tester.pumpAndSettle();
     expect(find.byType(DayEditorSheet), findsOneWidget);
+  });
+
+  testWidgets('header month flips at 60% of the drag; note stays visible',
+      (tester) async {
+    const size = Size(390, 844);
+    await tester.binding.setSurfaceSize(size);
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day)
+        .toIso8601String()
+        .substring(0, 10);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildApp217Theme(
+          brightness: Brightness.light,
+          palette: AppPalette.blue,
+        ),
+        home: MediaQuery(
+          data: const MediaQueryData(size: size),
+          child: CalendarScreen(
+            api: _FakeCalendarApi([
+              Entry(date: today, taken: true, notes: 'Felt fine'),
+            ]),
+            user: const User(
+              id: 'u1',
+              email: 'shot@example.invalid',
+              name: 'Shot',
+            ),
+            strings: const Strings(AppLanguage.en),
+            onOpenSettings: () {},
+            palette: AppPalette.blue,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final current = find.text(DateFormat.yMMMM('en_US').format(now));
+    final prev = DateTime(now.year, now.month - 1);
+    final previous = find.text(DateFormat.yMMMM('en_US').format(prev));
+    expect(find.text('Felt fine'), findsOneWidget);
+
+    // The note lives in the bottom bar, above the tags and button, outside
+    // the month carousel, and never moves while swiping.
+    final note = find.byKey(const ValueKey('day-note'));
+    final noteTop = tester.getTopLeft(note);
+    final carousel = find.byKey(const ValueKey('month-carousel'));
+    expect(
+      tester.getTopLeft(note).dy,
+      greaterThanOrEqualTo(tester.getBottomLeft(carousel).dy),
+    );
+    expect(
+      tester.getBottomLeft(note).dy,
+      lessThanOrEqualTo(
+        tester.getTopLeft(find.byKey(const ValueKey('day-tag-status'))).dy,
+      ),
+    );
+    // Shown inline, the note has no tag of its own.
+    expect(find.byKey(const ValueKey('day-tag-note')), findsNothing);
+    final gesture = await tester.startGesture(tester.getCenter(carousel));
+    // Slop first, then 40% of the 390px width.
+    await gesture.moveBy(const Offset(20, 0));
+    await tester.pump();
+    await gesture.moveBy(const Offset(136, 0));
+    await tester.pump();
+    expect(current, findsOneWidget);
+    expect(find.text('Felt fine'), findsOneWidget);
+
+    // 70% across: the header already names the previous month.
+    await gesture.moveBy(const Offset(117, 0));
+    await tester.pump();
+    expect(previous, findsOneWidget);
+    expect(current, findsNothing);
+    expect(find.text('Felt fine'), findsOneWidget);
+    expect(tester.getTopLeft(note), noteTop);
+
+    // Dragged back under 60%: the label returns.
+    await gesture.moveBy(const Offset(-117, 0));
+    await tester.pump();
+    expect(current, findsOneWidget);
+    expect(find.text('Felt fine'), findsOneWidget);
+
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(find.text('Felt fine'), findsOneWidget);
+    expect(tester.getTopLeft(note), noteTop);
+  });
+
+  testWidgets('short screens show the note as a tag that opens a card',
+      (tester) async {
+    const size = Size(900, 400);
+    await tester.binding.setSurfaceSize(size);
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day)
+        .toIso8601String()
+        .substring(0, 10);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildApp217Theme(
+          brightness: Brightness.light,
+          palette: AppPalette.blue,
+        ),
+        home: MediaQuery(
+          data: const MediaQueryData(size: size),
+          child: CalendarScreen(
+            api: _FakeCalendarApi([
+              Entry(date: today, taken: true, notes: 'Long note. ' * 60),
+            ]),
+            user: const User(
+              id: 'u1',
+              email: 'shot@example.invalid',
+              name: 'Shot',
+            ),
+            strings: const Strings(AppLanguage.en),
+            onOpenSettings: () {},
+            palette: AppPalette.blue,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    // Short screen: no inline note, a tag opens it in a card.
+    expect(find.byKey(const ValueKey('day-note')), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('day-tag-note')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('day-note-card')), findsOneWidget);
+    expect(find.textContaining('Long note.'), findsOneWidget);
+  });
+
+  testWidgets('tapping a long inline note opens the whole note',
+      (tester) async {
+    const size = Size(390, 844);
+    await tester.binding.setSurfaceSize(size);
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day)
+        .toIso8601String()
+        .substring(0, 10);
+    final note = 'Long note. ' * 60;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildApp217Theme(
+          brightness: Brightness.light,
+          palette: AppPalette.blue,
+        ),
+        home: MediaQuery(
+          data: const MediaQueryData(size: size),
+          child: CalendarScreen(
+            api: _FakeCalendarApi([
+              Entry(date: today, taken: true, notes: note),
+            ]),
+            user: const User(
+              id: 'u1',
+              email: 'shot@example.invalid',
+              name: 'Shot',
+            ),
+            strings: const Strings(AppLanguage.en),
+            onOpenSettings: () {},
+            palette: AppPalette.blue,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Inline, capped to three lines, and no separate note tag.
+    expect(find.byKey(const ValueKey('day-tag-note')), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('day-note')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('day-note-card')), findsOneWidget);
+    expect(find.text(note.trim()), findsNWidgets(2));
   });
 
   testWidgets('horizontal carousel swipe changes month with snap',
