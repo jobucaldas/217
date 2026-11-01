@@ -113,6 +113,24 @@ jobs:
             --build-number="$BUILD_NUMBER" \
             --dart-define=APP_VERSION="$APP_VERSION" \
             --dart-define=API_BASE_URL="$DEFAULT_SERVER_URL"
+      - name: Build release app bundle
+        # Google Play takes an .aab signed with the upload key (the same release
+        # key above); Play App Signing re-signs what it delivers to devices.
+        env:
+          APP_VERSION: ${{ steps.version.outputs.tag }}
+          BUILD_NUMBER: ${{ steps.version.outputs.build }}
+          DEFAULT_SERVER_URL: ${{ vars.DEFAULT_SERVER_URL }}
+        run: |
+          flutter build appbundle --release \
+            --build-name="$APP_VERSION" \
+            --build-number="$BUILD_NUMBER" \
+            --dart-define=APP_VERSION="$APP_VERSION" \
+            --dart-define=API_BASE_URL="$DEFAULT_SERVER_URL"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-app-bundle
+          path: frontend/build/app/outputs/bundle/release/app-release.aab
+          retention-days: 30
       - uses: actions/upload-artifact@v4
         with:
           name: frontend-build

@@ -228,8 +228,9 @@ Future<LocalReminderSyncStatus> syncPartnerAlerts(
     final exact = await _canUseExactAlarms();
     // Same high-importance, sound-on channel as the other partner alerts
     // makes the pill repeat alarm-like. Exact alarms fire on time but need
-    // USE_EXACT_ALARM (Android 13+, auto-granted) or SCHEDULE_EXACT_ALARM
-    // (Android 12 and below, user-granted); when neither is held we fall
+    // SCHEDULE_EXACT_ALARM, which the user grants in system settings (Android
+    // 14+ denies it by default; USE_EXACT_ALARM is not declared because Google
+    // Play reserves it for alarm-clock and calendar apps). Without it we fall
     // back to inexact-while-idle, which Doze can delay by several minutes
     // per occurrence.
     const details = NotificationDetails(
