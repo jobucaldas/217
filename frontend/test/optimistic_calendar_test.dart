@@ -104,9 +104,11 @@ Future<void> _pumpCalendar(
 Future<void> _tapTakenOnToday(WidgetTester tester) async {
   final now = DateTime.now();
   final grid = find.byKey(ValueKey('${now.year}-${now.month}'));
-  await tester.tap(
-    find.descendant(of: grid, matching: find.text('${now.day}')),
-  );
+  final cell = find.descendant(of: grid, matching: find.text('${now.day}'));
+  // A single tap only selects; a double tap opens the editor.
+  await tester.tap(cell);
+  await tester.pump(const Duration(milliseconds: 50));
+  await tester.tap(cell);
   await tester.pumpAndSettle();
   await tester.tap(find.text('Taken').last);
   await tester.pump();
