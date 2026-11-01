@@ -87,6 +87,11 @@ func (s *MemoryStore) DeleteUser(userID string) error {
 			delete(s.sessions, k)
 		}
 	}
+	for id, key := range s.deviceKeys {
+		if key.UserID == userID {
+			delete(s.deviceKeys, id)
+		}
+	}
 	for id, share := range s.shares {
 		switch {
 		case share.OwnerID == userID:
@@ -130,6 +135,11 @@ func (s *MemoryStore) PurgeExpired(now time.Time) error {
 	for k, a := range s.oauthAttempts {
 		if !now.Before(a.ExpiresAt) {
 			delete(s.oauthAttempts, k)
+		}
+	}
+	for id, key := range s.deviceKeys {
+		if !key.LastUsedAt.After(now.Add(-model.DeviceKeyIdleRetention)) {
+			s.deleteDeviceKeyLocked(id)
 		}
 	}
 	for key, delivery := range s.deliveries {

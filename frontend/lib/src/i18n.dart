@@ -201,6 +201,34 @@ class Strings {
         'No se puede conectar con el servidor. Inténtalo de nuevo.',
       );
   String get retry => _t('Retry', 'Tentar de novo', 'Reintentar');
+  String get syncOfflineTitle =>
+      _t("You're offline", 'Você está sem conexão', 'Estás sin conexión');
+  String get syncPendingTitle => _t('Changes waiting to sync',
+      'Alterações aguardando envio', 'Cambios pendientes de enviar');
+  String syncNoticeBody(bool offline, int pending) {
+    final changes = _t(
+      pending == 1 ? '1 change' : '$pending changes',
+      pending == 1 ? '1 alteração' : '$pending alterações',
+      pending == 1 ? '1 cambio' : '$pending cambios',
+    );
+    if (offline && pending == 0) {
+      return _t(
+          'Your calendar is saved on this phone. You stay signed in; it refreshes when the server is back.',
+          'Seu calendário está salvo neste celular. Sua sessão continua ativa; ele atualiza quando o servidor voltar.',
+          'Tu calendario está guardado en este teléfono. Sigues con la sesión iniciada; se actualiza cuando vuelva el servidor.');
+    }
+    if (offline) {
+      return _t(
+          '$changes saved on this phone. You stay signed in; they sync when the server is back.',
+          '$changes salvas neste celular. Sua sessão continua ativa; elas serão enviadas quando o servidor voltar.',
+          '$changes guardados en este teléfono. Sigues con la sesión iniciada; se enviarán cuando vuelva el servidor.');
+    }
+    return _t('$changes saved on this phone, not yet on the server.',
+        '$changes salvas neste celular, ainda não no servidor.',
+        '$changes guardados en este teléfono, aún no en el servidor.');
+  }
+
+  String get syncNow => _t('Sync now', 'Enviar agora', 'Enviar ahora');
   String get done => _t('Done', 'Pronto', 'Listo');
   String get clearNote => _t('Clear note', 'Limpar nota', 'Borrar nota');
   String get appearance => _t('Appearance', 'Aparência', 'Apariencia');

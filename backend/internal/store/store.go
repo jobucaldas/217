@@ -50,6 +50,22 @@ type Store interface {
 	DeleteSession(sessionID string) error
 	DeleteAllSessionsForUser(userID string) error
 
+	// Device keys renew sessions on a device without a new sign-in.
+	// CreateDeviceKey registers a PKIX public key and returns its ID.
+	CreateDeviceKey(userID string, publicKey []byte) (string, error)
+	// CreateDeviceSession is CreateSession bound to a device key, so
+	// revoking the key ends the session too.
+	CreateDeviceSession(userID, keyID, sessionID string, expiresAt time.Time) error
+	// SetDeviceChallenge stores a single-use challenge for keyID.
+	SetDeviceChallenge(keyID, challenge string, expiresAt time.Time) error
+	// ConsumeDeviceChallenge clears the key's challenge and, when it matches
+	// and has not expired, returns the key's owner and public key.
+	ConsumeDeviceChallenge(keyID, challenge string) (userID string, publicKey []byte, err error)
+	// DeleteSessionAndDevice ends a session and revokes the device key it
+	// is bound to, if any (logout).
+	DeleteSessionAndDevice(sessionID string) error
+	ListDeviceKeys(userID string) ([]model.DeviceKey, error)
+
 	// Calendar sharing (owner ↔ partner)
 	GetShareState(userID string) (*model.ShareState, error)
 	EnableShare(ownerID string) (*model.ShareState, error)

@@ -107,6 +107,10 @@ func (h *Handler) ExportAccount(w http.ResponseWriter, r *http.Request) {
 		fail("subscriptions", err)
 		return
 	}
+	if out.Devices, err = h.store.ListDeviceKeys(userID); err != nil {
+		fail("devices", err)
+		return
+	}
 	w.Header().Set("Content-Disposition", `attachment; filename="217-data-`+out.ExportedAt.Format("2006-01-02")+`.json"`)
 	writeJSON(w, http.StatusOK, out)
 }

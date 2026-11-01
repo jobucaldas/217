@@ -675,6 +675,7 @@ func (s *PGStore) PurgeExpired(now time.Time) error {
 		arg       time.Time
 	}{
 		{"sessions", `DELETE FROM sessions WHERE expires_at <= $1`, now},
+		{"idle device keys", `DELETE FROM device_keys WHERE last_used_at <= $1`, now.Add(-model.DeviceKeyIdleRetention)},
 		{"oauth attempts", `DELETE FROM oauth_attempts WHERE expires_at <= $1 OR consumed_at IS NOT NULL`, now},
 		{"reminder deliveries", `DELETE FROM reminder_deliveries WHERE reminder_date < ($1::timestamptz - INTERVAL '30 days')::date`, now},
 		{"revoked shares", `DELETE FROM calendar_shares WHERE status = 'revoked' AND updated_at <= $1`, now.Add(-model.RetentionAfterRevoke)},

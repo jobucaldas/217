@@ -20,9 +20,10 @@ type memoryDelivery struct {
 }
 
 type memorySession struct {
-	UserID    string
-	CreatedAt time.Time
-	ExpiresAt time.Time
+	UserID      string
+	CreatedAt   time.Time
+	ExpiresAt   time.Time
+	DeviceKeyID string
 }
 
 type memoryOAuthAttempt struct {
@@ -46,6 +47,7 @@ type MemoryStore struct {
 	shares         map[string]*model.CalendarShare
 	messages       map[string]*model.Message
 	partnerAlerts  map[string]model.PartnerAlertPreference
+	deviceKeys     map[string]*memoryDeviceKey
 }
 
 func NewMemoryStore() *MemoryStore {
@@ -61,6 +63,7 @@ func NewMemoryStore() *MemoryStore {
 		shares:         make(map[string]*model.CalendarShare),
 		messages:       make(map[string]*model.Message),
 		partnerAlerts:  make(map[string]model.PartnerAlertPreference),
+		deviceKeys:     make(map[string]*memoryDeviceKey),
 	}
 }
 
