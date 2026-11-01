@@ -640,14 +640,14 @@ class Strings {
         'Se repite cada $minutes min hasta que registres la píldora, hasta el final del día',
       );
   String get partnerAlertsNote => _t(
-        'Alerts are scheduled on this phone from her latest calendar each time 217 syncs, so open it now and then.',
-        'Os avisos são agendados neste celular com o calendário mais recente dela sempre que o 217 sincroniza, então abra o app de vez em quando.',
-        'Los avisos se programan en este teléfono con su calendario más reciente cada vez que 217 se sincroniza, así que ábrelo de vez en cuando.',
+        'Notifications are scheduled on this phone from her latest calendar each time 217 syncs, so open it now and then.',
+        'As notificações são agendadas neste celular com o calendário mais recente dela sempre que o 217 sincroniza, então abra o app de vez em quando.',
+        'Las notificaciones se programan en este teléfono con su calendario más reciente cada vez que 217 se sincroniza, así que ábrelo de vez en cuando.',
       );
   String get partnerAlertsWeb => _t(
-        'Alerts are delivered by the Android app.',
-        'Os avisos são entregues pelo app Android.',
-        'Los avisos los entrega la app de Android.',
+        'Notifications are delivered by the Android app.',
+        'As notificações são entregues pelo app Android.',
+        'Las notificaciones las entrega la app de Android.',
       );
   String get partnerAlertsNeedLink => _t(
         'Alerts start once you join her calendar.',
