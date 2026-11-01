@@ -956,15 +956,11 @@ class _CalendarScreenState extends State<CalendarScreen>
                           constraints.biggest,
                           bottomInset: 12,
                         );
-                    // While months slide, the incoming month may be a week
-                    // taller: keep the note clear of both grids on screen
-                    // so it stays put instead of vanishing mid-swipe.
-                    var gridBottom = bottomOf(_month);
-                    if (_dragPx < 0) {
-                      gridBottom = math.max(gridBottom, bottomOf(_nextMonth));
-                    } else if (_dragPx > 0) {
-                      gridBottom = math.max(gridBottom, bottomOf(_prevMonth));
-                    }
+                    // The note follows the month the header names: it stays
+                    // put through the first 60% of a swipe (even toward a
+                    // taller month, or a cancelled one) and only a month that
+                    // really has no room for it hides it.
+                    final gridBottom = bottomOf(_headerMonth(pageW));
                     // The note goes in the room the grid leaves below itself,
                     // when there is enough for a line or two, anchored right
                     // above the tags so 5- and 6-week months do not move it.
