@@ -118,7 +118,7 @@ class PaletteColors {
   /// Period marks (logged and predicted drops).
   final Color period;
 
-  /// Intimacy heart on the day sheet (bright red, distinct from the pink period).
+  /// Sex heart on the day sheet (bright red, distinct from the pink period).
   final Color intimacy;
 
   static PaletteColors resolve(AppPalette palette, Brightness brightness) {
@@ -163,7 +163,7 @@ class PaletteColors {
   static const _takenFillDark = Color(0xFF14532D);
   static const _missedFillDark = Color(0xFF7F1D1D);
 
-  // Cycle marks (shared): amber PMS ring, pink period drop, red intimacy heart.
+  // Cycle marks (shared): amber PMS ring, pink period drop, red sex heart.
   static const _pmsLight = Color(0xFFB45309);
   static const _pmsDark = Color(0xFFFBBF24);
   static const _periodLight = Color(0xFFBE185D);
