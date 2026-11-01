@@ -796,8 +796,8 @@ void main() {
       ));
       await tester.pumpAndSettle();
 
-      expect(find.text('Expected PMS heads-up'), findsOneWidget);
-      expect(find.text('Pill not logged'), findsOneWidget);
+      expect(find.text('PMS forecast'), findsOneWidget);
+      expect(find.text('Medication Not Logged'), findsOneWidget);
       expect(find.text('09:00'), findsOneWidget);
       expect(find.text('21:00'), findsOneWidget);
       expect(find.text(_en.pmsNotCounted), findsNothing);
@@ -822,7 +822,7 @@ void main() {
       expect(scheduled.length, 2);
 
       final scheme =
-          Theme.of(tester.element(find.text('Expected PMS heads-up'))).colorScheme;
+          Theme.of(tester.element(find.text('PMS forecast'))).colorScheme;
       final time = tester.widget<Text>(find.text('09:00'));
       expect(meetsBodyContrast(time.style!.color!, scheme.surface), isTrue);
     });
