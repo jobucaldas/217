@@ -9,7 +9,7 @@ class AuthScreen extends StatelessWidget {
     required this.strings,
     required this.onSignIn,
     required this.onOpenSettings,
-    this.customServer,
+    this.server,
     this.onOpenServerSettings,
   });
 
@@ -17,10 +17,10 @@ class AuthScreen extends StatelessWidget {
   final Future<void> Function() onSignIn;
   final VoidCallback onOpenSettings;
 
-  /// Host of a self-hosted server, shown so sign-in goes where you expect.
-  final String? customServer;
+  /// Host of the server in use (the built-in one too).
+  final String? server;
 
-  /// Opens Settings at the self-hosted server field; null hides the tip
+  /// Opens Settings at the server field; null hides the server link
   /// (web always talks to the server that serves it).
   final VoidCallback? onOpenServerSettings;
 
@@ -74,36 +74,35 @@ class AuthScreen extends StatelessWidget {
                             child: Text(strings.continueWorkOS),
                           ),
                         ),
-                        if (onOpenServerSettings != null) ...[
-                          const SizedBox(height: 8),
-                          TextButton(
-                            onPressed: onOpenServerSettings,
-                            style: TextButton.styleFrom(
-                              foregroundColor: scheme.onSurfaceVariant,
-                            ),
-                            child: Text(
-                              customServer != null
-                                  ? strings.serverLabel(customServer!)
-                                  : strings.selfHostTip,
-                              key: ValueKey(
-                                customServer != null
-                                    ? 'auth-custom-server'
-                                    : 'auth-self-host-tip',
-                              ),
-                              textAlign: TextAlign.center,
-                              style: text.bodySmall?.copyWith(
-                                color: scheme.onSurfaceVariant,
-                                decoration: TextDecoration.underline,
-                                decorationColor: scheme.onSurfaceVariant,
-                              ),
-                            ),
-                          ),
-                        ],
                       ],
                     ),
                   ),
                 ),
               ),
+              // Kept small at the bottom: it names the server in use and
+              // opens the server field, without drawing focus from sign-in.
+              if (onOpenServerSettings != null &&
+                  server != null &&
+                  server!.isNotEmpty)
+                Center(
+                  child: TextButton(
+                    key: const ValueKey('auth-server'),
+                    onPressed: onOpenServerSettings,
+                    style: TextButton.styleFrom(
+                      foregroundColor: scheme.onSurfaceVariant,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    child: Text(
+                      strings.serverLabel(server!),
+                      textAlign: TextAlign.center,
+                      style: text.labelSmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                        decoration: TextDecoration.underline,
+                        decorationColor: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                ),
             ],
           ),
         ),

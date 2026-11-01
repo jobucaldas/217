@@ -66,9 +66,9 @@ class Strings {
   String get brand => '217';
   String get continueWorkOS => _t('Sign in', 'Entrar', 'Iniciar sesión');
   String get signInSubtitle => _t(
-        'contraceptive calendar',
-        'calendário de anticoncepcional',
-        'calendario de anticonceptivos',
+        'Medication Calendar',
+        'Calendário de Remédios',
+        'Calendario de Medicamentos',
       );
   String get logout => _t('Log out', 'Sair', 'Cerrar sesión');
   String get settings => _t('Settings', 'Ajustes', 'Ajustes');
@@ -173,11 +173,6 @@ class Strings {
         'Accounts belong to a server, so you sign in again after switching.',
         'Contas pertencem a um servidor, então você entra de novo depois de trocar.',
         'Las cuentas pertenecen a un servidor, así que vuelves a iniciar sesión al cambiar.',
-      );
-  String get selfHostTip => _t(
-        'Hosting your own 217 server? Set it up in Settings.',
-        'Tem seu próprio servidor 217? Configure em Ajustes.',
-        '¿Tienes tu propio servidor 217? Configúralo en Ajustes.',
       );
   String get selfHostGuide => _t('Self-hosting guide',
       'Guia de hospedagem própria', 'Guía para alojarlo tú');

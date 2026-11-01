@@ -31,6 +31,7 @@ void main() {
               strings: const Strings(AppLanguage.pt),
               onSignIn: () async {},
               onOpenSettings: () {},
+              server: '217.caldas-studios.com.br',
               onOpenServerSettings: () => openedServerSettings = true,
             ),
           ),
@@ -39,27 +40,28 @@ void main() {
         expect(find.text('217'), findsOneWidget);
         expect(find.text('Entrar'), findsOneWidget);
 
-        // Self-hosting tip: readable secondary text that opens Settings.
-        final tip = find.byKey(const ValueKey('auth-self-host-tip'));
+        // Server link: small muted text at the bottom that opens Settings.
+        final server = find.text('Servidor: 217.caldas-studios.com.br');
         expect(
-          tester.widget<Text>(tip).data,
-          'Tem seu próprio servidor 217? Configure em Ajustes.',
+          tester.widget<Text>(server).style?.color,
+          scheme.onSurfaceVariant,
         );
-        expect(tester.widget<Text>(tip).style?.color, scheme.onSurfaceVariant);
-        await tester.tap(tip);
+        expect(
+          tester.getCenter(server).dy,
+          greaterThan(tester.getBottomLeft(find.text('Entrar')).dy + 100),
+        );
+        await tester.tap(server);
         expect(openedServerSettings, isTrue);
-        expect(find.text('calendário de anticoncepcional'), findsOneWidget);
+        expect(find.text('Calendário de Remédios'), findsOneWidget);
         expect(find.textContaining('tomada'), findsNothing);
         expect(find.text('EN'), findsNothing);
         expect(find.text('PT'), findsNothing);
         expect(find.byKey(const ValueKey('auth-settings')), findsOneWidget);
-        // Default server is not surfaced on the first viewport.
-        expect(find.byKey(const ValueKey('auth-custom-server')), findsNothing);
 
         final brand = tester.widget<Text>(find.text('217'));
         final cta = tester.widget<Text>(find.text('Entrar'));
         final tagline =
-            tester.widget<Text>(find.text('calendário de anticoncepcional'));
+            tester.widget<Text>(find.text('Calendário de Remédios'));
         expect(brand.style?.color, scheme.onSurface);
         expect(tagline.style?.color, scheme.onSurfaceVariant);
         // FilledButton paints primary; label uses onPrimary via button theme.
