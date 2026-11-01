@@ -464,7 +464,8 @@ void main() {
       final button = find.byKey(const ValueKey('update-day-button'));
       expect(find.text('Update today'), findsOneWidget);
       expect(find.byKey(const ValueKey('day-tag-heart')), findsOneWidget);
-      expect(find.byKey(const ValueKey('day-tag-note')), findsOneWidget);
+      // The note is drawn inline, so its tag is left out.
+      expect(find.byKey(const ValueKey('day-tag-note')), findsNothing);
       expect(find.text('Felt fine'), findsOneWidget);
       final carousel = find.byKey(const ValueKey('month-carousel'));
       expect(
@@ -600,9 +601,11 @@ void main() {
     expect(
       tester.getBottomLeft(note).dy,
       lessThanOrEqualTo(
-        tester.getTopLeft(find.byKey(const ValueKey('day-tag-note'))).dy,
+        tester.getTopLeft(find.byKey(const ValueKey('day-tag-status'))).dy,
       ),
     );
+    // Shown inline, the note has no tag of its own.
+    expect(find.byKey(const ValueKey('day-tag-note')), findsNothing);
     final gesture = await tester.startGesture(tester.getCenter(carousel));
     // Slop first, then 40% of the 390px width.
     await gesture.moveBy(const Offset(20, 0));

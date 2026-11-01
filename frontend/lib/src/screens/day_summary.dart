@@ -157,11 +157,12 @@ class DaySummaryBar extends StatelessWidget {
             icon: Icons.favorite,
           ),
         ),
-      if (entry != null && entry!.notes.trim().isNotEmpty)
+      // The inline note panel already shows it; the tag only stands in for it.
+      if (noteAsTag && entry != null && entry!.notes.trim().isNotEmpty)
         _DayTag(
           key: const ValueKey('day-tag-note'),
           label: strings.notes,
-          onPressed: noteAsTag ? onOpenNote : null,
+          onPressed: onOpenNote,
           color: scheme.primary,
           mark: DayMark(
             color: scheme.primary,
@@ -389,11 +390,15 @@ class DayNotePanel extends StatelessWidget {
               key: const ValueKey('day-note'),
               width: double.infinity,
               padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+              // Tinted with the accent, like the note tag it stands for.
               decoration: BoxDecoration(
-                color: scheme.surface,
+                color: Color.alphaBlend(
+                  scheme.primary.withValues(alpha: 0.14),
+                  scheme.surface,
+                ),
                 borderRadius: BorderRadius.circular(18),
                 border: Border.all(
-                  color: scheme.outline.withValues(alpha: 0.55),
+                  color: scheme.primary.withValues(alpha: 0.5),
                 ),
               ),
               child: Row(
@@ -404,7 +409,7 @@ class DayNotePanel extends StatelessWidget {
                     child: Icon(
                       Icons.sticky_note_2_outlined,
                       size: 18,
-                      color: scheme.onSurfaceVariant,
+                      color: scheme.primary,
                     ),
                   ),
                   const SizedBox(width: 10),
