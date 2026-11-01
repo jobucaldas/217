@@ -137,7 +137,7 @@ docker compose up -d
 
 If any command fails, stop and resolve the error before continuing. Keep `217.dump` until you have verified the restored data in the app, then delete it and any older plaintext backups. Do not rerun the dump command over your existing backup after removing the old volume.
 
-Optional server variables for the `backend` service: `PRIVACY_CONTACT` (email or URL for privacy requests, shown in the app's privacy notice), `SESSION_TTL` (e.g. `720h`), `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` (web push).
+Optional server variables for the `backend` service: `PRIVACY_CONTACT` (email or URL for privacy requests, shown on the privacy notice page), `SESSION_TTL` (e.g. `720h`), `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` (web push).
 
 Owners can record cycling, perimenopause, or menopause; menopause suppresses PMS predictions while perimenopause keeps PMS when periods are logged.
 
@@ -187,11 +187,11 @@ The `certs` service writes a private CA and the `postgres` / `backend` certifica
 
 | | How |
 |---|---|
-| Specific consent | After sign-in, a highlighted notice says what is stored, why, where and who sees it. Nothing is processed until the user agrees; the agreed version and time are stored. Changing the notice (`model.ConsentVersion`) asks everyone again |
+| Specific consent | After sign-in, the app links to the privacy notice page (`/api/privacy`, served by the API in English, Português or Español) that says what is stored, why, where and who sees it, and asks to **I have read and accept** or cancel (sign out). Nothing is processed until the user agrees; the agreed version and time are stored. Changing the notice (`model.ConsentVersion`) asks everyone again |
 | Contact | `PRIVACY_CONTACT` (the controller or its DPO) appears in the notice |
-| Access and portability | Settings → **Download my data**: everything held about the account as JSON (`GET /api/account/export`) |
+| Access and portability | Settings → **Privacy notice** opens the page; **Download my data** there downloads everything held about the account as JSON (`GET /api/account/export` for API clients). Every action on the page (download, withdraw, delete) shows its warning first and needs a fresh sign-in (within 5 minutes), enforced by the server |
 | Correction | Any day can be edited or cleared |
-| Erasure, withdrawing consent | Settings → **Delete account** removes the account and all its data (also without `WORKOS_API_KEY`, which only decides whether the WorkOS sign-in identity goes too). A departing partner leaves the owner's share revoked |
+| Erasure, withdrawing consent | On the privacy page, **Delete account** (after a warning that everything is lost) removes the account and all its data (also without `WORKOS_API_KEY`, which only decides whether the WorkOS sign-in identity goes too); a departing partner leaves the owner's share revoked. **Withdraw consent** (after a warning that the app stops working) keeps the data but blocks its processing until the user agrees again (`DELETE /api/account/consent`) |
 | Minimization and retention | No IP addresses or user agents are stored. Expired sessions and sign-in attempts, device keys unused for 180 days, reminder deliveries older than 30 days and shares revoked over 30 days ago are purged hourly |
 | No third parties | Fonts ship with the app; the web engine's fallback fonts are fetched by the server (`/gstatic/`), so browsers never contact Google. Sign-in goes through WorkOS, named in the notice |
 | Security | See [Security](#security) |

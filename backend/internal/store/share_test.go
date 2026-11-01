@@ -256,6 +256,30 @@ func forEachStore(t *testing.T, fn func(t *testing.T, name string, s Store)) {
 	t.Run("postgres", func(t *testing.T) { fn(t, "postgres", pgTestStore(t)) })
 }
 
+func TestWithdrawConsentAndSessionAge(t *testing.T) {
+	forEachStore(t, func(t *testing.T, name string, s Store) {
+		u, _ := s.LinkWorkOSIdentity("withdraw-"+name, "withdraw-"+name+"@example.com", "W", true)
+		if _, err := s.RecordConsent(u.ID, model.ConsentVersion); err != nil {
+			t.Fatal(err)
+		}
+		got, err := s.RecordConsent(u.ID, 0)
+		if err != nil || got.HasConsent() || got.ConsentedAt != nil {
+			t.Fatalf("withdraw: %+v %v", got, err)
+		}
+		before := time.Now().Add(-time.Minute)
+		if err := s.CreateSession(u.ID, "age-"+name, time.Now().Add(time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+		created, err := s.SessionCreatedAt("age-" + name)
+		if err != nil || created.Before(before) || created.After(time.Now().Add(time.Minute)) {
+			t.Fatalf("session created at %v: %v", created, err)
+		}
+		if _, err := s.SessionCreatedAt("missing-" + name); err == nil {
+			t.Fatal("unknown session must fail")
+		}
+	})
+}
+
 // A zero-value RepeatMinutes means "unset", not "every 0 minutes": the store
 // must seed the model default instead of persisting 0 (which PostgreSQL's
 // repeat_minutes_check constraint rejects).

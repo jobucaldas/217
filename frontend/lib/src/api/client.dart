@@ -569,28 +569,11 @@ class ApiClient {
     return _sessionFrom(response);
   }
 
-  /// Everything the server holds about this account, as JSON text.
-  Future<String> exportData() async {
-    final response = await _send('GET', _uri('/api/account/export'));
-    if (response.statusCode != 200) {
-      throw ApiException('export', response);
-    }
-    return response.body;
-  }
-
-  /// Who answers privacy requests for this server (email or URL), if set.
-  Future<String?> privacyContact() async {
-    try {
-      final response =
-          await _send('GET', _uri('/api/auth/config'), auth: false);
-      final decoded = jsonDecode(response.body);
-      final contact = decoded is Map ? decoded['privacy_contact'] : null;
-      return contact is String && contact.trim().isNotEmpty
-          ? contact.trim()
-          : null;
-    } catch (_) {
-      return null;
-    }
+  /// The server's privacy notice page in [language] (`en`, `pt`, `es`),
+  /// where people download or delete their data and withdraw consent.
+  String privacyPageUrl(String language) {
+    final uri = _uri('/api/privacy', {'lang': language});
+    return uri.hasScheme ? uri.toString() : Uri.base.resolveUri(uri).toString();
   }
 
   Future<void> deleteAccount() async {

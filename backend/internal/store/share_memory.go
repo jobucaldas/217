@@ -121,6 +121,9 @@ func (s *MemoryStore) RecordConsent(userID string, version int) (*model.User, er
 	}
 	now := time.Now().UTC()
 	u.ConsentVersion, u.ConsentedAt, u.UpdatedAt = version, &now, now
+	if version <= 0 {
+		u.ConsentVersion, u.ConsentedAt = 0, nil
+	}
 	return sanitizeUser(u), nil
 }
 

@@ -33,8 +33,6 @@ class SettingsPage extends StatefulWidget {
     this.user,
     this.share,
     this.onShareChanged,
-    this.onAccountDeleting,
-    this.onAccountDeleted,
     this.onLogout,
     this.onRoleChanged,
     this.onStageChanged,
@@ -42,6 +40,7 @@ class SettingsPage extends StatefulWidget {
     this.dailyReminderSyncQueue,
     this.partnerAlertSyncQueue,
     this.consentPending = false,
+    this.onPrivacyPageOpened,
     this.autoUpdate = false,
     this.onAutoUpdateChanged,
     this.messageNotifications = true,
@@ -61,8 +60,6 @@ class SettingsPage extends StatefulWidget {
   final User? user;
   final ShareState? share;
   final ValueChanged<ShareState>? onShareChanged;
-  final VoidCallback? onAccountDeleting;
-  final VoidCallback? onAccountDeleted;
   final Future<void> Function()? onLogout;
 
   /// Called after an owner with nothing shared switched to partner.
@@ -77,6 +74,9 @@ class SettingsPage extends StatefulWidget {
   /// Signed in but the privacy notice is not agreed yet: the server refuses
   /// the data behind reminders, alerts, sharing, role and stage until then.
   final bool consentPending;
+
+  /// Called when the privacy page (in the browser) is opened.
+  final VoidCallback? onPrivacyPageOpened;
 
   /// Android only: whether the app looks for a newer APK when it opens.
   final bool autoUpdate;
@@ -574,64 +574,45 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
             ],
           ),
-          // Privacy (LGPD): the notice, and a copy of everything held.
-          if (widget.onAccountDeleted != null) ...[
-            const SizedBox(height: 20),
+          // Privacy (LGPD): the server's notice page, which is also where
+          // people download or delete their data and withdraw consent.
+          const SizedBox(height: 20),
+          _SettingsSection(
+            children: [
+              ListTile(
+                key: const ValueKey('privacy-notice'),
+                leading:
+                    Icon(Icons.privacy_tip_outlined, color: scheme.primary),
+                title: Text(widget.strings.privacyNotice),
+                subtitle: Text(widget.strings.privacyNoticeBlurb),
+                trailing:
+                    Icon(Icons.open_in_new, color: scheme.onSurfaceVariant),
+                onTap: () {
+                  widget.onPrivacyPageOpened?.call();
+                  openPrivacyNotice(context, widget.api, widget.strings);
+                },
+              ),
+            ],
+          ),
+          if (widget.onLogout != null) ...[
+            const SizedBox(height: 40),
             _SettingsSection(
               children: [
                 ListTile(
-                  key: const ValueKey('privacy-notice'),
-                  leading:
-                      Icon(Icons.privacy_tip_outlined, color: scheme.primary),
-                  title: Text(widget.strings.privacyNotice),
-                  trailing:
-                      Icon(Icons.chevron_right, color: scheme.onSurfaceVariant),
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => PrivacyNoticePage(
-                        api: widget.api,
-                        strings: widget.strings,
-                      ),
+                  title: Text(
+                    widget.strings.logout,
+                    style: text.bodyLarge?.copyWith(
+                      color: kLogoutActionColor,
+                      fontWeight: FontWeight.w500,
                     ),
                   ),
+                  onTap: () async {
+                    await widget.onLogout!();
+                    if (context.mounted) Navigator.of(context).pop();
+                  },
                 ),
-                DownloadDataTile(api: widget.api, strings: widget.strings),
               ],
             ),
-          ],
-          // Account actions: pull away from prefs above; keep delete + logout tight.
-          if (widget.onAccountDeleted != null || widget.onLogout != null) ...[
-            const SizedBox(height: 40),
-            if (widget.onAccountDeleted != null)
-              DeleteAccountSection(
-                api: widget.api,
-                strings: widget.strings,
-                onAccountDeleting: widget.onAccountDeleting,
-                onAccountDeleted: () {
-                  widget.onAccountDeleted!();
-                  if (context.mounted) Navigator.of(context).pop();
-                },
-              ),
-            if (widget.onAccountDeleted != null && widget.onLogout != null)
-              const SizedBox(height: 10),
-            if (widget.onLogout != null)
-              _SettingsSection(
-                children: [
-                  ListTile(
-                    title: Text(
-                      widget.strings.logout,
-                      style: text.bodyLarge?.copyWith(
-                        color: kLogoutActionColor,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                    onTap: () async {
-                      await widget.onLogout!();
-                      if (context.mounted) Navigator.of(context).pop();
-                    },
-                  ),
-                ],
-              ),
           ],
         ],
       ),

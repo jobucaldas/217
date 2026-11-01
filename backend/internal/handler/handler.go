@@ -28,7 +28,12 @@ const (
 	consentKey contextKey = "consent"
 )
 
-const oauthBindingCookie = "217_oauth_binding"
+const (
+	oauthBindingCookie = "217_oauth_binding"
+	// oauthReturnCookie carries where a browser sign-in started from the
+	// privacy page should land (a local path), instead of the app.
+	oauthReturnCookie = "217_oauth_return"
+)
 
 const (
 	maxSessionDuration = 7 * 24 * time.Hour
@@ -50,6 +55,7 @@ type Handler struct {
 	authLimiter     *ipRateLimiter
 	inviteLimiter   *ipRateLimiter
 	privacyContact  string
+	reauthWindow    time.Duration
 }
 
 func New(s store.Store) *Handler {
@@ -59,6 +65,7 @@ func New(s store.Store) *Handler {
 		sessionDuration: maxSessionDuration,
 		authLimiter:     newIPRateLimiter(defaultAuthLimit, time.Minute),
 		inviteLimiter:   newIPRateLimiter(inviteAcceptLimit, time.Minute),
+		reauthWindow:    defaultReauthWindow,
 	}
 }
 
@@ -212,6 +219,28 @@ func (h *Handler) clearOAuthBindingCookie() *http.Cookie {
 		Secure: h.sessionCookieSecure(), SameSite: http.SameSiteLaxMode, Expires: time.Unix(0, 0), MaxAge: -1}
 }
 
+func (h *Handler) oauthReturnCookieValue(path string, expires time.Time) *http.Cookie {
+	return &http.Cookie{Name: oauthReturnCookie, Value: url.QueryEscape(path), Path: auth.BrowserCallbackPath, HttpOnly: true,
+		Secure: h.sessionCookieSecure(), SameSite: http.SameSiteLaxMode, Expires: expires, MaxAge: 300}
+}
+
+func (h *Handler) clearOAuthReturnCookie() *http.Cookie {
+	return &http.Cookie{Name: oauthReturnCookie, Path: auth.BrowserCallbackPath, HttpOnly: true,
+		Secure: h.sessionCookieSecure(), SameSite: http.SameSiteLaxMode, Expires: time.Unix(0, 0), MaxAge: -1}
+}
+
+// safeReturnPath keeps only paths of the privacy page (never another host),
+// so the callback cannot be turned into an open redirect.
+func safeReturnPath(path string) string {
+	if path != privacyPagePath && !strings.HasPrefix(path, privacyPagePath+"?") {
+		return ""
+	}
+	if strings.ContainsAny(path, "\\\r\n") || strings.Contains(path, "//") {
+		return ""
+	}
+	return path
+}
+
 func (h *Handler) appOrigin() string {
 	u, err := url.Parse(h.appBaseURL)
 	if err != nil || u.Scheme == "" || u.Host == "" {
@@ -338,54 +367,9 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) StartWorkOSOAuth(w http.ResponseWriter, r *http.Request) {
-	if !h.authLimiter.allow("workos:" + clientIP(r)) {
-		http.Error(w, `{"error":"rate limited"}`, http.StatusTooManyRequests)
-		return
-	}
-	if h.oauthProvider == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "oauth not configured"})
-		return
-	}
-	state, err := generateRandom(32)
-	if err != nil {
-		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
-		return
-	}
-	verifier, err := generateRandom(32)
-	if err != nil {
-		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
-		return
-	}
-	binding, err := generateRandom(32)
-	if err != nil {
-		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
-		return
-	}
-	nonce, err := generateRandom(32)
-	if err != nil {
-		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
-		return
-	}
-	expires := time.Now().UTC().Add(5 * time.Minute)
-	origin := h.requestOrigin(r)
-	redirectURI := ""
-	if origin != "" {
-		redirectURI = origin + auth.BrowserCallbackPath
-	}
-	if err := h.store.CreateOAuthAttempt(state, binding, verifier, nonce, redirectURI, expires); err != nil {
-		log.Printf("create oauth attempt failed: %v", err)
-		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
-		return
-	}
-	http.SetCookie(w, h.oauthBindingCookieValue(binding, expires))
-	var authURL string
-	if p, ok := h.oauthProvider.(auth.RedirectAuthCodeURLer); ok && redirectURI != "" {
-		authURL = p.AuthCodeURLForRedirect(state, pkceChallengeS256(verifier), nonce, redirectURI)
-	} else {
-		authURL = h.oauthProvider.AuthCodeURL(state, pkceChallengeS256(verifier), nonce)
-	}
+	authURL, status, msg := h.beginBrowserOAuth(w, r, "")
 	if authURL == "" {
-		http.Error(w, `{"error":"cannot build authorization url"}`, http.StatusInternalServerError)
+		http.Error(w, `{"error":"`+msg+`"}`, status)
 		return
 	}
 	// JSON + Set-Cookie (not a 302 bounce). Flutter web fetches this on the
@@ -394,6 +378,54 @@ func (h *Handler) StartWorkOSOAuth(w http.ResponseWriter, r *http.Request) {
 	// not drop 217_oauth_binding the way a redirect chain would.
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, map[string]string{"auth_url": authURL})
+}
+
+// beginBrowserOAuth records a browser AuthKit attempt, sets its binding
+// cookie and returns the AuthKit URL. returnTo is a local path the callback
+// lands on instead of the app (validated by safeReturnPath); "" means the app.
+// On failure it returns "" with the status and error to answer.
+func (h *Handler) beginBrowserOAuth(w http.ResponseWriter, r *http.Request, returnTo string) (string, int, string) {
+	if !h.authLimiter.allow("workos:" + clientIP(r)) {
+		return "", http.StatusTooManyRequests, "rate limited"
+	}
+	if h.oauthProvider == nil {
+		return "", http.StatusServiceUnavailable, "oauth not configured"
+	}
+	var secrets [4]string
+	for i := range secrets {
+		value, err := generateRandom(32)
+		if err != nil {
+			return "", http.StatusInternalServerError, "internal error"
+		}
+		secrets[i] = value
+	}
+	state, verifier, binding, nonce := secrets[0], secrets[1], secrets[2], secrets[3]
+	expires := time.Now().UTC().Add(5 * time.Minute)
+	origin := h.requestOrigin(r)
+	redirectURI := ""
+	if origin != "" {
+		redirectURI = origin + auth.BrowserCallbackPath
+	}
+	if err := h.store.CreateOAuthAttempt(state, binding, verifier, nonce, redirectURI, expires); err != nil {
+		log.Printf("create oauth attempt failed: %v", err)
+		return "", http.StatusInternalServerError, "internal error"
+	}
+	var authURL string
+	if p, ok := h.oauthProvider.(auth.RedirectAuthCodeURLer); ok && redirectURI != "" {
+		authURL = p.AuthCodeURLForRedirect(state, pkceChallengeS256(verifier), nonce, redirectURI)
+	} else {
+		authURL = h.oauthProvider.AuthCodeURL(state, pkceChallengeS256(verifier), nonce)
+	}
+	if authURL == "" {
+		return "", http.StatusInternalServerError, "cannot build authorization url"
+	}
+	http.SetCookie(w, h.oauthBindingCookieValue(binding, expires))
+	if returnTo = safeReturnPath(returnTo); returnTo != "" {
+		http.SetCookie(w, h.oauthReturnCookieValue(returnTo, expires))
+	} else {
+		http.SetCookie(w, h.clearOAuthReturnCookie())
+	}
+	return authURL, 0, ""
 }
 
 // createSessionForUser opens a session; with deviceKeyID it is bound to
@@ -430,8 +462,22 @@ func (h *Handler) linkWorkOSUser(w http.ResponseWriter, userInfo *auth.OAuthUser
 	return user, true
 }
 
+// oauthReturnPath reads the privacy-page return path set at sign-in start.
+func oauthReturnPath(r *http.Request) string {
+	cookie, err := r.Cookie(oauthReturnCookie)
+	if err != nil {
+		return ""
+	}
+	path, err := url.QueryUnescape(cookie.Value)
+	if err != nil {
+		return ""
+	}
+	return safeReturnPath(path)
+}
+
 func (h *Handler) WorkOSOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, h.clearOAuthBindingCookie())
+	http.SetCookie(w, h.clearOAuthReturnCookie())
 	if h.oauthProvider == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "oauth not configured"})
 		return
@@ -477,6 +523,9 @@ func (h *Handler) WorkOSOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	redirectTo := strings.TrimSuffix(attempt.RedirectURI, auth.BrowserCallbackPath)
 	if redirectTo == "" || redirectTo == attempt.RedirectURI && attempt.RedirectURI != "" {
 		redirectTo = strings.TrimRight(h.appBaseURL, "/")
+	}
+	if returnTo := oauthReturnPath(r); returnTo != "" {
+		redirectTo += returnTo
 	}
 	if redirectTo == "" {
 		redirectTo = "/"

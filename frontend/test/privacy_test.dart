@@ -2,8 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -14,10 +12,9 @@ import 'package:a217/src/app.dart';
 import 'package:a217/src/config.dart';
 import 'package:a217/src/i18n.dart';
 import 'package:a217/src/notifications/local_reminders.dart';
-import 'package:a217/src/platform/save_data.dart';
-import 'package:a217/src/platform/share_sheet.dart';
 import 'package:a217/src/screens/privacy_screens.dart';
 import 'package:a217/src/screens/settings_screen.dart';
+import 'package:a217/src/models.dart';
 import 'package:a217/src/theme/app_theme.dart';
 
 /// A signed-in account that has not agreed to the privacy notice yet.
@@ -122,19 +119,19 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Your data and privacy'), findsOneWidget);
-    expect(find.text('Sensitive health data'), findsOneWidget);
-    expect(find.text('dpo@example.com'), findsOneWidget);
+    // Only the notice link, accept and cancel: the notice is the server's page.
+    expect(find.byKey(const ValueKey('consent-notice-link')), findsOneWidget);
+    expect(find.text('I have read and accept'), findsOneWidget);
+    expect(find.text('Cancel'), findsOneWidget);
+    expect(find.byType(Checkbox), findsNothing);
+    expect(find.byTooltip('Settings'), findsNothing);
     // Nothing is loaded and no invite offered before consent.
     expect(server.calls.where((c) => c.contains('/api/reminders')), isEmpty);
     expect(find.text('Join the shared calendar?'), findsNothing);
 
     final accept = find.byKey(const ValueKey('consent-accept'));
-    await tester.scrollUntilVisible(accept, 200);
     await tester.ensureVisible(accept);
     await tester.pumpAndSettle();
-    expect(tester.widget<FilledButton>(accept).onPressed, isNull);
-    await tester.tap(find.byKey(const ValueKey('consent-checkbox')));
-    await tester.pump();
     await tester.tap(accept);
     await tester.pumpAndSettle();
 
@@ -146,68 +143,52 @@ void main() {
     expect(find.text('How will you use 217?'), findsOneWidget);
   });
 
-  testWidgets('409 refreshes metadata but blocks unsupported notice versions',
+  testWidgets('409 takes the new notice version and asks again',
       (tester) async {
     final server = _ConsentServer()..staleOnce = true;
     final api = server.client();
     await tester.pumpWidget(App217(config: api.config, api: api));
     await tester.pumpAndSettle();
     final accept = find.byKey(const ValueKey('consent-accept'));
-    await tester.scrollUntilVisible(accept, 200);
     await tester.ensureVisible(accept);
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('consent-checkbox')));
-    await tester.pump();
-    server.sessionRefreshGate = Completer<void>();
     await tester.tap(accept);
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
-    expect(tester.widget<ConsentScreen>(find.byType(ConsentScreen)).version, 1);
-    expect(
-        tester
-            .widget<CheckboxListTile>(
-                find.byKey(const ValueKey('consent-checkbox')))
-            .value,
-        isFalse);
-    expect(tester.widget<FilledButton>(accept).onPressed, isNull);
-    server.sessionRefreshGate!.complete();
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
     await tester.pumpAndSettle();
-    expect(server.consentVersion, 2, reason: server.calls.join(', '));
+    expect(server.acceptedVersion, 1);
     expect(find.byType(ConsentScreen), findsOneWidget);
     expect(tester.widget<ConsentScreen>(find.byType(ConsentScreen)).version, 2);
-    expect(
-        find.byKey(const ValueKey('consent-update-required')), findsOneWidget);
-    expect(
-        tester
-            .widget<CheckboxListTile>(
-                find.byKey(const ValueKey('consent-checkbox')))
-            .value,
-        isFalse);
-    expect(
-      tester
-          .widget<CheckboxListTile>(
-              find.byKey(const ValueKey('consent-checkbox')))
-          .onChanged,
-      isNull,
-    );
-    expect(tester.widget<FilledButton>(accept).onPressed, isNull);
-    expect(
-        server.calls.where((c) => c == 'PUT /api/account/consent').length, 1);
-    expect(find.byKey(const ValueKey('consent-decline')), findsOneWidget);
-    await tester.tap(find.byTooltip('Settings'));
+    expect(find.text(const Strings(AppLanguage.en).consentNoticeChanged),
+        findsOneWidget);
+
+    await tester.tap(accept);
     await tester.pumpAndSettle();
-    final download = find.text('Download my data').last;
-    await tester.scrollUntilVisible(
-      download,
-      200,
-      scrollable: find.byType(Scrollable).last,
-    );
-    expect(download, findsOneWidget);
-    expect(server.acceptedVersion, 1);
-    expect(
-        server.calls.where((c) => c == 'PUT /api/account/consent').length, 1);
+    expect(server.acceptedVersion, 2);
+    expect(find.byType(ConsentScreen), findsNothing);
+  });
+
+  testWidgets('the notice link opens the server privacy page',
+      (tester) async {
+    final opened = <String>[];
+    final api = _ConsentServer().client();
+    await tester.pumpWidget(MaterialApp(
+      theme: buildApp217Theme(brightness: Brightness.light),
+      home: ConsentScreen(
+        api: api,
+        strings: const Strings(AppLanguage.pt),
+        version: 1,
+        onAccepted: (_) {},
+        onDecline: () {},
+        openUrl: (url) async {
+          opened.add(url);
+          return true;
+        },
+      ),
+    ));
+    await tester.tap(find.byKey(const ValueKey('consent-notice-link')));
+    await tester.pumpAndSettle();
+    expect(opened.single, endsWith('/api/privacy?lang=pt'));
+    expect(find.text('Li e aceito'), findsOneWidget);
+    expect(find.text('Cancelar'), findsOneWidget);
   });
 
   testWidgets('consent acceptance restores saved owner reminder after cancel',
@@ -249,11 +230,8 @@ void main() {
     expect(reminderOperations, ['cancel-start']);
 
     final accept = find.byKey(const ValueKey('consent-accept'));
-    await tester.scrollUntilVisible(accept, 200);
     await tester.ensureVisible(accept);
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('consent-checkbox')));
-    await tester.pump();
     await tester.tap(accept);
     await tester.pumpAndSettle();
 
@@ -282,24 +260,36 @@ void main() {
 
   testWidgets('settings hide consent-gated controls until agreed',
       (tester) async {
-    final server = _ConsentServer()..role = 'owner';
-    final api = server.client();
-    await tester.pumpWidget(App217(config: api.config, api: api));
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.byTooltip('Settings'));
+    final api = _ConsentServer().client();
+    await tester.pumpWidget(MaterialApp(
+      theme: buildApp217Theme(brightness: Brightness.light),
+      home: SettingsPage(
+        api: api,
+        strings: const Strings(AppLanguage.en),
+        language: AppLanguage.en,
+        themeMode: ThemeMode.system,
+        palette: AppPalette.blue,
+        onLanguageChanged: (_) {},
+        onThemeModeChanged: (_) {},
+        onPaletteChanged: (_) {},
+        onApiBaseChanged: () {},
+        user: const User(id: 'u1', email: 'me@example.com', name: 'Me', role: 'owner'),
+        consentPending: true,
+        onLogout: () async {},
+      ),
+    ));
     await tester.pumpAndSettle();
     // Reminders, sharing, role and stage need data the server refuses yet.
     expect(find.text(const Strings(AppLanguage.en).reminders), findsNothing);
     expect(find.byKey(const ValueKey('stage-dropdown')), findsNothing);
     expect(find.byKey(const ValueKey('settings-switch-partner')), findsNothing);
-    final download = find.text('Download my data');
+    final privacy = find.byKey(const ValueKey('privacy-notice'));
     await tester.scrollUntilVisible(
-      download,
+      privacy,
       200,
       scrollable: find.byType(Scrollable).last,
     );
-    expect(download, findsOneWidget);
+    expect(privacy, findsOneWidget);
   });
 
   testWidgets('a notice change while Settings is open returns to consent',
@@ -371,7 +361,7 @@ void main() {
     )..onConsentRequired = () => calls++;
     await api.getReminderPreference().catchError((Object _) => null);
     expect(calls, 1);
-    await api.exportData().catchError((Object _) => '');
+    await api.getShare().catchError((Object _) => const ShareState(status: 'none'));
     expect(calls, 1);
   });
 
@@ -390,58 +380,6 @@ void main() {
     expect(server.loggedOut, isTrue, reason: server.calls.join(', '));
     expect(server.acceptedVersion, isNull);
     expect(find.text('Sign in'), findsOneWidget);
-  });
-
-  test('Android export invokes JSON file channel with name and body', () async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.android;
-    addTearDown(() => debugDefaultTargetPlatformOverride = null);
-    final calls = <MethodCall>[];
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(intentsChannel, (call) async {
-      calls.add(call);
-      return null;
-    });
-    addTearDown(() => TestDefaultBinaryMessengerBinding
-        .instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(intentsChannel, null));
-    await shareJsonFile('217-data-2026-10-13.json', '{"ok":true}');
-    expect(calls.single.method, 'shareFile');
-    expect((calls.single.arguments as Map)['name'], '217-data-2026-10-13.json');
-    expect((calls.single.arguments as Map)['content'], '{"ok":true}');
-    expect(calls.where((call) => call.method == 'shareText'), isEmpty);
-  });
-
-  testWidgets('download my data hands the export to the platform',
-      (tester) async {
-    String? savedName, savedContent;
-    final api = ApiClient(
-      AppConfig.fromEnvironment(),
-      httpClient: MockClient((request) async {
-        expect(request.url.path, '/api/account/export');
-        return http.Response('{"user":{"email":"me@example.com"}}', 200);
-      }),
-    );
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: buildApp217Theme(brightness: Brightness.light),
-        home: Scaffold(
-          body: DownloadDataTile(
-            api: api,
-            strings: const Strings(AppLanguage.en),
-            save: (name, content) async {
-              savedName = name;
-              savedContent = content;
-              return const SaveDataOutcome(SaveDataHow.downloaded);
-            },
-          ),
-        ),
-      ),
-    );
-    await tester.tap(find.text('Download my data'));
-    await tester.pumpAndSettle();
-    expect(savedName, matches(RegExp(r'^217-data-\d{4}-\d{2}-\d{2}\.json$')));
-    expect(savedContent, contains('me@example.com'));
-    expect(find.text('Download started'), findsOneWidget);
   });
 }
 

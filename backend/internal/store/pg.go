@@ -639,6 +639,18 @@ func (s *PGStore) GetUserBySession(sessionID string) (*model.User, error) {
 	return user, nil
 }
 
+func (s *PGStore) SessionCreatedAt(sessionID string) (time.Time, error) {
+	var created time.Time
+	err := s.db.QueryRow(`SELECT created_at FROM sessions WHERE id = $1 AND expires_at > NOW()`, hashString(sessionID)).Scan(&created)
+	if err == sql.ErrNoRows {
+		return time.Time{}, fmt.Errorf("session not found")
+	}
+	if err != nil {
+		return time.Time{}, fmt.Errorf("getting session: %w", err)
+	}
+	return created.UTC(), nil
+}
+
 func (s *PGStore) DeleteSession(sessionID string) error {
 	hash := hashString(sessionID)
 	_, err := s.db.Exec(`DELETE FROM sessions WHERE id = $1`, hash)
@@ -657,7 +669,7 @@ func (s *PGStore) DeleteAllSessionsForUser(userID string) error {
 }
 
 func (s *PGStore) RecordConsent(userID string, version int) (*model.User, error) {
-	user, err := s.scanUser(s.db.QueryRow(`UPDATE users AS u SET consent_version = $2, consented_at = NOW(), updated_at = NOW()
+	user, err := s.scanUser(s.db.QueryRow(`UPDATE users AS u SET consent_version = $2, consented_at = CASE WHEN $2 > 0 THEN NOW() END, updated_at = NOW()
 		WHERE u.id = $1 RETURNING `+userColumns, userID, version))
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("user not found")

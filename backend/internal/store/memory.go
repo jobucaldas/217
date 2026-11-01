@@ -564,6 +564,16 @@ func (s *MemoryStore) GetUserBySession(sessionID string) (*model.User, error) {
 	return nil, fmt.Errorf("user not found")
 }
 
+func (s *MemoryStore) SessionCreatedAt(sessionID string) (time.Time, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sess, ok := s.sessions[hashString(sessionID)]
+	if !ok || (!sess.ExpiresAt.IsZero() && time.Now().UTC().After(sess.ExpiresAt)) {
+		return time.Time{}, fmt.Errorf("session not found")
+	}
+	return sess.CreatedAt, nil
+}
+
 func (s *MemoryStore) DeleteSession(sessionID string) error {
 	hash := hashString(sessionID)
 	s.mu.Lock()
