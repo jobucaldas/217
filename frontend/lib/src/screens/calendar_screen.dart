@@ -772,8 +772,8 @@ class _CalendarScreenState extends State<CalendarScreen>
                   Wordmark(widget.strings.brand),
                   const SizedBox(width: 10),
                   Flexible(
-                    child: _ReadOnlyLabel(
-                      label: widget.strings.readOnly,
+                    child: _PartnerModeLabel(
+                      label: widget.strings.partnerMode,
                     ),
                   ),
                 ],
@@ -1864,11 +1864,11 @@ class _MarkButton extends StatelessWidget {
   }
 }
 
-/// "Read-only" hint beside the brand in the partner's app bar: an eye icon
+/// "Partner mode" hint beside the brand in the partner's app bar: an eye icon
 /// and plain text that ellipsizes rather than pushing the action icons off
 /// narrow screens.
-class _ReadOnlyLabel extends StatelessWidget {
-  const _ReadOnlyLabel({required this.label});
+class _PartnerModeLabel extends StatelessWidget {
+  const _PartnerModeLabel({required this.label});
 
   final String label;
 
@@ -1878,7 +1878,7 @@ class _ReadOnlyLabel extends StatelessWidget {
     return Tooltip(
       message: label,
       child: Row(
-        key: const ValueKey('read-only-label'),
+        key: const ValueKey('partner-mode-label'),
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(Icons.visibility_outlined, size: 16, color: fg),

@@ -1350,7 +1350,7 @@ void main() {
     });
   }
 
-  testWidgets('read-only label sits beside the logo without overflowing',
+  testWidgets('partner mode label sits beside the logo without overflowing',
       (tester) async {
     await tester.binding.setSurfaceSize(const Size(320, 640));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -1376,10 +1376,10 @@ void main() {
       ));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
-      final hint = find.byKey(const ValueKey('read-only-label'));
+      final hint = find.byKey(const ValueKey('partner-mode-label'));
       expect(find.descendant(of: find.byType(AppBar), matching: hint),
           findsOneWidget);
-      expect(find.text(strings.readOnly), findsOneWidget);
+      expect(find.text(strings.partnerMode), findsOneWidget);
       expect(tester.getTopLeft(hint).dx,
           greaterThan(tester.getTopRight(find.text(strings.brand)).dx));
       expect(tester.getTopRight(hint).dx,
