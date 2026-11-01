@@ -62,16 +62,19 @@ jobs:
       - name: Compute version
         # Tag and versionName are `0.<yy>.<MMDD>-<run>` (UTC date at build time, not commit
         # time; run = 1 + the highest run already tagged for that day). Computed once here
-        # and reused by publish. versionCode is the same instant in epoch seconds, so each
-        # newer build updates older installs.
+        # and reused by publish. versionCode is the same three numbers as one integer,
+        # (yy*10000 + MMDD)*1000 + run (e.g. 261101001), so it rises with every build and
+        # stays far below Android's 2.1 billion limit (Play warns about large jumps).
         id: version
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          NOW="$(date -u +%s)"
-          PREFIX="0.$(date -u -d "@$NOW" +%y).$(date -u -d "@$NOW" +%m%d)"
+          YY="$(date -u +%y)"; MMDD="$(date -u +%m%d)"
+          PREFIX="0.${YY}.${MMDD}"
           LAST="$(git ls-remote --tags origin "refs/tags/${PREFIX}-*" | sed -E 's|.*-([0-9]+)$|\1|' | sort -n | tail -1)"
-          echo "tag=${PREFIX}-$(( ${LAST:-0} + 1 ))" >> "$GITHUB_OUTPUT"
-          echo "build=$NOW" >> "$GITHUB_OUTPUT"
+          RUN=$(( ${LAST:-0} + 1 ))
+          if [ "$RUN" -gt 999 ]; then echo "::error::More than 999 builds in one day"; exit 1; fi
+          echo "tag=${PREFIX}-${RUN}" >> "$GITHUB_OUTPUT"
+          echo "build=$(( (10#$YY * 10000 + 10#$MMDD) * 1000 + RUN ))" >> "$GITHUB_OUTPUT"
       - run: flutter analyze
       - run: flutter test
       - name: Build web bundle
