@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../api/client.dart';
 import '../i18n.dart';
+import '../theme/app_theme.dart';
 
 /// Asks for the 217 server to use. Builds without a built-in server (release
 /// APKs) show it on first launch; signed out, it also changes the server.
@@ -223,12 +224,10 @@ class _ServerSetupScreenState extends State<ServerSetupScreen> {
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        Text(
+                        Wordmark(
                           strings.brand,
+                          large: true,
                           textAlign: TextAlign.center,
-                          style: text.displayLarge?.copyWith(
-                            color: scheme.onSurface,
-                          ),
                         ),
                         const SizedBox(height: 28),
                         form,

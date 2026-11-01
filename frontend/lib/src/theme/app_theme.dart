@@ -83,7 +83,8 @@ ThemeData buildApp217Theme({
   final scheme = buildApp217ColorScheme(brightness, palette: palette);
   final c = PaletteColors.resolve(palette, brightness);
 
-  final display = GoogleFonts.frauncesTextTheme();
+  // Fraunces is the "217" wordmark's face and nothing else (see
+  // [App217Typography]); every text theme style is Source Sans 3.
   // GoogleFonts' defaults carry the light-theme ink color; recolor every style
   // so framework-built text (dialog titles, pickers, menus) stays readable on
   // dark surfaces.
@@ -92,17 +93,11 @@ ThemeData buildApp217Theme({
     bodyColor: scheme.onSurfaceVariant,
   );
   final textTheme = body.copyWith(
-    displayLarge: display.displayLarge?.copyWith(
+    headlineMedium: body.headlineMedium?.copyWith(
       color: scheme.onSurface,
-      fontWeight: FontWeight.w600,
-      letterSpacing: -1.2,
-      fontSize: 56,
-      height: 1.0,
-    ),
-    headlineMedium: display.headlineMedium?.copyWith(
-      color: scheme.onSurface,
-      fontWeight: FontWeight.w600,
-      fontSize: 28,
+      fontWeight: FontWeight.w700,
+      fontSize: 30,
+      letterSpacing: -0.4,
       height: 1.15,
     ),
     titleLarge: body.titleLarge?.copyWith(
@@ -126,6 +121,23 @@ ThemeData buildApp217Theme({
     useMaterial3: true,
     colorScheme: scheme,
     textTheme: textTheme,
+    extensions: [
+      App217Typography(
+        wordmark: GoogleFonts.fraunces(
+          color: scheme.onSurface,
+          fontWeight: FontWeight.w600,
+          fontSize: 24,
+          height: 1.15,
+        ),
+        wordmarkLarge: GoogleFonts.fraunces(
+          color: scheme.onSurface,
+          fontWeight: FontWeight.w600,
+          letterSpacing: -1.2,
+          fontSize: 56,
+          height: 1.0,
+        ),
+      ),
+    ],
     scaffoldBackgroundColor: c.scaffold,
     dividerColor: scheme.outline.withValues(alpha: 0.55),
     listTileTheme: ListTileThemeData(
@@ -195,7 +207,7 @@ ThemeData buildApp217Theme({
       foregroundColor: scheme.onSurface,
       elevation: 0,
       centerTitle: false,
-      titleTextStyle: textTheme.headlineMedium?.copyWith(fontSize: 24),
+      titleTextStyle: textTheme.titleLarge?.copyWith(fontSize: 22),
       iconTheme: IconThemeData(color: scheme.onSurface),
     ),
     filledButtonTheme: FilledButtonThemeData(
@@ -219,4 +231,65 @@ ThemeData buildApp217Theme({
       ),
     ),
   );
+}
+
+/// The "217" wordmark's typography (Fraunces). Reserved for the logo: page
+/// titles, headings and body copy use the regular [TextTheme].
+@immutable
+class App217Typography extends ThemeExtension<App217Typography> {
+  const App217Typography({required this.wordmark, required this.wordmarkLarge});
+
+  /// App bar logo.
+  final TextStyle wordmark;
+
+  /// Splash-sized logo (sign-in, server setup).
+  final TextStyle wordmarkLarge;
+
+  static App217Typography of(BuildContext context) {
+    final theme = Theme.of(context);
+    final own = theme.extension<App217Typography>();
+    if (own != null) return own;
+    final color = theme.colorScheme.onSurface;
+    return App217Typography(
+      wordmark: TextStyle(
+          color: color, fontSize: 24, fontWeight: FontWeight.w600),
+      wordmarkLarge: TextStyle(
+          color: color, fontSize: 56, fontWeight: FontWeight.w600),
+    );
+  }
+
+  @override
+  App217Typography copyWith({TextStyle? wordmark, TextStyle? wordmarkLarge}) =>
+      App217Typography(
+        wordmark: wordmark ?? this.wordmark,
+        wordmarkLarge: wordmarkLarge ?? this.wordmarkLarge,
+      );
+
+  @override
+  App217Typography lerp(App217Typography? other, double t) {
+    if (other == null) return this;
+    return App217Typography(
+      wordmark: TextStyle.lerp(wordmark, other.wordmark, t)!,
+      wordmarkLarge: TextStyle.lerp(wordmarkLarge, other.wordmarkLarge, t)!,
+    );
+  }
+}
+
+/// The "217" logo set in its own typeface.
+class Wordmark extends StatelessWidget {
+  const Wordmark(this.text, {super.key, this.large = false, this.textAlign});
+
+  final String text;
+  final bool large;
+  final TextAlign? textAlign;
+
+  @override
+  Widget build(BuildContext context) {
+    final typography = App217Typography.of(context);
+    return Text(
+      text,
+      textAlign: textAlign,
+      style: large ? typography.wordmarkLarge : typography.wordmark,
+    );
+  }
 }
