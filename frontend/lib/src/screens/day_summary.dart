@@ -64,6 +64,7 @@ class DaySummaryBar extends StatelessWidget {
     this.isFuture = false,
     this.note = '',
     this.noteAsTag = false,
+    this.onOpenNote,
   });
 
   final Strings strings;
@@ -86,6 +87,9 @@ class DaySummaryBar extends StatelessWidget {
 
   /// Short screens: the note is not drawn; its tag opens it in a card.
   final bool noteAsTag;
+
+  /// Opens the note card (see [showDayNoteCard]) from the note tag.
+  final VoidCallback? onOpenNote;
 
   @override
   Widget build(BuildContext context) {
@@ -156,13 +160,7 @@ class DaySummaryBar extends StatelessWidget {
         _DayTag(
           key: const ValueKey('day-tag-note'),
           label: strings.notes,
-          onPressed: noteAsTag
-              ? () => showDayNoteCard(
-                    context,
-                    title: strings.notes,
-                    notes: entry!.notes.trim(),
-                  )
-              : null,
+          onPressed: noteAsTag ? onOpenNote : null,
           color: scheme.primary,
           mark: DayMark(
             color: scheme.primary,
@@ -472,47 +470,60 @@ class DashedRingPainter extends CustomPainter {
 }
 
 /// Read-only note card, styled like the note dialog of the day editor.
+/// Follows [notes] live and closes itself once it is empty, so a card never
+/// outlives the data it shows (e.g. calendar access cleared).
 Future<void> showDayNoteCard(
   BuildContext context, {
   required String title,
-  required String notes,
+  required ValueListenable<String> notes,
 }) {
   return showDialog<void>(
     context: context,
     useRootNavigator: true,
-    builder: (context) {
-      final scheme = Theme.of(context).colorScheme;
-      final textTheme = Theme.of(context).textTheme;
+    builder: (dialogContext) {
+      final scheme = Theme.of(dialogContext).colorScheme;
+      final textTheme = Theme.of(dialogContext).textTheme;
       final fieldFill = Color.alphaBlend(
         scheme.onSurface.withValues(alpha: 0.06),
         scheme.surface,
       );
-      return AlertDialog(
-        key: const ValueKey('day-note-card'),
-        backgroundColor: scheme.surface,
-        title: Text(
-          title,
-          style: textTheme.titleLarge?.copyWith(color: scheme.onSurface),
-        ),
-        content: SingleChildScrollView(
-          child: Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: fieldFill,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: scheme.outline),
+      return ValueListenableBuilder<String>(
+        valueListenable: notes,
+        builder: (_, value, __) {
+          if (value.isEmpty) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (dialogContext.mounted) Navigator.of(dialogContext).maybePop();
+            });
+            return const SizedBox.shrink();
+          }
+          return AlertDialog(
+            key: const ValueKey('day-note-card'),
+            backgroundColor: scheme.surface,
+            title: Text(
+              title,
+              style: textTheme.titleLarge?.copyWith(color: scheme.onSurface),
             ),
-            child: Text(
-              notes,
-              style: textTheme.bodyLarge?.copyWith(
-                color: scheme.onSurface,
-                fontSize: 17,
-                height: 1.35,
+            content: SingleChildScrollView(
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: fieldFill,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: scheme.outline),
+                ),
+                child: Text(
+                  value,
+                  style: textTheme.bodyLarge?.copyWith(
+                    color: scheme.onSurface,
+                    fontSize: 17,
+                    height: 1.35,
+                  ),
+                ),
               ),
             ),
-          ),
-        ),
+          );
+        },
       );
     },
   );

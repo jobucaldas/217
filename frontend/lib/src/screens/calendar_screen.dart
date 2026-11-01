@@ -123,6 +123,8 @@ class _CalendarScreenState extends State<CalendarScreen>
   /// names it.
   static const _monthLabelSwitch = 0.6;
 
+  final _liveNote = ValueNotifier<String>('');
+
   /// Body height from which the note is drawn above the day tags.
   static const _inlineNoteMinBodyHeight = 640.0;
   Animation<double>? _monthSnapAnim;
@@ -207,6 +209,7 @@ class _CalendarScreenState extends State<CalendarScreen>
     widget.cycleRefreshSignal?.removeListener(_onCycleRefresh);
     _wheelIdle?.cancel();
     _monthSnap.dispose();
+    _liveNote.dispose();
     super.dispose();
   }
 
@@ -753,6 +756,13 @@ class _CalendarScreenState extends State<CalendarScreen>
         MediaQuery.paddingOf(context).vertical -
         kToolbarHeight;
     final noteAsTag = bodyHeight < _inlineNoteMinBodyHeight;
+    // The open note card follows this, so it closes if the data is cleared.
+    if (_liveNote.value != selectedNotes) {
+      WidgetsBinding.instance
+          .addPostFrameCallback((_) {
+        if (mounted) _liveNote.value = selectedNotes;
+      });
+    }
     final pmsColor = App217Colors.pms(brightness, widget.palette);
     final periodColor = App217Colors.period(brightness, widget.palette);
     final todayKind = _cycle.kindOf(_today);
@@ -1058,6 +1068,11 @@ class _CalendarScreenState extends State<CalendarScreen>
                 isFuture: selectedDay.isAfter(_today),
                 note: selectedNotes,
                 noteAsTag: noteAsTag,
+                onOpenNote: () => showDayNoteCard(
+                  context,
+                  title: widget.strings.notes,
+                  notes: _liveNote,
+                ),
               ),
             ],
           ),
