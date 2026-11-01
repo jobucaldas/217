@@ -632,6 +632,52 @@ void main() {
     expect(tester.getTopLeft(note), noteTop);
   });
 
+  testWidgets('a long note does not squeeze the grid on short screens',
+      (tester) async {
+    const size = Size(900, 400);
+    await tester.binding.setSurfaceSize(size);
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day)
+        .toIso8601String()
+        .substring(0, 10);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildApp217Theme(
+          brightness: Brightness.light,
+          palette: AppPalette.blue,
+        ),
+        home: MediaQuery(
+          data: const MediaQueryData(size: size),
+          child: CalendarScreen(
+            api: _FakeCalendarApi([
+              Entry(date: today, taken: true, notes: 'Long note. ' * 60),
+            ]),
+            user: const User(
+              id: 'u1',
+              email: 'shot@example.invalid',
+              name: 'Shot',
+            ),
+            strings: const Strings(AppLanguage.en),
+            onOpenSettings: () {},
+            palette: AppPalette.blue,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    // One line only, so the grid keeps most of the screen.
+    expect(tester.getSize(find.byKey(const ValueKey('day-note'))).height,
+        lessThan(60));
+    expect(
+      tester.getSize(find.byKey(const ValueKey('month-carousel'))).height,
+      greaterThan(150),
+    );
+  });
+
   testWidgets('horizontal carousel swipe changes month with snap',
       (tester) async {
     const size = Size(390, 844);

@@ -210,7 +210,16 @@ class DaySummaryBar extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             if (note.isNotEmpty) ...[
-              DayNotePanel(notes: note, maxLines: 3),
+              // Fewer lines on short screens: the note must not squeeze the
+              // month grid.
+              DayNotePanel(
+                notes: note,
+                maxLines: size.height < 500
+                    ? 1
+                    : size.height < 700
+                        ? 2
+                        : 3,
+              ),
               const SizedBox(height: 8),
             ],
             _summary(compact, tagWrap, button),
