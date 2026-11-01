@@ -186,6 +186,12 @@ class _SettingsPageState extends State<SettingsPage> {
     });
   }
 
+  /// Android only, and only for a picked role (messages need one).
+  ValueChanged<bool>? get _messageToggle =>
+      isAndroidPlatform && (widget.user?.hasRole ?? false)
+          ? widget.onMessageNotificationsChanged
+          : null;
+
   String _paletteLabel(AppPalette p) {
     switch (p) {
       case AppPalette.blue:
@@ -216,7 +222,9 @@ class _SettingsPageState extends State<SettingsPage> {
                   ListTile(
                     key: const ValueKey('settings-partner-alerts'),
                     title: Text(widget.strings.partnerAlerts),
-                    subtitle: Text(widget.strings.partnerAlertsSubtitle),
+                    subtitle: Text(_messageToggle == null
+                        ? widget.strings.partnerAlertsSubtitle
+                        : widget.strings.partnerAlertsWithMessagesSubtitle),
                     trailing: Icon(
                       Icons.chevron_right,
                       color: scheme.onSurfaceVariant,
@@ -230,6 +238,8 @@ class _SettingsPageState extends State<SettingsPage> {
                             share: widget.share ??
                                 const ShareState(status: 'none'),
                             syncQueue: widget.partnerAlertSyncQueue,
+                            messageNotifications: widget.messageNotifications,
+                            onMessageNotificationsChanged: _messageToggle,
                           ),
                         ),
                       );
@@ -238,7 +248,9 @@ class _SettingsPageState extends State<SettingsPage> {
                 else
                   ListTile(
                     title: Text(widget.strings.reminders),
-                    subtitle: Text(widget.strings.reminderEnable),
+                    subtitle: Text(_messageToggle == null
+                        ? widget.strings.reminderEnable
+                        : widget.strings.remindersWithMessagesSubtitle),
                     trailing: Icon(
                       Icons.chevron_right,
                       color: scheme.onSurfaceVariant,
@@ -252,6 +264,8 @@ class _SettingsPageState extends State<SettingsPage> {
                             dailyReminderSyncQueue:
                                 widget.dailyReminderSyncQueue,
                             onToggled: widget.onRemindersToggled,
+                            messageNotifications: widget.messageNotifications,
+                            onMessageNotificationsChanged: _messageToggle,
                           ),
                         ),
                       );
@@ -267,16 +281,6 @@ class _SettingsPageState extends State<SettingsPage> {
                     subtitle: Text(widget.strings.autoUpdateSubtitle),
                     value: widget.autoUpdate,
                     onChanged: widget.onAutoUpdateChanged,
-                  ),
-                ],
-                if (isAndroidPlatform && (widget.user?.hasRole ?? false)) ...[
-                  const Divider(height: 1, indent: 16, endIndent: 16),
-                  SwitchListTile(
-                    key: const ValueKey('settings-message-notifications'),
-                    title: Text(widget.strings.messageNotifsTitle),
-                    subtitle: Text(widget.strings.messageNotifsSubtitle),
-                    value: widget.messageNotifications,
-                    onChanged: widget.onMessageNotificationsChanged,
                   ),
                 ],
               ],

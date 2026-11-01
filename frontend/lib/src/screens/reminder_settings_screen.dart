@@ -7,6 +7,7 @@ import '../i18n.dart';
 import '../notifications/daily_reminder_sync_queue.dart';
 import '../notifications/local_reminders.dart';
 import '../notifications/owner_reminder_repeat_sync.dart';
+import 'message_notifications_tile.dart';
 import 'repeat_minutes_controller.dart';
 import 'repeat_settings_section.dart';
 
@@ -19,6 +20,8 @@ class ReminderSettingsScreen extends StatefulWidget {
     required this.strings,
     this.dailyReminderSyncQueue,
     this.onToggled,
+    this.messageNotifications = true,
+    this.onMessageNotificationsChanged,
   });
 
   final ApiClient api;
@@ -27,6 +30,10 @@ class ReminderSettingsScreen extends StatefulWidget {
 
   /// Called after the on/off switch was saved, with its new value.
   final ValueChanged<bool>? onToggled;
+
+  /// Android only: new-message notifications, also in the background.
+  final bool messageNotifications;
+  final ValueChanged<bool>? onMessageNotificationsChanged;
 
   @override
   State<ReminderSettingsScreen> createState() => _ReminderSettingsScreenState();
@@ -434,6 +441,16 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen> {
                   onPressed: _saving ? null : () => _save(),
                   child: Text(widget.strings.save),
                 ),
+                // Saved on its own (this device only), so it sits after the
+                // reminder's Save button.
+                if (widget.onMessageNotificationsChanged != null) ...[
+                  const SizedBox(height: 24),
+                  MessageNotificationsTile(
+                    strings: widget.strings,
+                    value: widget.messageNotifications,
+                    onChanged: widget.onMessageNotificationsChanged!,
+                  ),
+                ],
               ],
             ),
     );

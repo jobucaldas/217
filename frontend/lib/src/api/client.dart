@@ -71,9 +71,22 @@ class ApiClient {
   static const _apiBaseKey = 'api_base_url';
 
   Future<void> loadPersistedApiBase() async {
-    final saved = normalizeApiBase(await _storage.read(key: _apiBaseKey) ?? '');
+    config.apiBaseUrl = (await storedLogin(config, _storage)).server;
+  }
+
+  /// The server in use and its session token as saved on this device, read
+  /// without side effects (for background work, which must never renew or
+  /// clear the app's session).
+  static Future<({String server, String? token})> storedLogin(
+    AppConfig config,
+    FlutterSecureStorage storage,
+  ) async {
+    final saved = normalizeApiBase(await storage.read(key: _apiBaseKey) ?? '');
     // Missing or empty (older builds stored '' for same-origin) → build default.
-    config.apiBaseUrl = saved.isEmpty ? config.defaultApiBaseUrl : saved;
+    return (
+      server: saved.isEmpty ? config.defaultApiBaseUrl : saved,
+      token: await storage.read(key: _sessionKey),
+    );
   }
 
   /// Validates a self-hosted server URL; empty means "use the default server".

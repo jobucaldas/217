@@ -275,6 +275,11 @@ class Strings {
   String get reminderTime => _t('Time', 'Horário', 'Hora');
   String get reminderEnable =>
       _t('Remind me daily', 'Lembrar todo dia', 'Recordarme cada día');
+  String get remindersWithMessagesSubtitle => _t(
+        'Daily pill reminder and messages',
+        'Lembrete diário da pílula e mensagens',
+        'Recordatorio diario de la píldora y mensajes',
+      );
   String get reminderSaved => _t('Saved', 'Salvo', 'Guardado');
   String get reminderNeedsPush => _t(
         'Enable system notifications on this device.',
@@ -459,9 +464,9 @@ class Strings {
         'Notificaciones de mensajes',
       );
   String get messageNotifsSubtitle => _t(
-        'Tells you about new messages when 217 opens or while it is open.',
-        'Avisa sobre mensagens novas quando o 217 abre ou enquanto está aberto.',
-        'Te avisa de mensajes nuevos al abrir 217 o mientras está abierto.',
+        'Tells you about new messages, also with 217 closed (checked about every 15 minutes).',
+        'Avisa sobre mensagens novas, também com o 217 fechado (verifica a cada 15 minutos, aproximadamente).',
+        'Te avisa de mensajes nuevos, también con 217 cerrado (revisa cada 15 minutos, aproximadamente).',
       );
   String get partnerRevokedTitle => _t(
         'You are not invited to her 217 calendar',
@@ -603,6 +608,11 @@ class Strings {
         'PMS and pill not logged',
         'TPM e pílula não registrada',
         'SPM y píldora no registrada',
+      );
+  String get partnerAlertsWithMessagesSubtitle => _t(
+        'PMS, pill not logged and messages',
+        'TPM, pílula não registrada e mensagens',
+        'SPM, píldora no registrada y mensajes',
       );
   String get pmsAlertTitle =>
       _t('Expected PMS heads-up', 'Aviso de TPM prevista',
