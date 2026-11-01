@@ -90,9 +90,8 @@ Offline-first client: `ApiClient` keeps the last session, months, cycle and aler
 
 ### Privacy page (HTML, cookie session; the app only links here)
 - `GET /api/privacy?lang=en|pt|es` — the notice (else `Accept-Language`); signed-in browsers also get the actions below. The app's Settings row and consent screen open it
-- `GET /api/privacy/signin` — browser AuthKit sign-in that returns to the page (`217_oauth_return` cookie, privacy paths only)
-- `POST /api/privacy/export` — form (`csrf` = hash of the session token); downloads the JSON only if the session signed in within 5 minutes, else redirects to sign-in
-- `POST /api/privacy/withdraw`, `POST /api/privacy/delete` — form + `csrf`, after a `?confirm=withdraw|delete` warning step
+- `GET /api/privacy/signin?confirm=download|withdraw|delete` — browser AuthKit sign-in (always re-prompts) that returns to the page, on that action's warning step (`217_oauth_return` cookie, privacy paths only)
+- `POST /api/privacy/export`, `POST /api/privacy/withdraw`, `POST /api/privacy/delete` — forms posted from the `?confirm=` warning step, with `csrf` (hash of the session token). Every action shows its warning first, and the server only performs it if the session signed in within 5 minutes; otherwise it redirects to sign-in, which returns to the warning to confirm again
 
 ### Roles, sharing, alerts (auth required)
 - `PUT /api/account/role` — `{role: owner|partner}`; 409 while shared

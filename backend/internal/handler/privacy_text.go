@@ -18,9 +18,10 @@ type privacyText struct {
 	SignInPrompt, SignInAction      string
 	SignInUnavailable, SignInFailed string
 	DownloadTitle, DownloadBody     string
-	DownloadAction, DownloadFresh   string
-	DownloadReauth                  string
-	DownloadReauthNote              string
+	DownloadAction                  string
+	DownloadConfirmTitle            string
+	DownloadWarn, DownloadConfirm   string
+	ReauthAction, ReauthNote        string
 	WithdrawTitle, WithdrawBody     string
 	WithdrawAction, WithdrawConfirm string
 	WithdrawConfirmTitle            string
@@ -64,9 +65,6 @@ var privacyTexts = map[string]privacyText{
 		DownloadTitle:          "Download my data",
 		DownloadBody:           "Everything this server holds about you, as a JSON file.",
 		DownloadAction:         "Download my data",
-		DownloadFresh:          "You signed in just now, so the download is available for a few minutes.",
-		DownloadReauth:         "Sign in again to download",
-		DownloadReauthNote:     "To protect your data, downloading asks you to confirm it is you by signing in again.",
 		WithdrawTitle:          "Withdraw consent",
 		WithdrawBody:           "Stop agreeing to this notice. Your data is kept, but 217 stops processing it.",
 		WithdrawAction:         "Withdraw consent",
@@ -87,6 +85,11 @@ var privacyTexts = map[string]privacyText{
 		Cancel:                 "Cancel",
 		FormExpired:            "This page expired. Reload it and try again.",
 		SignedOutError:         "You are signed out. Sign in and try again.",
+		DownloadConfirmTitle:   "Download your data?",
+		DownloadWarn:           "The file holds everything this server has about you, including sensitive health data. Keep it somewhere safe and do not share it.",
+		DownloadConfirm:        "Download",
+		ReauthAction:           "Sign in again to continue",
+		ReauthNote:             "To protect your data, confirm it is you by signing in again. You come back here to finish.",
 	},
 	"pt": {
 		LangName:               "Português",
@@ -115,9 +118,6 @@ var privacyTexts = map[string]privacyText{
 		DownloadTitle:          "Baixar meus dados",
 		DownloadBody:           "Tudo que este servidor guarda sobre você, em um arquivo JSON.",
 		DownloadAction:         "Baixar meus dados",
-		DownloadFresh:          "Você acabou de entrar, então o download fica disponível por alguns minutos.",
-		DownloadReauth:         "Entrar de novo para baixar",
-		DownloadReauthNote:     "Para proteger seus dados, o download pede que você confirme que é você entrando de novo.",
 		WithdrawTitle:          "Revogar consentimento",
 		WithdrawBody:           "Deixe de concordar com este aviso. Seus dados são mantidos, mas o 217 para de tratá-los.",
 		WithdrawAction:         "Revogar consentimento",
@@ -138,6 +138,11 @@ var privacyTexts = map[string]privacyText{
 		Cancel:                 "Cancelar",
 		FormExpired:            "Esta página expirou. Recarregue e tente de novo.",
 		SignedOutError:         "Você saiu da conta. Entre e tente de novo.",
+		DownloadConfirmTitle:   "Baixar seus dados?",
+		DownloadWarn:           "O arquivo traz tudo que este servidor tem sobre você, incluindo dados sensíveis de saúde. Guarde em um lugar seguro e não compartilhe.",
+		DownloadConfirm:        "Baixar",
+		ReauthAction:           "Entrar de novo para continuar",
+		ReauthNote:             "Para proteger seus dados, confirme que é você entrando de novo. Você volta aqui para concluir.",
 	},
 	"es": {
 		LangName:               "Español",
@@ -166,9 +171,6 @@ var privacyTexts = map[string]privacyText{
 		DownloadTitle:          "Descargar mis datos",
 		DownloadBody:           "Todo lo que este servidor guarda sobre ti, en un archivo JSON.",
 		DownloadAction:         "Descargar mis datos",
-		DownloadFresh:          "Acabas de iniciar sesión, así que la descarga está disponible durante unos minutos.",
-		DownloadReauth:         "Inicia sesión de nuevo para descargar",
-		DownloadReauthNote:     "Para proteger tus datos, la descarga te pide confirmar que eres tú iniciando sesión de nuevo.",
 		WithdrawTitle:          "Retirar consentimiento",
 		WithdrawBody:           "Deja de aceptar este aviso. Tus datos se conservan, pero 217 deja de tratarlos.",
 		WithdrawAction:         "Retirar consentimiento",
@@ -189,5 +191,10 @@ var privacyTexts = map[string]privacyText{
 		Cancel:                 "Cancelar",
 		FormExpired:            "Esta página caducó. Recárgala e inténtalo de nuevo.",
 		SignedOutError:         "Cerraste sesión. Inicia sesión e inténtalo de nuevo.",
+		DownloadConfirmTitle:   "¿Descargar tus datos?",
+		DownloadWarn:           "El archivo contiene todo lo que este servidor tiene sobre ti, incluidos datos sensibles de salud. Guárdalo en un lugar seguro y no lo compartas.",
+		DownloadConfirm:        "Descargar",
+		ReauthAction:           "Inicia sesión de nuevo para continuar",
+		ReauthNote:             "Para proteger tus datos, confirma que eres tú iniciando sesión de nuevo. Vuelves aquí para terminar.",
 	},
 }

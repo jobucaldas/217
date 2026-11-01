@@ -62,10 +62,15 @@ func TestPrivacyExportNeedsCSRFAndFreshSignIn(t *testing.T) {
 	h, s := newTestHandler(t)
 	user, _ := s.LinkWorkOSIdentity("privacy-page-export", "export-page@example.com", "E", true)
 	cookie := sessionCookie(t, s, user.ID)
-	page := privacyPage(t, h, "/api/privacy?lang=en", cookie).Body.String()
+	// The card only opens the warning step; the form lives on that step.
+	if page := privacyPage(t, h, "/api/privacy?lang=en", cookie).Body.String(); strings.Contains(page, `action="/api/privacy/export"`) ||
+		!strings.Contains(page, "confirm=download") {
+		t.Fatal("download must start with its warning step")
+	}
+	page := privacyPage(t, h, "/api/privacy?lang=en&confirm=download", cookie).Body.String()
 	m := csrfField.FindStringSubmatch(page)
-	if m == nil || !strings.Contains(page, `action="/api/privacy/export"`) {
-		t.Fatalf("fresh session should get the download form")
+	if m == nil || !strings.Contains(page, `action="/api/privacy/export"`) || !strings.Contains(page, "Download your data?") {
+		t.Fatalf("fresh session should get the download warning and form")
 	}
 
 	w := httptest.NewRecorder()
@@ -80,16 +85,33 @@ func TestPrivacyExportNeedsCSRFAndFreshSignIn(t *testing.T) {
 		!strings.Contains(w.Body.String(), "export-page@example.com") {
 		t.Fatalf("export: %d %q", w.Code, w.Header().Get("Content-Disposition"))
 	}
+}
 
-	// An older sign-in is bounced through AuthKit first.
+// Every action needs a recent sign-in, enforced by the server: a stale
+// session gets the warning with a sign-in link (no form), and a post is sent
+// through AuthKit back to that warning step without doing anything.
+func TestPrivacyActionsNeedFreshSignIn(t *testing.T) {
+	h, s := newTestHandler(t)
+	user, _ := s.LinkWorkOSIdentity("privacy-page-stale", "stale@example.com", "S", true)
+	_, _ = s.RecordConsent(user.ID, model.ConsentVersion)
+	cookie := sessionCookie(t, s, user.ID)
+	csrf := csrfField.FindStringSubmatch(privacyPage(t, h, "/api/privacy?confirm=delete", cookie).Body.String())[1]
 	h.SetReauthWindow(0)
-	if page := privacyPage(t, h, "/api/privacy?lang=pt", cookie).Body.String(); strings.Contains(page, `action="/api/privacy/export"`) {
-		t.Fatal("stale session must not get the download form")
+	for action, post := range map[string]func(http.ResponseWriter, *http.Request){
+		"download": h.PrivacyExport, "withdraw": h.PrivacyWithdraw, "delete": h.PrivacyDelete,
+	} {
+		page := privacyPage(t, h, "/api/privacy?lang=pt&confirm="+action, cookie).Body.String()
+		if strings.Contains(page, `method="post"`) || !strings.Contains(page, "/api/privacy/signin?confirm="+action+"&amp;lang=pt") {
+			t.Fatalf("%s: stale session must get a sign-in link, not the form", action)
+		}
+		w := httptest.NewRecorder()
+		post(w, privacyForm("/api/privacy/"+action, cookie, url.Values{"csrf": {csrf}, "lang": {"pt"}}))
+		if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/api/privacy/signin?confirm="+action+"&lang=pt" {
+			t.Fatalf("stale %s: %d %q", action, w.Code, w.Header().Get("Location"))
+		}
 	}
-	w = httptest.NewRecorder()
-	h.PrivacyExport(w, privacyForm("/api/privacy/export", cookie, url.Values{"csrf": {m[1]}, "lang": {"pt"}}))
-	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/api/privacy/signin?lang=pt" {
-		t.Fatalf("stale export: %d %q", w.Code, w.Header().Get("Location"))
+	if u, err := s.GetUserByID(user.ID); err != nil || !u.HasConsent() {
+		t.Fatalf("stale posts must not change anything: %+v %v", u, err)
 	}
 }
 
@@ -155,7 +177,7 @@ func TestPrivacySignInReturnsToPage(t *testing.T) {
 	provider := &fakeOAuthProvider{userInfo: &auth.OAuthUserInfo{Subject: "page-subject", Email: "page@example.com", EmailVerified: true}}
 	h.SetOAuthProvider(provider)
 	w := httptest.NewRecorder()
-	h.PrivacySignIn(w, httptest.NewRequest(http.MethodGet, "/api/privacy/signin?lang=pt", nil))
+	h.PrivacySignIn(w, httptest.NewRequest(http.MethodGet, "/api/privacy/signin?lang=pt&confirm=delete", nil))
 	if w.Code != http.StatusSeeOther || !strings.HasPrefix(w.Header().Get("Location"), "https://api.workos.com/") {
 		t.Fatalf("signin: %d %q", w.Code, w.Header().Get("Location"))
 	}
@@ -164,7 +186,7 @@ func TestPrivacySignInReturnsToPage(t *testing.T) {
 	cb.AddCookie(cookieNamed(t, w.Result().Cookies(), "217_oauth_return"))
 	w = httptest.NewRecorder()
 	h.WorkOSOAuthCallback(w, cb)
-	if w.Code != http.StatusFound || w.Header().Get("Location") != "http://localhost:8080/api/privacy?lang=pt" {
+	if w.Code != http.StatusFound || w.Header().Get("Location") != "http://localhost:8080/api/privacy?confirm=delete&lang=pt" {
 		t.Fatalf("callback: %d %q", w.Code, w.Header().Get("Location"))
 	}
 

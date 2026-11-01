@@ -35,14 +35,18 @@ type privacyView struct {
 	ContactURL string
 	Nonce      string
 
-	AuthKit      bool
-	SignedIn     bool
-	Email        string
-	HasConsent   bool
-	Fresh        bool
-	CSRF         string
-	DeleteWarn   string
-	Confirm      string
+	AuthKit    bool
+	SignedIn   bool
+	Email      string
+	HasConsent bool
+	Fresh      bool
+	CSRF       string
+	DeleteWarn string
+	Confirm    string
+	// The open warning step: what it says and where its form posts.
+	ConfirmTitle, ConfirmWarn, ConfirmAction, ConfirmClass, ConfirmPost string
+	// ReauthURL signs in again and comes back to this warning step.
+	ReauthURL    string
 	Notice       string
 	Error        string
 	SignInURL    string
@@ -151,13 +155,22 @@ func (h *Handler) renderPrivacy(w http.ResponseWriter, r *http.Request, status i
 		v.HasConsent = user.HasConsent()
 		v.Fresh = h.sessionIsFresh(token)
 		v.CSRF = privacyCSRF(token)
-		switch confirm := r.URL.Query().Get("confirm"); confirm {
-		case "delete":
-			v.Confirm = confirm
+		confirm := privacyAction(r.URL.Query().Get("confirm"))
+		if confirm == "withdraw" && !v.HasConsent {
+			confirm = ""
+		}
+		v.Confirm = confirm
+		v.ReauthURL = privacySignInURL(lang, confirm)
+		switch confirm {
+		case "download":
+			v.ConfirmTitle, v.ConfirmWarn, v.ConfirmAction, v.ConfirmClass = t.DownloadConfirmTitle, t.DownloadWarn, t.DownloadConfirm, "primary"
+			v.ConfirmPost = privacyPagePath + "/export"
 		case "withdraw":
-			if v.HasConsent {
-				v.Confirm = confirm
-			}
+			v.ConfirmTitle, v.ConfirmWarn, v.ConfirmAction, v.ConfirmClass = t.WithdrawConfirmTitle, t.WithdrawWarn, t.WithdrawConfirm, "danger"
+			v.ConfirmPost = privacyPagePath + "/withdraw"
+		case "delete":
+			v.ConfirmTitle, v.ConfirmWarn, v.ConfirmAction, v.ConfirmClass = t.DeleteConfirmTitle, v.DeleteWarn, t.DeleteConfirm, "danger"
+			v.ConfirmPost = privacyPagePath + "/delete"
 		}
 	}
 
@@ -200,12 +213,35 @@ func privacyContactLink(contact string) (string, string) {
 	return contact, ""
 }
 
-// PrivacySignIn starts a browser AuthKit sign-in that lands back on the page.
-// AuthKit always asks for credentials again (max_age=0), so it also serves
-// as the re-authentication before a download.
+// privacyAction keeps only the page's actions: download, withdraw, delete.
+func privacyAction(action string) string {
+	switch action {
+	case "download", "withdraw", "delete":
+		return action
+	}
+	return ""
+}
+
+// privacySignInURL signs in and returns to the page, on the warning step of
+// action when one is given.
+func privacySignInURL(lang, action string) string {
+	q := url.Values{"lang": {lang}}
+	if action = privacyAction(action); action != "" {
+		q.Set("confirm", action)
+	}
+	return privacyPagePath + "/signin?" + q.Encode()
+}
+
+// PrivacySignIn starts a browser AuthKit sign-in that lands back on the page
+// (on ?confirm= when given). AuthKit always asks for credentials again
+// (max_age=0), so it is also the re-authentication every action needs.
 func (h *Handler) PrivacySignIn(w http.ResponseWriter, r *http.Request) {
 	lang := pageLanguage(r)
-	authURL, status, _ := h.beginBrowserOAuth(w, r, privacyPageURL(lang))
+	back := privacyPageURL(lang)
+	if action := privacyAction(r.URL.Query().Get("confirm")); action != "" {
+		back = privacyPageURL(lang, "confirm", action)
+	}
+	authURL, status, _ := h.beginBrowserOAuth(w, r, back)
 	if authURL == "" {
 		h.renderPrivacy(w, r, status, privacyTexts[lang].SignInFailed)
 		return
@@ -214,44 +250,45 @@ func (h *Handler) PrivacySignIn(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, authURL, http.StatusSeeOther)
 }
 
-// privacyFormUser checks a privacy page form post: a live cookie session, the
-// form's CSRF token and, when sent, an allowed Origin.
-func (h *Handler) privacyFormUser(w http.ResponseWriter, r *http.Request) (*model.User, string, bool) {
+// privacyFormUser checks a privacy page form post for action: a live cookie
+// session, the form's CSRF token, an allowed Origin when sent, and a recent
+// sign-in; a stale one is sent through AuthKit back to the warning step.
+func (h *Handler) privacyFormUser(w http.ResponseWriter, r *http.Request, action string) (*model.User, bool) {
 	t := privacyTexts[pageLanguage(r)]
 	if origin := r.Header.Get("Origin"); origin != "" && origin != "null" && !h.sameOriginAllowed(r) {
 		h.renderPrivacy(w, r, http.StatusForbidden, t.FormExpired)
-		return nil, "", false
+		return nil, false
 	}
 	user, token := h.privacySession(w, r)
 	if user == nil {
 		h.renderPrivacy(w, r, http.StatusUnauthorized, t.SignedOutError)
-		return nil, "", false
+		return nil, false
 	}
 	sent := r.PostFormValue("csrf")
 	if subtle.ConstantTimeCompare([]byte(sent), []byte(privacyCSRF(token))) != 1 {
 		h.renderPrivacy(w, r, http.StatusForbidden, t.FormExpired)
-		return nil, "", false
-	}
-	return user, token, true
-}
-
-// PrivacyExport downloads the data export, but only shortly after a sign-in;
-// otherwise it sends the browser through AuthKit first.
-func (h *Handler) PrivacyExport(w http.ResponseWriter, r *http.Request) {
-	user, token, ok := h.privacyFormUser(w, r)
-	if !ok {
-		return
+		return nil, false
 	}
 	if !h.sessionIsFresh(token) {
-		http.Redirect(w, r, privacyPagePath+"/signin?"+url.Values{"lang": {pageLanguage(r)}}.Encode(), http.StatusSeeOther)
+		http.Redirect(w, r, privacySignInURL(pageLanguage(r), action), http.StatusSeeOther)
+		return nil, false
+	}
+	return user, true
+}
+
+// PrivacyExport downloads the data export after the warning step and a
+// recent sign-in.
+func (h *Handler) PrivacyExport(w http.ResponseWriter, r *http.Request) {
+	user, ok := h.privacyFormUser(w, r, "download")
+	if !ok {
 		return
 	}
 	h.ExportAccount(w, r.WithContext(context.WithValue(r.Context(), userIDKey, user.ID)))
 }
 
-// PrivacyDelete erases the account after the page's confirmation step.
+// PrivacyDelete erases the account after the warning step and a recent sign-in.
 func (h *Handler) PrivacyDelete(w http.ResponseWriter, r *http.Request) {
-	user, _, ok := h.privacyFormUser(w, r)
+	user, ok := h.privacyFormUser(w, r, "delete")
 	if !ok {
 		return
 	}
@@ -264,9 +301,9 @@ func (h *Handler) PrivacyDelete(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, privacyPageURL(lang, "done", "deleted"), http.StatusSeeOther)
 }
 
-// PrivacyWithdraw revokes consent after the page's confirmation step.
+// PrivacyWithdraw revokes consent after the warning step and a recent sign-in.
 func (h *Handler) PrivacyWithdraw(w http.ResponseWriter, r *http.Request) {
-	user, _, ok := h.privacyFormUser(w, r)
+	user, ok := h.privacyFormUser(w, r, "withdraw")
 	if !ok {
 		return
 	}
@@ -328,23 +365,19 @@ small{display:block;color:var(--muted);margin-top:8px}
 {{if .Notice}}<div class="card status" role="status"><p>{{.Notice}}</p></div>{{end}}
 {{if .Error}}<div class="card error" role="alert"><p>{{.Error}}</p></div>{{end}}
 
-{{if eq .Confirm "delete"}}
+{{if .Confirm}}
 <section aria-labelledby="confirm-title" class="card danger-card">
-<h2 id="confirm-title">{{.T.DeleteConfirmTitle}}</h2>
-<p>{{.DeleteWarn}}</p>
-<form method="post" action="/api/privacy/delete">
+<h2 id="confirm-title">{{.ConfirmTitle}}</h2>
+<p>{{.ConfirmWarn}}</p>
+{{if .Fresh}}
+<form method="post" action="{{.ConfirmPost}}">
 <input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="lang" value="{{.Lang}}">
-<div class="row"><a class="btn" href="?lang={{.Lang}}">{{.T.Cancel}}</a><button class="btn danger" type="submit">{{.T.DeleteConfirm}}</button></div>
+<div class="row"><a class="btn" href="?lang={{.Lang}}">{{.T.Cancel}}</a><button class="btn {{.ConfirmClass}}" type="submit">{{.ConfirmAction}}</button></div>
 </form>
-</section>
-{{else if eq .Confirm "withdraw"}}
-<section aria-labelledby="confirm-title" class="card danger-card">
-<h2 id="confirm-title">{{.T.WithdrawConfirmTitle}}</h2>
-<p>{{.T.WithdrawWarn}}</p>
-<form method="post" action="/api/privacy/withdraw">
-<input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="lang" value="{{.Lang}}">
-<div class="row"><a class="btn" href="?lang={{.Lang}}">{{.T.Cancel}}</a><button class="btn danger" type="submit">{{.T.WithdrawConfirm}}</button></div>
-</form>
+{{else}}
+<small>{{.T.ReauthNote}}</small>
+<div class="row"><a class="btn" href="?lang={{.Lang}}">{{.T.Cancel}}</a><a class="btn {{.ConfirmClass}}" href="{{.ReauthURL}}">{{.T.ReauthAction}}</a></div>
+{{end}}
 </section>
 {{end}}
 
@@ -362,16 +395,7 @@ small{display:block;color:var(--muted);margin-top:8px}
 <div class="card">
 <h2>{{.T.DownloadTitle}}</h2>
 <p>{{.T.DownloadBody}}</p>
-{{if .Fresh}}
-<form method="post" action="/api/privacy/export">
-<input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="lang" value="{{.Lang}}">
-<button class="btn primary" type="submit">{{.T.DownloadAction}}</button>
-</form>
-<small>{{.T.DownloadFresh}}</small>
-{{else}}
-<a class="btn primary" href="{{.SignInURL}}">{{.T.DownloadReauth}}</a>
-<small>{{.T.DownloadReauthNote}}</small>
-{{end}}
+<a class="btn primary" href="?lang={{.Lang}}&amp;confirm=download#confirm-title">{{.T.DownloadAction}}</a>
 </div>
 {{if .HasConsent}}
 <div class="card">
