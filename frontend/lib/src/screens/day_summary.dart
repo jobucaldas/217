@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 
 import '../i18n.dart';
 import '../models.dart';
@@ -84,7 +83,7 @@ class DaySummaryBar extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final text = Theme.of(context).textTheme;
     final brightness = Theme.of(context).brightness;
-    final shortDay = DateFormat.MMMd(strings.dateLocale).format(day);
+    final shortDay = strings.dates.shortDayMonth(day);
     final taken = entry?.taken;
     final period = App217Colors.period(brightness, palette);
     final loggedPeriod = entry?.period ?? false;
