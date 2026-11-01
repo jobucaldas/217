@@ -951,22 +951,6 @@ class _CalendarScreenState extends State<CalendarScreen>
                   builder: (context, constraints) {
                     final pageW = constraints.maxWidth;
                     _carouselWidth = pageW;
-                    double bottomOf(DateTime month) => _MonthGrid.contentHeight(
-                          month,
-                          constraints.biggest,
-                          bottomInset: 12,
-                        );
-                    // The note follows the month the header names: it stays
-                    // put through the first 60% of a swipe (even toward a
-                    // taller month, or a cancelled one) and only a month that
-                    // really has no room for it hides it.
-                    final gridBottom = bottomOf(_headerMonth(pageW));
-                    // The note goes in the room the grid leaves below itself,
-                    // when there is enough for a line or two, anchored right
-                    // above the tags so 5- and 6-week months do not move it.
-                    final noteRoom = constraints.maxHeight - gridBottom - 12;
-                    final showNote =
-                        selectedNotes.isNotEmpty && noteRoom >= 52;
                     // Web touchpad swipes arrive as scroll signals; native
                     // touchpad pan/zoom reaches the horizontal drag below.
                     final carousel = Listener(
@@ -1048,32 +1032,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                         ),
                       ),
                     );
-                    // Same tree whether or not the note shows: swapping it
-                    // mid-swipe would rebuild the GestureDetector and drop
-                    // the drag.
-                    return Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        carousel,
-                        Positioned(
-                          left: 16,
-                          right: 16,
-                          top: math.min(
-                            gridBottom + 4,
-                            constraints.maxHeight - 8,
-                          ),
-                          bottom: 8,
-                          child: Visibility(
-                            visible: showNote,
-                            maintainState: true,
-                            child: DayNotePanel(
-                              notes: selectedNotes,
-                              alignment: Alignment.bottomCenter,
-                            ),
-                          ),
-                        ),
-                      ],
-                    );
+                    return carousel;
                   },
                 ),
               ),
@@ -1088,6 +1047,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                     ? () => _openDay(selectedDay)
                     : null,
                 isFuture: selectedDay.isAfter(_today),
+                note: selectedNotes,
               ),
             ],
           ),
@@ -1157,19 +1117,6 @@ class _MonthGrid extends StatelessWidget {
     this.cycle = CycleInfo.empty,
     this.selected,
   });
-
-  /// Grid padding, weekday row and week rows: how far down [month] reaches
-  /// in a page of [size]. Mirrors the layout in [build].
-  static double contentHeight(
-    DateTime month,
-    Size size, {
-    required double bottomInset,
-  }) {
-    final rows = _rowCount(month);
-    final rowsHeight = size.height - 4 - bottomInset - _weekdayRowHeight;
-    final rowHeight = math.min(rowsHeight / rows, (size.width - 24) / 7 * 1.15);
-    return 4 + _weekdayRowHeight + rowHeight * rows;
-  }
 
   static const double _weekdayRowHeight = 28;
 

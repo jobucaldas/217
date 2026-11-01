@@ -62,6 +62,7 @@ class DaySummaryBar extends StatelessWidget {
     required this.palette,
     this.onEdit,
     this.isFuture = false,
+    this.note = '',
   });
 
   final Strings strings;
@@ -77,6 +78,10 @@ class DaySummaryBar extends StatelessWidget {
   /// Future days show only what is expected. The button stays (so the grid
   /// keeps its height) but is disabled: nothing can be logged ahead of time.
   final bool isFuture;
+
+  /// The day's note, drawn above the tags so it keeps one fixed place at the
+  /// bottom of the screen whatever the month shows.
+  final String note;
 
   @override
   Widget build(BuildContext context) {
@@ -200,7 +205,23 @@ class DaySummaryBar extends StatelessWidget {
       top: false,
       child: Padding(
         padding: EdgeInsets.fromLTRB(16, 4, 16, compact ? 8 : 12),
-        child: compact
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (note.isNotEmpty) ...[
+              DayNotePanel(notes: note, maxLines: 3),
+              const SizedBox(height: 8),
+            ],
+            _summary(compact, tagWrap, button),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _summary(bool compact, Widget tagWrap, Widget? button) {
+    return compact
             ? Row(
                 key: const ValueKey('day-summary'),
                 children: [
@@ -222,9 +243,7 @@ class DaySummaryBar extends StatelessWidget {
                     button,
                   ],
                 ],
-              ),
-      ),
-    );
+              );
   }
 }
 
@@ -311,16 +330,19 @@ class _DayTagState extends State<_DayTag> {
   }
 }
 
-/// The selected day's note, drawn in the room the month grid leaves below
-/// itself. Display only: swipes pass through to the month carousel.
+/// The selected day's note, shown above the day tags. Display only: swipes pass through to the month carousel.
 class DayNotePanel extends StatelessWidget {
   const DayNotePanel({
     super.key,
     required this.notes,
     this.alignment = Alignment.topCenter,
+    this.maxLines,
   });
 
   final String notes;
+
+  /// Fixed line cap; when null the panel fits the room it is given.
+  final int? maxLines;
 
   /// Where the panel sits in the room it is given.
   final AlignmentGeometry alignment;
@@ -338,7 +360,7 @@ class DayNotePanel extends StatelessWidget {
               MediaQuery.textScalerOf(context).scale(style?.fontSize ?? 17) *
                   (style?.height ?? 1.4);
           // 24px of vertical padding inside the panel.
-          final maxLines =
+          final lines = maxLines ??
               ((constraints.maxHeight - 24) / lineHeight).floor().clamp(1, 12);
           return Align(
             alignment: alignment,
@@ -368,7 +390,7 @@ class DayNotePanel extends StatelessWidget {
                   Expanded(
                     child: Text(
                       notes,
-                      maxLines: maxLines,
+                      maxLines: lines,
                       overflow: TextOverflow.ellipsis,
                       style: style,
                     ),

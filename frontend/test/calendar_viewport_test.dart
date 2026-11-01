@@ -588,7 +588,21 @@ void main() {
     final previous = find.text(DateFormat.yMMMM('en_US').format(prev));
     expect(find.text('Felt fine'), findsOneWidget);
 
+    // The note lives in the bottom bar, above the tags and button, outside
+    // the month carousel, and never moves while swiping.
+    final note = find.byKey(const ValueKey('day-note'));
+    final noteTop = tester.getTopLeft(note);
     final carousel = find.byKey(const ValueKey('month-carousel'));
+    expect(
+      tester.getTopLeft(note).dy,
+      greaterThanOrEqualTo(tester.getBottomLeft(carousel).dy),
+    );
+    expect(
+      tester.getBottomLeft(note).dy,
+      lessThanOrEqualTo(
+        tester.getTopLeft(find.byKey(const ValueKey('day-tag-note'))).dy,
+      ),
+    );
     final gesture = await tester.startGesture(tester.getCenter(carousel));
     // Slop first, then 40% of the 390px width.
     await gesture.moveBy(const Offset(20, 0));
@@ -604,6 +618,7 @@ void main() {
     expect(previous, findsOneWidget);
     expect(current, findsNothing);
     expect(find.text('Felt fine'), findsOneWidget);
+    expect(tester.getTopLeft(note), noteTop);
 
     // Dragged back under 60%: the label returns.
     await gesture.moveBy(const Offset(-117, 0));
@@ -613,6 +628,8 @@ void main() {
 
     await gesture.up();
     await tester.pumpAndSettle();
+    expect(find.text('Felt fine'), findsOneWidget);
+    expect(tester.getTopLeft(note), noteTop);
   });
 
   testWidgets('horizontal carousel swipe changes month with snap',
