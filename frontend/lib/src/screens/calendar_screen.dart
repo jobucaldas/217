@@ -394,7 +394,7 @@ class _CalendarScreenState extends State<CalendarScreen>
         }
       } else {
         final now = DateTime.now();
-        final day = DateFormat.MMMd(widget.strings.dateLocale);
+        final dates = widget.strings.dates;
         final alerts = planPartnerAlerts(
           now: now,
           pref: pref,
@@ -403,7 +403,7 @@ class _CalendarScreenState extends State<CalendarScreen>
           pmsTitle: (_) => widget.strings.pmsNotifTitle,
           pmsBody: (window) => widget.strings.pmsNotifBody(
             widget.share.ownerName,
-            day.format(window.periodStart),
+            dates.shortDayMonth(window.periodStart),
           ),
           pillTitle: widget.strings.pillNotifTitle,
           pillBody: widget.strings.pillNotifBody(widget.share.ownerName),
@@ -703,8 +703,8 @@ class _CalendarScreenState extends State<CalendarScreen>
 
   @override
   Widget build(BuildContext context) {
-    final locale = widget.strings.dateLocale;
-    final monthLabel = DateFormat.yMMMM(locale).format(_month);
+    final dates = widget.strings.dates;
+    final monthLabel = dates.monthYear(_month);
     final scheme = Theme.of(context).colorScheme;
     final text = Theme.of(context).textTheme;
     final brightness = Theme.of(context).brightness;
@@ -716,7 +716,7 @@ class _CalendarScreenState extends State<CalendarScreen>
         : (_todayEntry!.taken!
             ? App217Colors.statusTaken(brightness, widget.palette)
             : App217Colors.statusMissed(brightness, widget.palette));
-    final humanDate = DateFormat.MMMMd(locale).format(_today);
+    final humanDate = dates.dayMonth(_today);
     final selectedDay = _selectedDay;
     final selectedKey = DateFormat('yyyy-MM-dd').format(selectedDay);
     final selectedEntry = _visibleEntry(selectedKey);
@@ -726,7 +726,6 @@ class _CalendarScreenState extends State<CalendarScreen>
     final todayKind = _cycle.kindOf(_today);
     final inPms = todayKind == CycleDayKind.pms;
     final next = _cycle.nextWindow(_today);
-    final shortDay = DateFormat.MMMd(locale);
     // One line per upcoming event, soonest first.
     final cycleLines = <({bool pms, bool now, String text})>[];
     if (next == null) {
@@ -741,8 +740,8 @@ class _CalendarScreenState extends State<CalendarScreen>
         ..add((
           pms: false,
           now: false,
-          text:
-              widget.strings.cycleNextPeriod(shortDay.format(next.periodStart)),
+          text: widget.strings
+              .cycleNextPeriod(dates.shortDayMonth(next.periodStart)),
         ));
     } else if (todayKind == CycleDayKind.predictedPeriod) {
       cycleLines
@@ -752,13 +751,15 @@ class _CalendarScreenState extends State<CalendarScreen>
         cycleLines.add((
           pms: true,
           now: false,
-          text: widget.strings.cyclePmsFrom(shortDay.format(next.pmsStart)),
+          text:
+              widget.strings.cyclePmsFrom(dates.shortDayMonth(next.pmsStart)),
         ));
       }
       cycleLines.add((
         pms: false,
         now: false,
-        text: widget.strings.cycleNextPeriod(shortDay.format(next.periodStart)),
+        text: widget.strings
+            .cycleNextPeriod(dates.shortDayMonth(next.periodStart)),
       ));
     }
 
@@ -1628,8 +1629,7 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final locale = widget.strings.dateLocale;
-    final human = DateFormat.yMMMMd(locale).format(DateTime.parse(widget.date));
+    final human = widget.strings.dates.fullDate(DateTime.parse(widget.date));
     final hasNote = _notes.trim().isNotEmpty;
     final periodColor = App217Colors.period(Theme.of(context).brightness);
     final heartColor = App217Colors.intimacy(Theme.of(context).brightness);

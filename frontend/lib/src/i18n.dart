@@ -1,3 +1,5 @@
+import 'dates.dart';
+
 /// UI languages. Without a saved choice the app follows the device language,
 /// falling back to English.
 enum AppLanguage { en, pt, es }
@@ -50,6 +52,9 @@ class Strings {
       };
 
   String get dateLocale => language.dateLocale;
+
+  /// Display date formats (month names capitalized).
+  AppDates get dates => AppDates(dateLocale);
 
   /// Sunday-first weekday initials for the month grid.
   List<String> get weekdayInitials => switch (language) {

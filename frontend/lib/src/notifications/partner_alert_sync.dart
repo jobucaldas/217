@@ -1,5 +1,3 @@
-import 'package:intl/intl.dart';
-
 import '../i18n.dart';
 import '../models.dart';
 import 'local_reminders.dart';
@@ -16,7 +14,7 @@ Future<LocalReminderSyncStatus> syncPartnerAlertsFrom({
   Future<LocalReminderSyncStatus> Function(List<PlannedAlert>)? scheduler,
   DateTime? now,
 }) {
-  final day = DateFormat.MMMd(strings.dateLocale);
+  final dates = strings.dates;
   final alerts = linked
       ? planPartnerAlerts(
           now: now ?? DateTime.now(),
@@ -24,8 +22,8 @@ Future<LocalReminderSyncStatus> syncPartnerAlertsFrom({
           cycle: cycle,
           todayLogged: todayLogged,
           pmsTitle: (_) => strings.pmsNotifTitle,
-          pmsBody: (w) =>
-              strings.pmsNotifBody(ownerName, day.format(w.periodStart)),
+          pmsBody: (w) => strings.pmsNotifBody(
+              ownerName, dates.shortDayMonth(w.periodStart)),
           pillTitle: strings.pillNotifTitle,
           pillBody: strings.pillNotifBody(ownerName),
         )

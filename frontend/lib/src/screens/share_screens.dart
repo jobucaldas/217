@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:intl/intl.dart';
 
 import '../api/client.dart';
 import '../errors.dart';
@@ -838,9 +837,7 @@ class _MessageBubble extends StatelessWidget {
         : highlighted
             ? scheme.onPrimaryContainer
             : scheme.onSurface;
-    final when = DateFormat.MMMd(strings.dateLocale)
-        .add_Hm()
-        .format(message.createdAt.toLocal());
+    final when = strings.dates.shortDayMonthTime(message.createdAt.toLocal());
     final header = [
       mine ? strings.messageFromMe : message.fromLabel,
       when,
