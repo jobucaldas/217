@@ -104,6 +104,7 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _testing = false;
   String? _serverError;
   bool _savingStage = false;
+  int _stageResets = 0;
 
   @override
   void dispose() {
@@ -126,7 +127,10 @@ class _SettingsPageState extends State<SettingsPage> {
       widget.onStageChanged?.call(session);
     } catch (error) {
       if (mounted) {
-        setState(() => _savingStage = false);
+        setState(() {
+          _savingStage = false;
+          _stageResets++;
+        });
         _showSnack(friendlyError(widget.strings, error));
       }
     }
@@ -424,26 +428,27 @@ class _SettingsPageState extends State<SettingsPage> {
             _SectionLabel(widget.strings.reproductiveStage),
             _SettingsSection(children: [
               Padding(
-                padding: const EdgeInsets.all(12),
-                child: Wrap(
-                  spacing: 8,
-                  runSpacing: 4,
-                  children: [
+                key: const ValueKey('stage-dropdown'),
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                child: DropdownMenu<String>(
+                  // Rebuilt from the saved stage (and after a failed save) so
+                  // the field never shows a choice the server did not keep.
+                  key: ValueKey('stage-${widget.user!.stage}-$_stageResets'),
+                  initialSelection: widget.user!.stage,
+                  expandedInsets: EdgeInsets.zero,
+                  enabled: !_savingStage,
+                  dropdownMenuEntries: [
                     for (final option in <(String, String)>[
                       ('cycling', widget.strings.stageCycling),
                       ('perimenopause', widget.strings.stagePerimenopause),
                       ('menopause', widget.strings.stageMenopause),
                     ])
-                      ChoiceChip(
-                        key: ValueKey('stage-${option.$1}'),
-                        label: Text(option.$2),
-                        selected: widget.user!.stage == option.$1,
-                        onSelected:
-                            _savingStage || widget.user!.stage == option.$1
-                                ? null
-                                : (_) => _saveStage(option.$1),
-                      ),
+                      DropdownMenuEntry(value: option.$1, label: option.$2),
                   ],
+                  onSelected: (value) {
+                    if (value == null || value == widget.user!.stage) return;
+                    _saveStage(value);
+                  },
                 ),
               ),
               Padding(
