@@ -773,7 +773,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                   const SizedBox(width: 10),
                   Flexible(
                     child: _ReadOnlyLabel(
-                      label: widget.strings.readOnlyCalendar,
+                      label: widget.strings.readOnly,
                     ),
                   ),
                 ],

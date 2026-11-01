@@ -213,7 +213,7 @@ void _pendingInviteTests() {
     await tester.pumpAndSettle();
 
     expect(server.acceptedCode, 'ABCD1234');
-    expect(find.text('Read-only calendar'), findsOneWidget);
+    expect(find.text('Read-only'), findsOneWidget);
     expect(
       await const FlutterSecureStorage().read(key: 'pending_invite'),
       isNull,

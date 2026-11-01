@@ -1379,7 +1379,7 @@ void main() {
       final hint = find.byKey(const ValueKey('read-only-label'));
       expect(find.descendant(of: find.byType(AppBar), matching: hint),
           findsOneWidget);
-      expect(find.text(strings.readOnlyCalendar), findsOneWidget);
+      expect(find.text(strings.readOnly), findsOneWidget);
       expect(tester.getTopLeft(hint).dx,
           greaterThan(tester.getTopRight(find.text(strings.brand)).dx));
       expect(tester.getTopRight(hint).dx,
