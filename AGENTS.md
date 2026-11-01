@@ -77,7 +77,7 @@ Offline-first client: `ApiClient` keeps the last session, months, cycle and aler
 - `GET /api/entries?year=YYYY&month=MM`
 - `GET|POST|DELETE /api/entries/{date}` — body `{taken, notes, heart, period}`
 - `GET /api/stats?year=YYYY&month=MM`
-- `GET /api/cycle?today=YYYY-MM-DD` — period starts + next predicted periods/PMS windows
+- `GET /api/cycle?today=YYYY-MM-DD` — period starts + next predicted periods/PMS windows; for the owner herself also `suggested_stage` (omitted when none) from `cycle.SuggestStage`: menopause when the latest logged period day is ≥ 12 months before `today`, perimenopause at age 45–55, only ever forward from the current stage
 
 ### Reminders (auth required)
 - `GET|PUT /api/reminders/preferences` — `{enabled, time, timezone, repeat_enabled, repeat_minutes}`; `repeat_minutes` is 1-120 and repeats the owner's own "pill not logged" reminder until logged or day end
@@ -96,6 +96,7 @@ Offline-first client: `ApiClient` keeps the last session, months, cycle and aler
 ### Roles, sharing, alerts (auth required)
 - `PUT /api/account/role` — `{role: owner|partner}`; 409 while shared
 - `PUT /api/account/stage` — `{stage: cycling|perimenopause|menopause}` (owner only)
+- `PUT /api/account/profile` — `{display_name, birth_date}`, both optional (omitted = kept, empty = cleared); `display_name` is trimmed, ≤ 60 characters, shown to the other side (`from_name`, `owner_name`/`partner_name`) instead of the sign-in name when set; `birth_date` is `YYYY-MM`, owner only. Both sealed in `users.profile_sealed`; the session `user` carries `display_name` and `birth_date`
 - `POST /api/share/enable|revoke` (owner), `POST /api/share/accept` (unset role or partner)
 - `GET|PUT /api/partner-alerts` (partner) — `{pms_enabled, pms_time, pill_enabled, pill_time, pill_repeat_enabled, pill_repeat_minutes}`; `pill_repeat_minutes` is 1-120
 

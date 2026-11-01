@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"217/backend/internal/cycle"
 	"217/backend/internal/model"
@@ -96,7 +98,105 @@ func (h *Handler) GetCycle(w http.ResponseWriter, r *http.Request) {
 	case "perimenopause":
 		note = "pms_counted_perimenopause"
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"stage": owner.Stage, "period_starts": info.PeriodStarts, "cycle_length": info.CycleLength, "period_length": info.PeriodLength, "estimated": info.Estimated, "predictions": info.Predictions, "note": note})
+	out := map[string]any{"stage": owner.Stage, "period_starts": info.PeriodStarts, "cycle_length": info.CycleLength, "period_length": info.PeriodLength, "estimated": info.Estimated, "predictions": info.Predictions, "note": note}
+	// The stage suggestion is for the owner only, never her partner.
+	if subjectID == getUserID(r) && owner.EffectiveRole() == model.RoleOwner {
+		suggested, err := h.suggestStage(owner, days, today)
+		if err != nil {
+			log.Printf("suggest stage: %v", err)
+			http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+			return
+		}
+		if suggested != "" {
+			out["suggested_stage"] = suggested
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// suggestStage runs cycle.SuggestStage on the owner's data. recent are the
+// period days of the last cycle.HistoryDays; older ones are only read when
+// that window holds none, since only the latest period day matters.
+func (h *Handler) suggestStage(owner *model.User, recent []string, today time.Time) (string, error) {
+	days := recent
+	if len(days) == 0 {
+		before := today.AddDate(0, 0, -cycle.HistoryDays-1).Format("2006-01-02")
+		older, err := h.store.ListPeriodDays(owner.ID, "0001-01-01", before)
+		if err != nil {
+			return "", err
+		}
+		days = older
+	}
+	return cycle.SuggestStage(owner.Stage, owner.BirthDate, days, today), nil
+}
+
+// UpdateProfile sets the caller's display name (both roles) and birth month
+// (owners only). Omitted fields are kept; an empty value clears the field,
+// so an empty display name falls back to the sign-in profile name.
+func (h *Handler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		DisplayName *string `json:"display_name"`
+		BirthDate   *string `json:"birth_date"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
+		return
+	}
+	userID := getUserID(r)
+	user, err := h.store.GetUserByID(userID)
+	if err != nil {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	if body.DisplayName != nil {
+		name := strings.TrimSpace(*body.DisplayName)
+		if !validDisplayName(name) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "display_name must be at most 60 characters, without control characters"})
+			return
+		}
+		body.DisplayName = &name
+	}
+	if body.BirthDate != nil {
+		birth := strings.TrimSpace(*body.BirthDate)
+		if birth != "" && user.EffectiveRole() != model.RoleOwner {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "only owners may set birth_date"})
+			return
+		}
+		if birth != "" && !validBirthMonth(birth, time.Now().UTC()) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "birth_date must be a past month, YYYY-MM"})
+			return
+		}
+		body.BirthDate = &birth
+	}
+	updated, err := h.store.SetProfile(userID, body.DisplayName, body.BirthDate)
+	if err != nil {
+		log.Printf("set profile: %v", err)
+		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, h.sessionPayload(updated))
+}
+
+func validDisplayName(name string) bool {
+	if !utf8.ValidString(name) || utf8.RuneCountInString(name) > model.MaxDisplayNameRunes {
+		return false
+	}
+	for _, r := range name {
+		if unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
+}
+
+// validBirthMonth accepts YYYY-MM from 1900 up to the current month (a day
+// of slack for clients ahead of UTC).
+func validBirthMonth(v string, now time.Time) bool {
+	t, err := time.Parse(cycle.BirthMonthLayout, v)
+	if err != nil || len(v) != 7 || t.Year() < 1900 {
+		return false
+	}
+	return !t.After(now.Add(24 * time.Hour))
 }
 
 func (h *Handler) SetStage(w http.ResponseWriter, r *http.Request) {
@@ -107,7 +207,7 @@ func (h *Handler) SetStage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
 		return
 	}
-	if body.Stage != "cycling" && body.Stage != "perimenopause" && body.Stage != "menopause" {
+	if !model.ValidStage(body.Stage) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid stage"})
 		return
 	}

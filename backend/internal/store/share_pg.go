@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"217/backend/internal/model"
@@ -97,7 +98,7 @@ func (s *PGStore) buildShareState(user *model.User) (*model.ShareState, error) {
 		if partnerID.Valid {
 			if partner, err := s.GetUserByID(partnerID.String); err == nil {
 				state.PartnerEmail = partner.Email
-				state.PartnerName = partner.Name
+				state.PartnerName = partner.PublicName()
 			}
 		}
 		state.UnreadNotes = s.unreadMessages(user.ID)
@@ -132,7 +133,7 @@ func (s *PGStore) buildShareState(user *model.User) (*model.ShareState, error) {
 	state.CanEditCalendar = false
 	state.UnreadNotes = s.unreadMessages(user.ID)
 	if owner, err := s.GetUserByID(share.OwnerID); err == nil {
-		state.OwnerName = owner.Name
+		state.OwnerName = owner.PublicName()
 		state.OwnerEmail = owner.Email
 	}
 	return state, nil
@@ -408,6 +409,43 @@ func (s *PGStore) SetStage(userID, stage string) (*model.User, error) {
 	sealed := sealJSON(s.kr, stage, userStageCtx(userID))
 	if _, err := s.db.Exec(`UPDATE users SET stage_sealed = $1, updated_at = NOW() WHERE id = $2`, sealed, userID); err != nil {
 		return nil, fmt.Errorf("setting stage: %w", err)
+	}
+	return s.GetUserByID(userID)
+}
+
+// SetProfile merges the given fields into the sealed profile. The row is
+// locked so concurrent updates of different fields do not drop each other.
+func (s *PGStore) SetProfile(userID string, displayName, birthDate *string) (*model.User, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("setting profile: %w", err)
+	}
+	defer tx.Rollback()
+	var sealed []byte
+	if err := tx.QueryRow(`SELECT profile_sealed FROM users WHERE id = $1 FOR UPDATE`, userID).Scan(&sealed); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("user not found")
+		}
+		return nil, fmt.Errorf("setting profile: %w", err)
+	}
+	var p profilePayload
+	if len(sealed) > 0 {
+		if err := openJSON(s.kr, sealed, userProfileCtx(userID), &p); err != nil {
+			return nil, fmt.Errorf("opening user %s profile: %w", userID, err)
+		}
+	}
+	if displayName != nil {
+		p.DisplayName = *displayName
+	}
+	if birthDate != nil {
+		p.BirthDate = *birthDate
+	}
+	if _, err := tx.Exec(`UPDATE users SET profile_sealed = $1, updated_at = NOW() WHERE id = $2`,
+		sealJSON(s.kr, p, userProfileCtx(userID)), userID); err != nil {
+		return nil, fmt.Errorf("setting profile: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("setting profile: %w", err)
 	}
 	return s.GetUserByID(userID)
 }

@@ -232,6 +232,13 @@ func TestKeyRotationReseals(t *testing.T) {
 	if _, err := s.UpsertEntry(owner.ID, "2026-09-01", model.UpsertRequest{Notes: "kept"}); err != nil {
 		t.Fatal(err)
 	}
+	displayName, birth := "Secret Display", "1977-04"
+	if _, err := s.SetProfile(owner.ID, &displayName, &birth); err != nil {
+		t.Fatal(err)
+	}
+	if dump := dumpSchema(t, s.db); strings.Contains(dump, displayName) || strings.Contains(dump, birth) {
+		t.Fatal("profile stored in plaintext")
+	}
 	if _, err := s.RecordConsent(owner.ID, model.ConsentVersion); err != nil {
 		t.Fatal(err)
 	}
@@ -258,7 +265,7 @@ func TestKeyRotationReseals(t *testing.T) {
 	if e, err := n.GetEntry(owner.ID, "2026-09-01"); err != nil || e.Notes != "kept" {
 		t.Fatalf("entry after rotation: %+v %v", e, err)
 	}
-	if u, err := n.LinkWorkOSIdentity("owner", "owner@example.com", "", true); err != nil || u.Email != "owner@example.com" {
+	if u, err := n.LinkWorkOSIdentity("owner", "owner@example.com", "", true); err != nil || u.Email != "owner@example.com" || u.DisplayName != displayName || u.BirthDate != birth {
 		t.Fatalf("user after rotation: %+v %v", u, err)
 	}
 	partner, _ := n.LinkWorkOSIdentity("partner", "bf@example.com", "Bf", true)

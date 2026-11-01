@@ -221,7 +221,7 @@ func (s *MemoryStore) shareStateLocked(user *model.User) *model.ShareState {
 		if live.PartnerID != "" {
 			if partner := s.findUserLocked(live.PartnerID); partner != nil {
 				state.PartnerEmail = partner.Email
-				state.PartnerName = partner.Name
+				state.PartnerName = partner.PublicName()
 			}
 		}
 		return state
@@ -237,7 +237,7 @@ func (s *MemoryStore) shareStateLocked(user *model.User) *model.ShareState {
 		state.Status = latest.Status
 		state.UnreadNotes = s.unreadMessagesLocked(user.ID)
 		if owner := s.findUserLocked(latest.OwnerID); owner != nil {
-			state.OwnerName = owner.Name
+			state.OwnerName = owner.PublicName()
 			state.OwnerEmail = owner.Email
 		}
 		state.CanEditCalendar = false
@@ -247,7 +247,7 @@ func (s *MemoryStore) shareStateLocked(user *model.User) *model.ShareState {
 	state.CanEditCalendar = false
 	state.UnreadNotes = s.unreadMessagesLocked(user.ID)
 	if owner := s.findUserLocked(live.OwnerID); owner != nil {
-		state.OwnerName = owner.Name
+		state.OwnerName = owner.PublicName()
 		state.OwnerEmail = owner.Email
 	}
 	return state
@@ -436,6 +436,23 @@ func (s *MemoryStore) SetStage(userID, stage string) (*model.User, error) {
 		return nil, fmt.Errorf("only owners may set stage")
 	}
 	u.Stage = stage
+	u.UpdatedAt = time.Now().UTC()
+	return sanitizeUser(u), nil
+}
+
+func (s *MemoryStore) SetProfile(userID string, displayName, birthDate *string) (*model.User, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	u := s.findUserLocked(userID)
+	if u == nil {
+		return nil, fmt.Errorf("user not found")
+	}
+	if displayName != nil {
+		u.DisplayName = *displayName
+	}
+	if birthDate != nil {
+		u.BirthDate = *birthDate
+	}
 	u.UpdatedAt = time.Now().UTC()
 	return sanitizeUser(u), nil
 }

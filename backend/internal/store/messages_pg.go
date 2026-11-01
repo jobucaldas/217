@@ -62,7 +62,7 @@ func (s *PGStore) queryMessages(viewerID, where string) ([]*model.Message, error
 			senders[id], _ = s.GetUserByID(id)
 		}
 		if from := senders[id]; from != nil {
-			m.FromName, m.FromEmail = from.Name, from.Email
+			m.FromName, m.FromEmail = from.PublicName(), from.Email
 		}
 	}
 	return out, nil
@@ -118,7 +118,7 @@ func (s *PGStore) SendMessage(senderID, body string) (*model.Message, error) {
 		return nil, fmt.Errorf("%s", consentErr)
 	}
 	sender := model.NormalizeRole(user.Role)
-	m := &model.Message{Sender: sender, Body: body, FromName: user.Name, FromEmail: user.Email, FromMe: true}
+	m := &model.Message{Sender: sender, Body: body, FromName: user.PublicName(), FromEmail: user.Email, FromMe: true}
 	id := uuid.NewString() // chosen here: the seal is bound to it
 	err = s.db.QueryRow(
 		`INSERT INTO partner_notes (id, owner_id, partner_id, sender, body_sealed)
