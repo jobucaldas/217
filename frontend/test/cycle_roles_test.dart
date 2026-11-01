@@ -1350,7 +1350,7 @@ void main() {
     });
   }
 
-  testWidgets('read-only chip sits beside the logo without overflowing',
+  testWidgets('read-only label sits beside the logo without overflowing',
       (tester) async {
     await tester.binding.setSurfaceSize(const Size(320, 640));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -1376,13 +1376,13 @@ void main() {
       ));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
-      final chip = find.byKey(const ValueKey('read-only-chip'));
-      expect(find.descendant(of: find.byType(AppBar), matching: chip),
+      final hint = find.byKey(const ValueKey('read-only-label'));
+      expect(find.descendant(of: find.byType(AppBar), matching: hint),
           findsOneWidget);
       expect(find.text(strings.readOnlyCalendar), findsOneWidget);
-      expect(tester.getTopLeft(chip).dx,
+      expect(tester.getTopLeft(hint).dx,
           greaterThan(tester.getTopRight(find.text(strings.brand)).dx));
-      expect(tester.getTopRight(chip).dx,
+      expect(tester.getTopRight(hint).dx,
           lessThan(tester.getTopLeft(find.byTooltip(strings.settings)).dx));
     }
   });

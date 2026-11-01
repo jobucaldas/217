@@ -772,7 +772,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                   Wordmark(widget.strings.brand),
                   const SizedBox(width: 10),
                   Flexible(
-                    child: _ReadOnlyChip(
+                    child: _ReadOnlyLabel(
                       label: widget.strings.readOnlyCalendar,
                     ),
                   ),
@@ -1864,45 +1864,38 @@ class _MarkButton extends StatelessWidget {
   }
 }
 
-/// Compact "read-only" badge beside the brand in the partner's app bar.
-/// Ellipsizes rather than pushing the action icons off narrow screens.
-class _ReadOnlyChip extends StatelessWidget {
-  const _ReadOnlyChip({required this.label});
+/// "Read-only" hint beside the brand in the partner's app bar: an eye icon
+/// and plain text that ellipsizes rather than pushing the action icons off
+/// narrow screens.
+class _ReadOnlyLabel extends StatelessWidget {
+  const _ReadOnlyLabel({required this.label});
 
   final String label;
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final fg = scheme.onSecondaryContainer;
+    final fg = Theme.of(context).colorScheme.onSurfaceVariant;
     return Tooltip(
       message: label,
-      child: Container(
-        key: const ValueKey('read-only-chip'),
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        decoration: BoxDecoration(
-          color: scheme.secondaryContainer,
-          borderRadius: BorderRadius.circular(999),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.visibility_outlined, size: 14, color: fg),
-            const SizedBox(width: 4),
-            Flexible(
-              child: Text(
-                label,
-                maxLines: 1,
-                softWrap: false,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                      color: fg,
-                      fontWeight: FontWeight.w600,
-                    ),
-              ),
+      child: Row(
+        key: const ValueKey('read-only-label'),
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.visibility_outlined, size: 16, color: fg),
+          const SizedBox(width: 4),
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              softWrap: false,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    color: fg,
+                    fontWeight: FontWeight.w600,
+                  ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
