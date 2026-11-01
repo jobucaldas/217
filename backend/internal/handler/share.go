@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -51,6 +52,19 @@ func (h *Handler) RecordConsent(w http.ResponseWriter, r *http.Request) {
 	user, err := h.store.RecordConsent(getUserID(r), body.Version)
 	if err != nil {
 		log.Printf("record consent: %v", err)
+		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, h.sessionPayload(user))
+}
+
+// WithdrawConsent revokes the user's agreement to the privacy notice: data
+// endpoints answer 403 "consent required" until it is agreed again. Nothing
+// is deleted (that is DeleteAccount).
+func (h *Handler) WithdrawConsent(w http.ResponseWriter, r *http.Request) {
+	user, err := h.store.RecordConsent(getUserID(r), 0)
+	if err != nil {
+		log.Printf("withdraw consent: %v", err)
 		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
 		return
 	}
@@ -136,14 +150,21 @@ func (h *Handler) DeleteAccount(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 		return
 	}
+	if status, msg := h.deleteAccount(r.Context(), userID); status != 0 {
+		writeJSON(w, status, map[string]string{"error": msg})
+		return
+	}
+	http.SetCookie(w, h.clearSessionCookie())
+	w.WriteHeader(http.StatusNoContent)
+}
 
+// deleteAccount erases the account (and its WorkOS identity when the server
+// may delete it). It returns 0 on success, else the status and error to answer.
+func (h *Handler) deleteAccount(ctx context.Context, userID string) (int, string) {
 	subject, err := h.store.WorkOSSubject(userID)
 	if err != nil {
 		log.Printf("delete account workos subject lookup: %v", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{
-			"error": "could not resolve WorkOS identity; account not deleted",
-		})
-		return
+		return http.StatusInternalServerError, "could not resolve WorkOS identity; account not deleted"
 	}
 	// Without WORKOS_API_KEY the sign-in identity stays with WorkOS, but the
 	// data here (the sensitive part) is still deleted: the right to erasure
@@ -153,12 +174,9 @@ func (h *Handler) DeleteAccount(w http.ResponseWriter, r *http.Request) {
 		canDelete = false
 	}
 	if subject != "" && canDelete {
-		if err := deleter.DeleteUser(r.Context(), subject); err != nil {
+		if err := deleter.DeleteUser(ctx, subject); err != nil {
 			log.Printf("delete account workos user %s: %v", subject, err)
-			writeJSON(w, http.StatusBadGateway, map[string]string{
-				"error": "failed to delete WorkOS user; account not deleted",
-			})
-			return
+			return http.StatusBadGateway, "failed to delete WorkOS user; account not deleted"
 		}
 	} else if subject != "" {
 		log.Printf("delete account %s: WorkOS identity kept (WORKOS_API_KEY not set or provider unavailable)", userID)
@@ -166,17 +184,12 @@ func (h *Handler) DeleteAccount(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.store.DeleteUser(userID); err != nil {
 		if strings.Contains(err.Error(), "not found") {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "user not found"})
-			return
+			return http.StatusNotFound, "user not found"
 		}
 		log.Printf("delete account error: %v", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{
-			"error": "failed to delete local account data",
-		})
-		return
+		return http.StatusInternalServerError, "failed to delete local account data"
 	}
-	http.SetCookie(w, h.clearSessionCookie())
-	w.WriteHeader(http.StatusNoContent)
+	return 0, ""
 }
 
 func (h *Handler) GetShare(w http.ResponseWriter, r *http.Request) {

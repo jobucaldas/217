@@ -15,7 +15,8 @@ type Store interface {
 	// DeleteUser removes the account and everything it owns; a share it
 	// followed as partner is revoked so the owner can invite someone else.
 	DeleteUser(userID string) error
-	// RecordConsent stores that the user agreed to privacy notice version.
+	// RecordConsent stores that the user agreed to privacy notice version;
+	// version 0 withdraws consent (and clears when it was given).
 	RecordConsent(userID string, version int) (*model.User, error)
 	// PurgeExpired drops data past its retention: expired sessions and
 	// sign-in attempts, old reminder deliveries and long-revoked shares.
@@ -47,6 +48,8 @@ type Store interface {
 	// Session management
 	CreateSession(userID, sessionID string, expiresAt time.Time) error
 	GetUserBySession(sessionID string) (*model.User, error)
+	// SessionCreatedAt is when the session was signed in (re-authentication checks).
+	SessionCreatedAt(sessionID string) (time.Time, error)
 	DeleteSession(sessionID string) error
 	DeleteAllSessionsForUser(userID string) error
 

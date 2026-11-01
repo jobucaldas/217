@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -7,106 +6,31 @@ import '../errors.dart';
 import '../i18n.dart';
 import '../theme/app_theme.dart';
 import '../models.dart';
-import '../platform/save_data.dart';
+import '../platform/open_url.dart';
 
-/// The server people are on, as shown in the privacy notice.
-String serverLabel(ApiClient api) {
-  final base = api.config.apiBaseUrl;
-  final authority =
-      base.isEmpty ? Uri.base.authority : Uri.tryParse(base)?.authority;
-  return (authority == null || authority.isEmpty) ? '217' : authority;
-}
-
-/// What is processed, why, where, and the user's rights (LGPD arts. 9, 11, 18).
-class PrivacyNoticeBody extends StatelessWidget {
-  const PrivacyNoticeBody({
-    super.key,
-    required this.strings,
-    required this.server,
-    this.contact,
-  });
-
-  final Strings strings;
-  final String server;
-  final String? contact;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final text = Theme.of(context).textTheme;
-    Widget section(String title, String body) => Padding(
-          padding: const EdgeInsets.only(top: 16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: text.titleMedium?.copyWith(color: scheme.onSurface),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                body,
-                style:
-                    text.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
-              ),
-            ],
-          ),
-        );
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        // Highlighted, as LGPD art. 11 asks of consent for sensitive data.
-        Container(
-          key: const ValueKey('privacy-sensitive'),
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: scheme.tertiaryContainer,
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(Icons.health_and_safety_outlined,
-                      color: scheme.onTertiaryContainer),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      strings.privacySensitiveTitle,
-                      style: text.titleMedium
-                          ?.copyWith(color: scheme.onTertiaryContainer),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Text(
-                strings.privacySensitiveBody,
-                style: text.bodyMedium
-                    ?.copyWith(color: scheme.onTertiaryContainer),
-              ),
-            ],
-          ),
-        ),
-        section(strings.privacyWhatTitle, strings.privacyWhatBody),
-        section(strings.privacyWhyTitle, strings.privacyWhyBody),
-        section(strings.privacyWhereTitle, strings.privacyWhereBody(server)),
-        section(strings.privacyRightsTitle, strings.privacyRightsBody),
-        section(
-            strings.privacyContactTitle, strings.privacyContactBody(contact)),
-      ],
-    );
+/// Opens the server's privacy notice page, where people also download or
+/// delete their data and withdraw consent. Copies the link when nothing can
+/// open it.
+Future<void> openPrivacyNotice(
+  BuildContext context,
+  ApiClient api,
+  Strings strings, {
+  Future<bool> Function(String url) open = openExternalUrl,
+}) async {
+  final url = api.privacyPageUrl(strings.language.id);
+  if (await open(url)) return;
+  await Clipboard.setData(ClipboardData(text: url));
+  if (context.mounted) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(strings.linkCopied)));
   }
 }
 
 /// After sign-in, until the user agrees to the current privacy notice: the
-/// server refuses to process their data before that.
+/// server refuses to process their data before that. The notice itself is
+/// the server's page; here there is only its link, accept and cancel.
 class ConsentScreen extends StatefulWidget {
-  // Bump this only when the privacy notice shown below is updated. A server
-  // may require a newer notice before this build has its wording.
-  static const supportedNoticeVersion = 1;
-
   const ConsentScreen({
     super.key,
     required this.api,
@@ -115,7 +39,8 @@ class ConsentScreen extends StatefulWidget {
     required this.onAccepted,
     this.onNoticeChanged,
     required this.onDecline,
-    required this.onOpenSettings,
+    this.onNoticeOpened,
+    this.openUrl = openExternalUrl,
   });
 
   final ApiClient api;
@@ -123,39 +48,26 @@ class ConsentScreen extends StatefulWidget {
   final int version;
   final ValueChanged<SessionSnapshot> onAccepted;
   final Future<void> Function(int version)? onNoticeChanged;
+
+  /// Cancel: back to before this screen (signs out to the sign-in screen).
   final VoidCallback onDecline;
-  final VoidCallback onOpenSettings;
+
+  /// Called when the notice page is opened (the app re-reads the session on
+  /// return, since the account may be deleted there).
+  final VoidCallback? onNoticeOpened;
+
+  /// Opens the notice link; injectable for tests.
+  final Future<bool> Function(String url) openUrl;
 
   @override
   State<ConsentScreen> createState() => _ConsentScreenState();
 }
 
 class _ConsentScreenState extends State<ConsentScreen> {
-  bool _agreed = false;
   bool _busy = false;
-  String? _contact;
-
-  bool get _supportsNotice =>
-      widget.version == ConsentScreen.supportedNoticeVersion;
-
-  @override
-  void didUpdateWidget(covariant ConsentScreen oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.version != widget.version) {
-      _agreed = false;
-    }
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    widget.api.privacyContact().then((contact) {
-      if (mounted) setState(() => _contact = contact);
-    });
-  }
 
   Future<void> _accept() async {
-    if (!_supportsNotice || _busy) return;
+    if (_busy) return;
     setState(() => _busy = true);
     try {
       widget.onAccepted(await widget.api.acceptConsent(widget.version));
@@ -164,8 +76,13 @@ class _ConsentScreenState extends State<ConsentScreen> {
       if (err is ApiException &&
           err.statusCode == 409 &&
           err.consentVersion != null) {
-        setState(() => _agreed = false);
+        // The notice changed meanwhile: take the new version, and ask again.
         await widget.onNoticeChanged?.call(err.consentVersion!);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(widget.strings.consentNoticeChanged)),
+          );
+        }
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
@@ -182,182 +99,61 @@ class _ConsentScreenState extends State<ConsentScreen> {
     final text = Theme.of(context).textTheme;
     final strings = widget.strings;
     return Scaffold(
-      appBar: AppBar(
-        title: Wordmark(strings.brand),
-        actions: [
-          IconButton(
-            tooltip: strings.settings,
-            onPressed: widget.onOpenSettings,
-            icon: const Icon(Icons.settings_outlined),
-          ),
-        ],
-      ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 24, 20, 32),
-        children: [
-          Text(
-            strings.privacyTitle,
-            style: text.headlineMedium?.copyWith(color: scheme.onSurface),
-          ),
-          const SizedBox(height: 16),
-          PrivacyNoticeBody(
-            strings: strings,
-            server: serverLabel(widget.api),
-            contact: _contact,
-          ),
-          const SizedBox(height: 20),
-          if (!_supportsNotice) ...[
+      appBar: AppBar(title: Wordmark(strings.brand)),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(20, 24, 20, 32),
+          children: [
             Text(
-              strings.consentUpdateRequired,
-              key: const ValueKey('consent-update-required'),
-              style: text.bodyMedium?.copyWith(color: scheme.error),
+              strings.privacyTitle,
+              style: text.headlineMedium?.copyWith(color: scheme.onSurface),
             ),
             const SizedBox(height: 12),
-          ],
-          CheckboxListTile(
-            key: const ValueKey('consent-checkbox'),
-            value: _agreed,
-            onChanged: _busy || !_supportsNotice
-                ? null
-                : (v) => setState(() => _agreed = v ?? false),
-            controlAffinity: ListTileControlAffinity.leading,
-            contentPadding: EdgeInsets.zero,
-            title: Text(
-              strings.consentCheckbox,
-              style: text.bodyLarge?.copyWith(color: scheme.onSurface),
+            Text(
+              strings.consentIntro,
+              style: text.bodyLarge?.copyWith(color: scheme.onSurfaceVariant),
             ),
-          ),
-          const SizedBox(height: 12),
-          FilledButton(
-            key: const ValueKey('consent-accept'),
-            style:
-                FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
-            onPressed: _supportsNotice && _agreed && !_busy ? _accept : null,
-            child: Text(strings.consentAccept),
-          ),
-          const SizedBox(height: 8),
-          TextButton(
-            key: const ValueKey('consent-decline'),
-            onPressed: _busy ? null : widget.onDecline,
-            child: Text(strings.consentDecline),
-          ),
-        ],
+            const SizedBox(height: 16),
+            Card(
+              margin: EdgeInsets.zero,
+              clipBehavior: Clip.antiAlias,
+              child: ListTile(
+                key: const ValueKey('consent-notice-link'),
+                leading:
+                    Icon(Icons.privacy_tip_outlined, color: scheme.primary),
+                title: Text(strings.privacyNotice),
+                trailing:
+                    Icon(Icons.open_in_new, color: scheme.onSurfaceVariant),
+                onTap: () {
+                  widget.onNoticeOpened?.call();
+                  openPrivacyNotice(
+                    context,
+                    widget.api,
+                    strings,
+                    open: widget.openUrl,
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 24),
+            FilledButton(
+              key: const ValueKey('consent-accept'),
+              style: FilledButton.styleFrom(
+                  minimumSize: const Size.fromHeight(48)),
+              onPressed: _busy ? null : _accept,
+              child: Text(strings.consentAccept),
+            ),
+            const SizedBox(height: 8),
+            TextButton(
+              key: const ValueKey('consent-decline'),
+              style:
+                  TextButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+              onPressed: _busy ? null : widget.onDecline,
+              child: Text(strings.cancel),
+            ),
+          ],
+        ),
       ),
-    );
-  }
-}
-
-/// The privacy notice on its own page (Settings).
-class PrivacyNoticePage extends StatefulWidget {
-  const PrivacyNoticePage(
-      {super.key, required this.api, required this.strings});
-
-  final ApiClient api;
-  final Strings strings;
-
-  @override
-  State<PrivacyNoticePage> createState() => _PrivacyNoticePageState();
-}
-
-class _PrivacyNoticePageState extends State<PrivacyNoticePage> {
-  String? _contact;
-
-  @override
-  void initState() {
-    super.initState();
-    widget.api.privacyContact().then((contact) {
-      if (mounted) setState(() => _contact = contact);
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: Text(widget.strings.privacyNotice)),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
-        children: [
-          PrivacyNoticeBody(
-            strings: widget.strings,
-            server: serverLabel(widget.api),
-            contact: _contact,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Settings row that downloads everything the server holds about the user.
-class DownloadDataTile extends StatefulWidget {
-  const DownloadDataTile({
-    super.key,
-    required this.api,
-    required this.strings,
-    this.save = saveDataFile,
-  });
-
-  final ApiClient api;
-  final Strings strings;
-
-  /// Hands the file to the user; injectable for tests.
-  final Future<SaveDataOutcome> Function(String name, String content) save;
-
-  @override
-  State<DownloadDataTile> createState() => _DownloadDataTileState();
-}
-
-class _DownloadDataTileState extends State<DownloadDataTile> {
-  bool _busy = false;
-
-  Future<void> _download() async {
-    setState(() => _busy = true);
-    final strings = widget.strings;
-    final messenger = ScaffoldMessenger.of(context);
-    try {
-      final json = await widget.api.exportData();
-      final today = DateTime.now().toIso8601String().substring(0, 10);
-      final outcome = await widget.save('217-data-$today.json', json);
-      final String? message;
-      switch (outcome.how) {
-        case SaveDataHow.downloaded:
-          message = strings.dataDownloaded;
-        case SaveDataHow.saved:
-          message = strings.dataSavedTo(outcome.path ?? '');
-        case SaveDataHow.shared:
-          message = null;
-        case SaveDataHow.unsupported:
-          await Clipboard.setData(ClipboardData(text: json));
-          message = strings.dataCopied;
-      }
-      if (message != null) {
-        messenger.showSnackBar(SnackBar(content: Text(message)));
-      }
-    } catch (err) {
-      if (kDebugMode) debugPrint('export failed: $err');
-      messenger.showSnackBar(
-        SnackBar(content: Text(friendlyError(strings, err))),
-      );
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return ListTile(
-      key: const ValueKey('download-data'),
-      leading: Icon(Icons.download_outlined, color: scheme.primary),
-      title: Text(widget.strings.downloadData),
-      subtitle: Text(widget.strings.downloadDataBlurb),
-      trailing: _busy
-          ? const SizedBox.square(
-              dimension: 18,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            )
-          : null,
-      onTap: _busy ? null : _download,
     );
   }
 }

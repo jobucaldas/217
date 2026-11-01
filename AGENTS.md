@@ -84,8 +84,15 @@ Offline-first client: `ApiClient` keeps the last session, months, cycle and aler
 
 ### Privacy (auth required; reachable before consent)
 - `PUT /api/account/consent` — `{version}`; every other data endpoint answers 403 `consent required` until the current `model.ConsentVersion` is agreed
+- `DELETE /api/account/consent` — withdraw consent (data kept, processing refused until agreed again)
 - `GET /api/account/export` — all data about the caller (JSON attachment)
 - `DELETE /api/account` — erasure (WorkOS identity too when `WORKOS_API_KEY` is set)
+
+### Privacy page (HTML, cookie session; the app only links here)
+- `GET /api/privacy?lang=en|pt|es` — the notice (else `Accept-Language`); signed-in browsers also get the actions below. The app's Settings row and consent screen open it
+- `GET /api/privacy/signin` — browser AuthKit sign-in that returns to the page (`217_oauth_return` cookie, privacy paths only)
+- `POST /api/privacy/export` — form (`csrf` = hash of the session token); downloads the JSON only if the session signed in within 5 minutes, else redirects to sign-in
+- `POST /api/privacy/withdraw`, `POST /api/privacy/delete` — form + `csrf`, after a `?confirm=withdraw|delete` warning step
 
 ### Roles, sharing, alerts (auth required)
 - `PUT /api/account/role` — `{role: owner|partner}`; 409 while shared

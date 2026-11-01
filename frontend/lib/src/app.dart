@@ -97,6 +97,9 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
   bool? _remindersOn;
   int _sessionGeneration = 0;
 
+  /// Settings opened the privacy page; the next resume re-reads the session.
+  bool _privacyPageOpened = false;
+
   /// Changes only when the signed-in account does (logout, deletion, server
   /// switch, sign-in), so a late session refresh cannot restore the old one.
   int _accountEpoch = 0;
@@ -140,7 +143,34 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _foreground = state == AppLifecycleState.resumed;
     _markForeground();
-    if (_foreground) unawaited(_checkMessages());
+    if (!_foreground) return;
+    unawaited(_checkMessages());
+    // Back from the privacy page (browser): consent may have been withdrawn
+    // or the account deleted there. Re-checked on every resume until this
+    // account's session ends, so an offline return (cached session) retries.
+    if (_privacyPageOpened && _user != null) {
+      unawaited(_checkPrivacyReturn());
+    }
+  }
+
+  /// After the privacy page: applies the session only when it changed
+  /// (signed out, other account, consent withdrawn). An unchanged or cached
+  /// session leaves in-flight calendar and reminder work alone.
+  Future<void> _checkPrivacyReturn() async {
+    final epoch = _accountEpoch;
+    final SessionSnapshot session;
+    try {
+      session = await _api.currentSession();
+    } catch (_) {
+      return; // offline: the next resume checks again
+    }
+    if (!mounted || epoch != _accountEpoch) return;
+    final user = session.user;
+    if (user != null && user.id == _user?.id && !session.consentRequired) {
+      return;
+    }
+    _privacyPageOpened = false;
+    await _recoverConsent();
   }
 
   /// Tells the background worker whether the app is in the foreground (it
@@ -355,13 +385,21 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     if (!mounted || epoch != _accountEpoch) return;
     _cancelOwnerReminderIfSessionLeavesOwner(session);
     _cancelPartnerAlertsIfSessionLeavesPartner(session);
+    // Signed out meanwhile (e.g. account deleted on the privacy page): a
+    // message shown for this account must not outlive its session.
+    if (_user != null && session.user == null) {
+      unawaited(cancelMessageNotification());
+    }
+    if (session.user == null) _privacyPageOpened = false;
+    // Consent withdrawn (e.g. on the privacy page): stop local reminders.
+    _clearRemindersIfConsentRequired(session);
     _sessionGeneration++;
     setState(() {
       _user = session.user;
       _share = session.share ?? const ShareState(status: 'none');
       _setConsent(session);
     });
-    if (session.consentRequired) {
+    if (session.consentRequired || session.user == null) {
       _navKey.currentState?.popUntil((route) => route.isFirst);
     }
   }
@@ -754,6 +792,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
   }
 
   Future<void> _logout() async {
+    _privacyPageOpened = false;
     _accountEpoch++;
     _sessionGeneration++;
     unawaited(_cancelAllNotifications());
@@ -805,8 +844,6 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
             onThemeModeChanged: _setThemeMode,
             onPaletteChanged: _setPalette,
             onShareChanged: (share) => setState(() => _share = share),
-            onAccountDeleting: _user == null ? null : _onAccountDeletionStarted,
-            onAccountDeleted: _user == null ? null : _onAccountDeleted,
             onLogout: _user == null ? null : _logout,
             onApiBaseChanged: _onApiBaseChanged,
             onRoleChanged: _user == null ? null : _onRoleChosen,
@@ -815,6 +852,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
             dailyReminderSyncQueue: _dailyReminderSyncQueue,
             partnerAlertSyncQueue: _partnerAlertSyncQueue,
             consentPending: _consentRequired,
+            onPrivacyPageOpened: () => _privacyPageOpened = true,
             autoUpdate: _autoUpdate,
             onAutoUpdateChanged: _setAutoUpdate,
             messageNotifications: _messageNotifs,
@@ -891,7 +929,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
           }
         },
         onDecline: _logout,
-        onOpenSettings: _openSettings,
+        onNoticeOpened: () => _privacyPageOpened = true,
       );
     }
     if (!_user!.hasRole) {

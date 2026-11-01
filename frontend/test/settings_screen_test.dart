@@ -84,7 +84,7 @@ void main() {
     );
   }
 
-  testWidgets('signed in: share, no server setting, delete near logout',
+  testWidgets('signed in: share, no server setting, privacy link, logout',
       (tester) async {
     final api = ApiClient(AppConfig.fromEnvironment());
     await tester.pumpWidget(
@@ -111,7 +111,6 @@ void main() {
           ),
           share: const ShareState(status: 'none'),
           onShareChanged: (_) {},
-          onAccountDeleted: () {},
           onLogout: () async {},
         ),
       ),
@@ -134,19 +133,23 @@ void main() {
 
     final shareTop =
         await absoluteTop(find.text('SHARE CALENDAR WITH PARTNER'));
-    final deleteTop = await absoluteTop(find.text('Delete account'));
+    final privacyTop = await absoluteTop(find.text('Privacy notice'));
     final logoutTop = await absoluteTop(find.text('Log out'));
     // The server is chosen before sign-in, so it is not offered here.
     expect(find.text('Advanced options'), findsNothing);
     expect(find.text('Self-hosted server URL'), findsNothing);
-    expect(deleteTop, greaterThan(shareTop));
-    expect(logoutTop, greaterThan(deleteTop));
+    expect(privacyTop, greaterThan(shareTop));
+    expect(logoutTop, greaterThan(privacyTop));
+    // Download, delete and withdraw live on the server's privacy page.
+    final privacy = find.byKey(const ValueKey('privacy-notice'));
+    expect(
+      find.descendant(of: privacy, matching: find.byIcon(Icons.open_in_new)),
+      findsOneWidget,
+    );
+    expect(find.text('Download my data'), findsNothing);
+    expect(find.text('Delete account'), findsNothing);
 
-    expect(logoutTop - deleteTop, lessThan(80));
-
-    final deleteLabel = tester.widget<Text>(find.text('Delete account'));
     final logoutLabel = tester.widget<Text>(find.text('Log out'));
-    expect(deleteLabel.style?.color, const Color(0xFFDC2626));
     expect(logoutLabel.style?.color, const Color(0xFFEA580C));
   });
 

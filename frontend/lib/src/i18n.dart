@@ -694,65 +694,23 @@ class Strings {
       'Seus dados e privacidade', 'Tus datos y privacidad');
   String get privacyNotice =>
       _t('Privacy notice', 'Aviso de privacidade', 'Aviso de privacidad');
-  String get privacySensitiveTitle => _t(
-        'Sensitive health data',
-        'Dados sensíveis de saúde',
-        'Datos sensibles de salud',
+  String get privacyNoticeBlurb => _t(
+        'What is stored and why. Download or delete your data, or withdraw consent.',
+        'O que é guardado e para quê. Baixe ou exclua seus dados, ou revogue o consentimento.',
+        'Qué se guarda y para qué. Descarga o elimina tus datos, o retira el consentimiento.',
       );
-  String get privacySensitiveBody => _t(
-        "217 records when you take your contraceptive, missed days, notes, intimacy and period days. Under Brazil's LGPD (Law 13.709/2018) this is sensitive data about health and sex life, so it is only processed with your specific consent.",
-        '217 registra quando você toma o anticoncepcional, dias esquecidos, notas, intimidade e dias de menstruação. Pela LGPD (Lei 13.709/2018) são dados sensíveis de saúde e vida sexual, por isso só são tratados com o seu consentimento específico.',
-        '217 registra cuándo tomas el anticonceptivo, días olvidados, notas, intimidad y días de regla. Según la LGPD de Brasil (Ley 13.709/2018) son datos sensibles de salud y vida sexual, por eso solo se tratan con tu consentimiento específico.',
-      );
-  String get privacyWhatTitle =>
-      _t('What is stored', 'O que é guardado', 'Qué se guarda');
-  String get privacyWhatBody => _t(
-        'Your email and name from sign-in, your calendar entries, notes between you and your partner, and your reminder and alert times.',
-        'Seu email e nome do login, os registros do calendário, as notas entre você e seu parceiro, e os horários de lembretes e alertas.',
-        'Tu email y nombre del inicio de sesión, los registros del calendario, las notas entre tú y tu pareja, y las horas de recordatorios y alertas.',
-      );
-  String get privacyWhyTitle => _t('Why', 'Para quê', 'Para qué');
-  String get privacyWhyBody => _t(
-        'Only to show your calendar and stats, predict periods and PMS, remind you, and share the calendar read-only with the one partner you invite. Never for ads or profiling, and never sold.',
-        'Só para mostrar seu calendário e estatísticas, prever menstruação e TPM, lembrar você e compartilhar o calendário, só para leitura, com o parceiro que você convidar. Nunca para anúncios ou perfilamento, e nunca vendidos.',
-        'Solo para mostrar tu calendario y estadísticas, predecir la regla y el SPM, recordarte y compartir el calendario, solo lectura, con la pareja que invites. Nunca para anuncios o perfiles, y nunca se venden.',
-      );
-  String get privacyWhereTitle => _t('Where and who sees it',
-      'Onde fica e quem vê', 'Dónde está y quién lo ve');
-  String privacyWhereBody(String server) => _t(
-        'On the server $server, run by its operator (the controller). It is encrypted in transit (TLS). Calendar entries, notes, names and emails are encrypted at rest with AES-256. Reminder times, alert times and operational timestamps are stored so the app can run and are not sealed. Only you and a partner you invite see your calendar. Sign-in is handled by WorkOS, which receives your email.',
-        'No servidor $server, mantido por quem o opera (o controlador). Fica criptografado em trânsito (TLS). Registros do calendário, notas, nomes e emails são criptografados em repouso com AES-256. Horários de lembretes e alertas e registros operacionais são guardados para o app funcionar e não são selados. Só você e o parceiro que você convidar veem seu calendário. O login é feito pela WorkOS, que recebe seu email.',
-        'En el servidor $server, gestionado por quien lo opera (el responsable). Está cifrado en tránsito (TLS). Las entradas del calendario, notas, nombres y correos están cifrados en reposo con AES-256. Las horas de recordatorios y alertas y las marcas operativas se guardan para que funcione la app y no están selladas. Solo tú y la pareja que invites ven tu calendario. El inicio de sesión lo hace WorkOS, que recibe tu email.',
-      );
-  String get privacyRightsTitle =>
-      _t('Your rights', 'Seus direitos', 'Tus derechos');
-  String get privacyRightsBody => _t(
-        'Download all your data, correct any day, stop sharing, or delete your account and everything in it at any time in Settings. Deleting the account withdraws this consent.',
-        'Baixe todos os seus dados, corrija qualquer dia, pare de compartilhar ou exclua sua conta e tudo nela quando quiser, em Ajustes. Excluir a conta revoga este consentimento.',
-        'Descarga todos tus datos, corrige cualquier día, deja de compartir o elimina tu cuenta y todo su contenido cuando quieras, en Ajustes. Eliminar la cuenta retira este consentimiento.',
-      );
-  String get privacyContactTitle => _t('Contact', 'Contato', 'Contacto');
-  String privacyContactBody(String? contact) =>
-      contact ??
-      _t(
-        'Ask whoever runs this server.',
-        'Fale com quem opera este servidor.',
-        'Pregunta a quien opera este servidor.',
-      );
-  String get consentCheckbox => _t(
-        'I agree to 217 processing my health data for these purposes.',
-        'Concordo que o 217 trate meus dados de saúde para essas finalidades.',
-        'Acepto que 217 trate mis datos de salud para estos fines.',
+  String get consentIntro => _t(
+        '217 handles sensitive health data, so it needs your consent first. Read the privacy notice: it explains what is stored, why, and how to download or delete your data or withdraw consent later.',
+        'O 217 trata dados sensíveis de saúde, por isso precisa do seu consentimento antes. Leia o aviso de privacidade: ele explica o que é guardado, para quê, e como baixar ou excluir seus dados ou revogar o consentimento depois.',
+        '217 trata datos sensibles de salud, por eso necesita tu consentimiento primero. Lee el aviso de privacidad: explica qué se guarda, para qué y cómo descargar o eliminar tus datos o retirar el consentimiento después.',
       );
   String get consentAccept =>
-      _t('Agree and continue', 'Concordar e continuar', 'Aceptar y continuar');
-  String get consentUpdateRequired => _t(
-        'This privacy notice has changed. Update 217 to review the current notice before agreeing.',
-        'Este aviso de privacidade mudou. Atualize o 217 para ler o aviso atual antes de concordar.',
-        'Este aviso de privacidad cambió. Actualiza 217 para leer el aviso actual antes de aceptar.',
+      _t('I have read and accept', 'Li e aceito', 'He leído y acepto');
+  String get consentNoticeChanged => _t(
+        'The privacy notice was just updated. Read it again before accepting.',
+        'O aviso de privacidade acabou de mudar. Leia de novo antes de aceitar.',
+        'El aviso de privacidad acaba de cambiar. Léelo de nuevo antes de aceptar.',
       );
-  String get consentDecline =>
-      _t('Not now (sign out)', 'Agora não (sair)', 'Ahora no (cerrar sesión)');
   String get sharedCalendarOwnerConsentRequired => _t(
         'The calendar owner must agree to the current privacy notice before you can view their calendar.',
         'A pessoa responsável pelo calendário precisa concordar com o aviso de privacidade atual antes que você possa vê-lo.',
@@ -762,24 +720,5 @@ class Strings {
         'Your partner must agree to the current privacy notice before you can send messages.',
         'Seu parceiro precisa concordar com o aviso de privacidade atual antes que você possa enviar mensagens.',
         'Tu pareja debe aceptar el aviso de privacidad actual antes de que puedas enviar mensajes.',
-      );
-  String get downloadData =>
-      _t('Download my data', 'Baixar meus dados', 'Descargar mis datos');
-  String get downloadDataBlurb => _t(
-        'Everything this server holds about you, as a JSON file.',
-        'Tudo que este servidor guarda sobre você, em um arquivo JSON.',
-        'Todo lo que este servidor guarda sobre ti, en un archivo JSON.',
-      );
-  String dataSavedTo(String where) => _t(
-        'Saved to $where',
-        'Salvo em $where',
-        'Guardado en $where',
-      );
-  String get dataDownloaded =>
-      _t('Download started', 'Download iniciado', 'Descarga iniciada');
-  String get dataCopied => _t(
-        'Data copied to the clipboard',
-        'Dados copiados para a área de transferência',
-        'Datos copiados al portapapeles',
       );
 }
