@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 
 import 'package:a217/src/api/client.dart';
 import 'package:a217/src/config.dart';
@@ -145,5 +148,68 @@ void main() {
     final logoutLabel = tester.widget<Text>(find.text('Log out'));
     expect(deleteLabel.style?.color, const Color(0xFFDC2626));
     expect(logoutLabel.style?.color, const Color(0xFFEA580C));
+  });
+
+  testWidgets('a failed stage save resets the dropdown to the saved stage',
+      (tester) async {
+    FlutterSecureStorage.setMockInitialValues({});
+    final saved = <String>[];
+    final api = ApiClient(
+      AppConfig.fromEnvironment(),
+      httpClient: MockClient((request) async {
+        if (request.url.path == '/api/account/stage') {
+          saved.add(request.body);
+          return http.Response('{"error":"boom"}', 500);
+        }
+        return http.Response('{}', 404);
+      }),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildApp217Theme(brightness: Brightness.light),
+        home: SettingsPage(
+          api: api,
+          strings: const Strings(AppLanguage.en),
+          language: AppLanguage.en,
+          themeMode: ThemeMode.system,
+          palette: AppPalette.blue,
+          onLanguageChanged: (_) {},
+          onThemeModeChanged: (_) {},
+          onPaletteChanged: (_) {},
+          onApiBaseChanged: () {},
+          user: const User(
+            id: '1',
+            email: 'a@b.c',
+            name: 'Owner',
+            role: 'owner',
+          ),
+          onLogout: () async {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final stage = find.byKey(const ValueKey('stage-dropdown'));
+    final field = find.descendant(of: stage, matching: find.byType(TextField));
+    String shown() => tester.widget<TextField>(field).controller!.text;
+    await tester.scrollUntilVisible(stage, 200,
+        scrollable: find.byType(Scrollable).first);
+    Future<void> pick(String label) async {
+      await tester.ensureVisible(stage);
+      await tester.pumpAndSettle();
+      await tester.tap(field);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(label).last);
+      await tester.pumpAndSettle();
+    }
+
+    expect(shown(), 'Cycling');
+    await pick('Menopause');
+    expect(find.byType(SnackBar), findsOneWidget);
+    expect(shown(), 'Cycling');
+    // Still usable after the failure: a second choice is sent too.
+    await pick('Perimenopause');
+    expect(saved, ['{"stage":"menopause"}', '{"stage":"perimenopause"}']);
+    expect(shown(), 'Cycling');
   });
 }
