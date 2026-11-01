@@ -5,7 +5,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
-import 'package:a217/src/api/client.dart';
 import 'package:a217/src/config.dart';
 import 'package:a217/src/i18n.dart';
 import 'package:a217/src/notifications/message_background_check.dart';
@@ -14,8 +13,12 @@ import 'package:a217/src/prefs.dart';
 void main() {
   var inbox = <Map<String, dynamic>>[];
   var requests = <String>[];
+  var signOutDuringInbox = false;
   final client = MockClient((request) async {
     requests.add(request.url.path);
+    if (request.url.path == '/api/inbox' && signOutDuringInbox) {
+      await const FlutterSecureStorage().delete(key: 'session_token');
+    }
     if (request.url.path == '/api/auth/session') {
       return http.Response(
         jsonEncode({
@@ -27,14 +30,11 @@ void main() {
     }
     return http.Response(jsonEncode({'notes': inbox}), 200);
   });
-  ApiClient api() => ApiClient(
-        AppConfig(
-          apiBaseUrl: 'https://217.example',
-          workosClientId: '',
-          redirectUri: 'com.caldasstudios.app217://auth/callback',
-        ),
-        httpClient: client,
-      );
+  final config = AppConfig(
+    apiBaseUrl: 'https://217.example',
+    workosClientId: '',
+    redirectUri: 'com.caldasstudios.app217://auth/callback',
+  );
   Map<String, dynamic> msg(String id, int minute) => {
         'id': id,
         'body': 'hi $id',
@@ -45,13 +45,15 @@ void main() {
   setUp(() {
     inbox = [];
     requests = [];
+    signOutDuringInbox = false;
   });
 
   test('announces each new message once, after a silent first run', () async {
     FlutterSecureStorage.setMockInitialValues({'session_token': 't'});
     final shown = <String>[];
     Future<void> run() => checkMessagesInBackground(
-          api: api(),
+          config: config,
+          client: client,
           prefs: AppearancePrefs(),
           deviceLanguage: AppLanguage.en,
           show: ({required title, required body}) async {
@@ -71,7 +73,8 @@ void main() {
 
   test('does nothing when turned off or signed out', () async {
     Future<void> run() => checkMessagesInBackground(
-          api: api(),
+          config: config,
+          client: client,
           prefs: AppearancePrefs(),
           deviceLanguage: AppLanguage.en,
           show: ({required title, required body}) async => true,
@@ -82,5 +85,35 @@ void main() {
     FlutterSecureStorage.setMockInitialValues({});
     await run();
     expect(requests, isEmpty);
+  });
+
+  test('skips while the app is in the foreground, or signed out meanwhile',
+      () async {
+    final shown = <String>[];
+    Future<void> run() => checkMessagesInBackground(
+          config: config,
+          client: client,
+          prefs: AppearancePrefs(),
+          deviceLanguage: AppLanguage.en,
+          show: ({required title, required body}) async {
+            shown.add(body);
+            return true;
+          },
+        );
+    FlutterSecureStorage.setMockInitialValues({
+      'session_token': 't',
+      '${AppearancePrefs.messagesNotifiedKeyPrefix}u1': '2026-10-31T12:00:00Z',
+      AppearancePrefs.messagesForegroundAtKey:
+          DateTime.now().toUtc().toIso8601String(),
+    });
+    inbox = [msg('a', 1)];
+    await run();
+    expect(requests, isEmpty);
+
+    await AppearancePrefs().saveMessagesForegroundAt(null);
+    signOutDuringInbox = true;
+    await run();
+    expect(requests, ['/api/auth/session', '/api/inbox']);
+    expect(shown, isEmpty);
   });
 }

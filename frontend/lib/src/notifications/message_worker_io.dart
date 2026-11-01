@@ -3,7 +3,7 @@ import 'dart:ui';
 import 'package:flutter/widgets.dart';
 import 'package:workmanager/workmanager.dart';
 
-import '../api/client.dart';
+import '../api/platform_http.dart';
 import '../config.dart';
 import '../i18n.dart';
 import '../prefs.dart';
@@ -24,9 +24,11 @@ void messageWorkerDispatcher() {
   WidgetsFlutterBinding.ensureInitialized();
   DartPluginRegistrant.ensureInitialized();
   Workmanager().executeTask((task, _) async {
+    final client = createPlatformHttpClient();
     try {
       await checkMessagesInBackground(
-        api: ApiClient(AppConfig.fromEnvironment()),
+        config: AppConfig.fromEnvironment(),
+        client: client,
         prefs: AppearancePrefs(),
         deviceLanguage: AppLanguageX.fromDevice(
           PlatformDispatcher.instance.locales.map((l) => l.languageCode),
@@ -34,6 +36,8 @@ void messageWorkerDispatcher() {
       );
     } catch (_) {
       // Offline or server error: the next periodic run tries again.
+    } finally {
+      client.close();
     }
     return true;
   });

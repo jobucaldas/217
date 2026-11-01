@@ -128,14 +128,27 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     super.initState();
     _api.onConsentRequired = _onOwnConsentRequired;
     WidgetsBinding.instance.addObserver(this);
-    _messagePoll = Timer.periodic(_messagePollEvery, (_) => _checkMessages());
+    _messagePoll = Timer.periodic(_messagePollEvery, (_) {
+      _markForeground();
+      _checkMessages();
+    });
+    _markForeground();
     _bootstrap();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _foreground = state == AppLifecycleState.resumed;
+    _markForeground();
     if (_foreground) unawaited(_checkMessages());
+  }
+
+  /// Tells the background worker whether the app is in the foreground (it
+  /// announces messages itself then), so both never announce the same one.
+  void _markForeground() {
+    unawaited(_prefs
+        .saveMessagesForegroundAt(_foreground ? DateTime.now() : null)
+        .catchError((Object _) {}));
   }
 
   /// Fetches the inbox: refreshes the unread badge and notifies messages

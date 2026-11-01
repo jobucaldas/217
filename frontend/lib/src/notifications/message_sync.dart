@@ -20,17 +20,20 @@ Future<void> announceNewMessages({
   required Strings strings,
   required bool notify,
   MessageNotifier show = showMessageNotification,
+  Future<bool> Function()? stillAllowed,
 }) async {
   final upTo = await prefs.messagesNotifiedUpTo(userId);
   if (notify && upTo != null) {
     final fresh = unannouncedMessages(messages, upTo);
-    if (fresh.isNotEmpty) {
+    // Checked last, right before posting: the session or the toggle may
+    // have changed while the inbox loaded.
+    if (fresh.isNotEmpty && (stillAllowed == null || await stillAllowed())) {
       final text = messageNotificationText(strings, fresh);
       await show(title: text.title, body: text.body);
     }
   }
   // An empty first check still sets the starting point, so the first
-  // message that arrives later is announced.
+  // message that arrives later is announced. The mark only moves forward.
   final newest = newestReceived(messages, upTo) ??
       DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
   if (newest != upTo) {

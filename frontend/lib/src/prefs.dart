@@ -20,6 +20,7 @@ class AppearancePrefs {
   static const messageNotificationsKey = 'message_notifications';
   static const messagesNotifiedKeyPrefix = 'messages_notified_';
   static const messagePermissionAskedKey = 'message_permission_asked';
+  static const messagesForegroundAtKey = 'messages_foreground_at';
 
   Future<({ThemeMode mode, AppPalette palette})> load() async {
     final modeRaw = await _storage.read(key: themeModeKey);
@@ -93,10 +94,25 @@ class AppearancePrefs {
       DateTime.tryParse(
           await _storage.read(key: messagesNotifiedKeyPrefix + userId) ?? '');
 
-  Future<void> saveMessagesNotifiedUpTo(String userId, DateTime at) =>
-      _storage.write(
-          key: messagesNotifiedKeyPrefix + userId,
-          value: at.toUtc().toIso8601String());
+  /// Only ever moves forward, so a slower check cannot rewind the mark and
+  /// announce a message again.
+  Future<void> saveMessagesNotifiedUpTo(String userId, DateTime at) async {
+    final current = await messagesNotifiedUpTo(userId);
+    if (current != null && !at.isAfter(current)) return;
+    await _storage.write(
+        key: messagesNotifiedKeyPrefix + userId,
+        value: at.toUtc().toIso8601String());
+  }
+
+  /// When the app last checked messages in the foreground (null: not in
+  /// the foreground). The background worker leaves those checks to it.
+  Future<DateTime?> messagesForegroundAt() async => DateTime.tryParse(
+      await _storage.read(key: messagesForegroundAtKey) ?? '');
+
+  Future<void> saveMessagesForegroundAt(DateTime? at) => at == null
+      ? _storage.delete(key: messagesForegroundAtKey)
+      : _storage.write(
+          key: messagesForegroundAtKey, value: at.toUtc().toIso8601String());
 
   static ThemeMode _parseThemeMode(String? raw) {
     switch (raw) {
