@@ -122,7 +122,7 @@ curl http://localhost:8787/api/auth/config   # {"authkit":true,...}
 
 To serve the web app on more than one host, list every origin in `APP_ALLOWED_ORIGINS` (comma-separated, same rules as `APP_BASE_URL`; the base URL is always included) and register each `https://<host>/api/auth/workos/callback` in WorkOS. Sign-in uses the host the request arrived on (`X-Forwarded-Host` from your proxy, else `Host`) only if it is listed, otherwise `APP_BASE_URL`. Each host keeps its own session; invite links use `APP_BASE_URL`.
 
-Open `APP_BASE_URL`. Update with `docker compose pull && docker compose up -d`; pin `:nightly` to a `YYYYMMDDHHMMSS_<shortsha>` tag to stay on a fixed version. Data is in the `pgdata` volume.
+Open `APP_BASE_URL`. Update with `docker compose pull && docker compose up -d`; pin `:nightly` to a `0.YY.MMDD-RUN` tag to stay on a fixed version. Data is in the `pgdata` volume.
 
 Coming from a version without encryption at rest (no `certs` service in your `compose.yaml`)? Back up the `pgdata` volume, replace `compose.yaml` with the one above, add `DATA_ENCRYPTION_KEY` to `.env`, then pull and start: the first start encrypts the existing data, drops the plaintext and rewrites the tables. Older backups, and PostgreSQL's write-ahead log until it is recycled, can still hold plaintext; for a clean volume, move the (now encrypted) data to a fresh one and delete the old backups:
 
@@ -158,7 +158,7 @@ The native apps ship **no built-in server**. On first launch they ask for yours:
 
 **Staying signed in, offline.** On Android, sign-in creates a P-256 key in the Android Keystore (StrongBox when the phone has one); the server keeps only its public half. When the session runs out the app signs a one-time challenge with it and gets a new one, so you sign in again only after signing out, deleting the account, or 180 days without opening the app. The app also keeps the calendar on the phone and opens offline: day edits are saved at once and sent, in order, once the server is reachable again (a dot on the settings button means something is waiting; Settings says what and offers **Sync now**). Signing out sends what it can and erases the rest from the phone.
 
-Every push to `main` publishes the apps and images as `nightly` (rolling) and as an immutable `YYYYMMDDHHMMSS_<shortsha>` release.
+Every push to `main` publishes the apps and images as `nightly` (rolling) and as an immutable `0.YY.MMDD-RUN` release (UTC date, then that day's build number from 1, e.g. `0.26.1101-1`).
 
 ## Security
 

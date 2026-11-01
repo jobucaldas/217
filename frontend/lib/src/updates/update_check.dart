@@ -21,9 +21,27 @@ final _releasesUrl = Uri.parse(
 /// The APK is only ever offered from the project's own release downloads.
 const _downloadPrefix = 'https://github.com/jobucaldas/217/releases/download/';
 
-/// Tags are `<UTC yyyyMMddHHmmss>_<short sha>`, so they sort by time as plain
-/// strings. The rolling `nightly` release does not match.
-final _tagPattern = RegExp(r'^\d{14}_[0-9a-f]{7}$');
+/// Tags are `0.<yy>.<MMDD>-<run>` (UTC date, then the build of that day, from 1).
+/// The rolling `nightly` release does not match.
+final _tagPattern = RegExp(r'^0\.(\d{2})\.(\d{4})-(\d+)$');
+
+/// Builds before this scheme were tagged `<yyyyMMddHHmmss>_<short sha>`; they
+/// are older than every tag in the current scheme.
+final _legacyTagPattern = RegExp(r'^\d{14}_[0-9a-f]{7}$');
+
+/// Orderable key of a current-scheme tag, or null when [tag] is not one.
+List<int>? _versionKey(String tag) {
+  final m = _tagPattern.firstMatch(tag);
+  if (m == null) return null;
+  return [for (var i = 1; i <= 3; i++) int.parse(m.group(i)!)];
+}
+
+int _compare(List<int> a, List<int> b) {
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) return a[i].compareTo(b[i]);
+  }
+  return 0;
+}
 
 /// The newest published release whose APK is newer than [installed], or null
 /// when there is none. Never throws: any failure reads as "no update".
@@ -32,7 +50,10 @@ Future<AvailableUpdate?> checkForUpdate({
   String installed = appVersion,
 }) async {
   try {
-    if (!_tagPattern.hasMatch(installed)) return null;
+    // A legacy-tagged build is older than any current tag ([0, 0, 0] sorts first).
+    final installedKey = _versionKey(installed) ??
+        (_legacyTagPattern.hasMatch(installed) ? const [0, 0, 0] : null);
+    if (installedKey == null) return null;
     final response = await client.get(
       _releasesUrl,
       headers: const {'Accept': 'application/vnd.github+json'},
@@ -42,22 +63,22 @@ Future<AvailableUpdate?> checkForUpdate({
     if (releases is! List) return null;
 
     Map<String, dynamic>? newest;
+    List<int>? newestKey;
     String? newestTag;
     for (final release in releases) {
       if (release is! Map<String, dynamic>) continue;
       final tag = release['tag_name'];
-      if (release['draft'] == true ||
-          tag is! String ||
-          !_tagPattern.hasMatch(tag)) {
-        continue;
-      }
-      if (newestTag == null || tag.compareTo(newestTag) > 0) {
+      if (release['draft'] == true || tag is! String) continue;
+      final key = _versionKey(tag);
+      if (key == null) continue;
+      if (newestKey == null || _compare(key, newestKey) > 0) {
         newest = release;
+        newestKey = key;
         newestTag = tag;
       }
     }
-    if (newest == null || newestTag == null) return null;
-    if (newestTag.compareTo(installed) <= 0) return null;
+    if (newest == null || newestKey == null || newestTag == null) return null;
+    if (_compare(newestKey, installedKey) <= 0) return null;
 
     final assets = newest['assets'];
     if (assets is! List) return null;
