@@ -260,10 +260,13 @@ void main() {
     await tester.pumpAndSettle();
     // Second edit waits behind the first.
     final now = DateTime.now();
-    await tester.tap(find.descendant(
+    final cell = find.descendant(
       of: find.byKey(ValueKey('${now.year}-${now.month}')),
       matching: find.text('${now.day}'),
-    ));
+    );
+    await tester.tap(cell);
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(cell);
     await tester.pumpAndSettle();
     await tester.tap(find.text('Missed').last);
     await tester.pumpAndSettle();
