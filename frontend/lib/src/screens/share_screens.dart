@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import '../api/client.dart';
 import '../errors.dart';
 import '../i18n.dart';
+import '../theme/app_theme.dart';
 import 'dialog_actions.dart';
 import '../models.dart';
 import '../platform/share_sheet.dart';
@@ -430,7 +431,7 @@ class _PartnerJoinScreenState extends State<PartnerJoinScreen> {
     final text = Theme.of(context).textTheme;
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.strings.brand),
+        title: Wordmark(widget.strings.brand),
         actions: [
           IconButton(
             tooltip: widget.strings.settings,

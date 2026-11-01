@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../api/client.dart';
 import '../errors.dart';
 import '../i18n.dart';
+import '../theme/app_theme.dart';
 import '../models.dart';
 import 'dialog_actions.dart';
 
@@ -51,7 +52,7 @@ class _RoleChoiceScreenState extends State<RoleChoiceScreen> {
     final strings = widget.strings;
     return Scaffold(
       appBar: AppBar(
-        title: Text(strings.brand),
+        title: Wordmark(strings.brand),
         actions: [
           IconButton(
             tooltip: strings.settings,

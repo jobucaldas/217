@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../i18n.dart';
+import '../theme/app_theme.dart';
 
 class AuthScreen extends StatelessWidget {
   const AuthScreen({
@@ -51,12 +52,10 @@ class AuthScreen extends StatelessWidget {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(
+                        Wordmark(
                           strings.brand,
+                          large: true,
                           textAlign: TextAlign.center,
-                          style: text.displayLarge?.copyWith(
-                            color: scheme.onSurface,
-                          ),
                         ),
                         const SizedBox(height: 14),
                         Text(

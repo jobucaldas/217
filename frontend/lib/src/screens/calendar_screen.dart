@@ -765,7 +765,7 @@ class _CalendarScreenState extends State<CalendarScreen>
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.strings.brand),
+        title: Wordmark(widget.strings.brand),
         actions: [
           InboxButton(
             api: widget.api,

@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import '../api/client.dart';
 import '../errors.dart';
 import '../i18n.dart';
+import '../theme/app_theme.dart';
 import '../models.dart';
 import '../platform/save_data.dart';
 
@@ -182,7 +183,7 @@ class _ConsentScreenState extends State<ConsentScreen> {
     final strings = widget.strings;
     return Scaffold(
       appBar: AppBar(
-        title: Text(strings.brand),
+        title: Wordmark(strings.brand),
         actions: [
           IconButton(
             tooltip: strings.settings,
