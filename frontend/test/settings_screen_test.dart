@@ -49,6 +49,8 @@ void main() {
         expect(find.byType(DropdownMenu<AppLanguage>), findsOneWidget);
         expect(find.byType(SegmentedButton<bool>), findsNothing);
         expect(find.text('English'), findsWidgets);
+        await tester.scrollUntilVisible(find.text('Advanced options'), 200,
+            scrollable: find.byType(Scrollable).first);
         expect(find.text('Advanced options'), findsOneWidget);
         expect(find.text('Show more'), findsNothing);
         expect(find.text('Self-hosted server URL'), findsNothing);
@@ -57,10 +59,15 @@ void main() {
         await tester.tap(find.text('Advanced options'));
         await tester.pumpAndSettle();
 
+        await tester.scrollUntilVisible(find.text('Test connection'), 200,
+            scrollable: find.byType(Scrollable).first);
         expect(find.text('Hide advanced options'), findsOneWidget);
         expect(find.text('Self-hosted server URL'), findsWidgets);
         expect(find.text('Test connection'), findsOneWidget);
 
+        await tester.scrollUntilVisible(
+            find.byType(DropdownMenu<AppLanguage>), -200,
+            scrollable: find.byType(Scrollable).first);
         // Open language dropdown menu and pick Português.
         await tester.tap(find.byType(DropdownMenu<AppLanguage>));
         await tester.pumpAndSettle();
@@ -68,17 +75,25 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(find.text('Ajustes'), findsOneWidget);
+        await tester.drag(find.byType(Scrollable).first, const Offset(0, 3000));
+        await tester.pumpAndSettle();
         expect(find.text('IDIOMA'), findsOneWidget);
         expect(find.text('Idioma'), findsNothing);
+        await tester.scrollUntilVisible(find.text('Ocultar opções avançadas'), 200,
+            scrollable: find.byType(Scrollable).first);
         expect(find.text('Ocultar opções avançadas'), findsOneWidget);
         expect(find.text('Mostrar menos'), findsNothing);
 
+        await tester.drag(find.byType(Scrollable).first, const Offset(0, 3000));
+        await tester.pumpAndSettle();
         await tester.tap(find.byType(DropdownMenu<AppLanguage>));
         await tester.pumpAndSettle();
         await tester.tap(find.text('Español').last);
         await tester.pumpAndSettle();
         expect(find.text('Ajustes'), findsOneWidget);
         expect(find.text('IDIOMA'), findsOneWidget);
+        await tester.scrollUntilVisible(find.text('Ocultar opciones avanzadas'), 200,
+            scrollable: find.byType(Scrollable).first);
         expect(find.text('Ocultar opciones avanzadas'), findsOneWidget);
       },
     );
@@ -136,16 +151,17 @@ void main() {
     final privacyTop = await absoluteTop(find.text('Privacy notice'));
     final logoutTop = await absoluteTop(find.text('Log out'));
     // The server is chosen before sign-in, so it is not offered here.
-    expect(find.text('Advanced options'), findsNothing);
+    // Advanced options is last; signed in, it only holds the guide.
+    final advancedTop = await absoluteTop(find.text('Advanced options'));
+    expect(advancedTop, greaterThan(logoutTop));
     expect(find.text('Self-hosted server URL'), findsNothing);
     expect(privacyTop, greaterThan(shareTop));
     expect(logoutTop, greaterThan(privacyTop));
     // Download, delete and withdraw live on the server's privacy page.
     final privacy = find.byKey(const ValueKey('privacy-notice'));
-    expect(
-      find.descendant(of: privacy, matching: find.byIcon(Icons.open_in_new)),
-      findsOneWidget,
-    );
+    expect(privacy, findsOneWidget);
+    expect(tester.widget<Text>(find.text('Privacy notice')).style?.decoration,
+        TextDecoration.underline);
     expect(find.text('Download my data'), findsNothing);
     expect(find.text('Delete account'), findsNothing);
 

@@ -232,7 +232,6 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('server-setup-settings')));
     await tester.pumpAndSettle();
     expect(find.byType(SettingsPage), findsOneWidget);
-    expect(find.text('Advanced options'), findsNothing);
     expect(find.byKey(const ValueKey('server-url')), findsNothing);
 
     // Language picked there applies to the setup screen.

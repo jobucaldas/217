@@ -179,11 +179,6 @@ class Strings {
         'Tem seu próprio servidor 217? Configure em Ajustes.',
         '¿Tienes tu propio servidor 217? Configúralo en Ajustes.',
       );
-  String get selfHostBlurb => _t(
-        'Run 217 on your own server and keep your data there.',
-        'Rode o 217 no seu próprio servidor e mantenha seus dados lá.',
-        'Ejecuta 217 en tu propio servidor y guarda tus datos allí.',
-      );
   String get selfHostGuide => _t('Self-hosting guide',
       'Guia de hospedagem própria', 'Guía para alojarlo tú');
   String get dismiss => _t('Dismiss', 'Dispensar', 'Descartar');
@@ -323,14 +318,9 @@ class Strings {
 
   // Updates (Android only)
   String get autoUpdateTitle => _t(
-        'Check for updates automatically',
-        'Verificar atualizações automaticamente',
-        'Buscar actualizaciones automáticamente',
-      );
-  String get autoUpdateSubtitle => _t(
-        'Looks for a newer release when the app opens. Nothing is installed without your confirmation.',
-        'Procura uma versão nova quando o app abre. Nada é instalado sem a sua confirmação.',
-        'Busca una versión nueva al abrir la app. No se instala nada sin tu confirmación.',
+        'Check for updates',
+        'Verificar atualizações',
+        'Buscar actualizaciones',
       );
   String get updateAvailable => _t(
         'A new version is available',
@@ -645,16 +635,6 @@ class Strings {
   // Partner alerts
   String get partnerAlerts =>
       _t('Notifications', 'Notificações', 'Notificaciones');
-  String get partnerAlertsSubtitle => _t(
-        'PMS and pill not logged',
-        'TPM e pílula não registrada',
-        'SPM y píldora no registrada',
-      );
-  String get partnerAlertsWithMessagesSubtitle => _t(
-        'PMS, pill not logged and messages',
-        'TPM, pílula não registrada e mensagens',
-        'SPM, píldora no registrada y mensajes',
-      );
   String get pmsAlertTitle => _t(
         'PMS forecast',
         'Previsão de TPM',
@@ -727,11 +707,6 @@ class Strings {
       'Seus dados e privacidade', 'Tus datos y privacidad');
   String get privacyNotice =>
       _t('Privacy notice', 'Aviso de privacidade', 'Aviso de privacidad');
-  String get privacyNoticeBlurb => _t(
-        'What is stored and why. Download or delete your data, or withdraw consent.',
-        'O que é guardado e para quê. Baixe ou exclua seus dados, ou revogue o consentimento.',
-        'Qué se guarda y para qué. Descarga o elimina tus datos, o retira el consentimiento.',
-      );
   String get consentIntro => _t(
         '217 handles sensitive health data, so it needs your consent first. Read the privacy notice: it explains what is stored, why, and how to download or delete your data or withdraw consent later.',
         'O 217 trata dados sensíveis de saúde, por isso precisa do seu consentimento antes. Leia o aviso de privacidade: ele explica o que é guardado, para quê, e como baixar ou excluir seus dados ou revogar o consentimento depois.',

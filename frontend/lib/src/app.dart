@@ -877,6 +877,8 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
             stageSuggestion: _stageSuggestion,
             focusPersonal: focusPersonal,
             stageUpdated: stageUpdated,
+            onAccountDeleting: _user == null ? null : _onAccountDeletionStarted,
+            onAccountDeleted: _user == null ? null : _onAccountDeleted,
           ),
         ),
       ),
