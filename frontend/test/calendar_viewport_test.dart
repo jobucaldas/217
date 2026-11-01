@@ -547,6 +547,74 @@ void main() {
     expect(find.byType(DayEditorSheet), findsOneWidget);
   });
 
+  testWidgets('header month flips at 60% of the drag; note stays visible',
+      (tester) async {
+    const size = Size(390, 844);
+    await tester.binding.setSurfaceSize(size);
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day)
+        .toIso8601String()
+        .substring(0, 10);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildApp217Theme(
+          brightness: Brightness.light,
+          palette: AppPalette.blue,
+        ),
+        home: MediaQuery(
+          data: const MediaQueryData(size: size),
+          child: CalendarScreen(
+            api: _FakeCalendarApi([
+              Entry(date: today, taken: true, notes: 'Felt fine'),
+            ]),
+            user: const User(
+              id: 'u1',
+              email: 'shot@example.invalid',
+              name: 'Shot',
+            ),
+            strings: const Strings(AppLanguage.en),
+            onOpenSettings: () {},
+            palette: AppPalette.blue,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final current = find.text(DateFormat.yMMMM('en_US').format(now));
+    final prev = DateTime(now.year, now.month - 1);
+    final previous = find.text(DateFormat.yMMMM('en_US').format(prev));
+    expect(find.text('Felt fine'), findsOneWidget);
+
+    final carousel = find.byKey(const ValueKey('month-carousel'));
+    final gesture = await tester.startGesture(tester.getCenter(carousel));
+    // Slop first, then 40% of the 390px width.
+    await gesture.moveBy(const Offset(20, 0));
+    await tester.pump();
+    await gesture.moveBy(const Offset(136, 0));
+    await tester.pump();
+    expect(current, findsOneWidget);
+    expect(find.text('Felt fine'), findsOneWidget);
+
+    // 70% across: the header already names the previous month.
+    await gesture.moveBy(const Offset(117, 0));
+    await tester.pump();
+    expect(previous, findsOneWidget);
+    expect(current, findsNothing);
+    expect(find.text('Felt fine'), findsOneWidget);
+
+    // Dragged back under 60%: the label returns.
+    await gesture.moveBy(const Offset(-117, 0));
+    await tester.pump();
+    expect(current, findsOneWidget);
+    expect(find.text('Felt fine'), findsOneWidget);
+
+    await gesture.up();
+    await tester.pumpAndSettle();
+  });
+
   testWidgets('horizontal carousel swipe changes month with snap',
       (tester) async {
     const size = Size(390, 844);

@@ -114,6 +114,14 @@ class _CalendarScreenState extends State<CalendarScreen>
   double _dragPx = 0;
   bool _monthDragging = false;
   late final AnimationController _monthSnap;
+
+  /// Carousel width from the last layout; the month header, built above
+  /// the carousel, reads it to follow the drag.
+  double _carouselWidth = 0;
+
+  /// Share of the carousel the incoming month must cover before the header
+  /// names it.
+  static const _monthLabelSwitch = 0.6;
   Animation<double>? _monthSnapAnim;
 
   /// Web touchpad scroll has no end event: an idle gap ends the gesture,
@@ -137,6 +145,17 @@ class _CalendarScreenState extends State<CalendarScreen>
 
   DateTime get _prevMonth => DateTime(_month.year, _month.month - 1);
   DateTime get _nextMonth => DateTime(_month.year, _month.month + 1);
+
+  /// Month the header names: follows the drag once the incoming month
+  /// covers most of the carousel, and back if the finger returns. Only the
+  /// label moves; loads still wait for the swipe to commit.
+  DateTime _headerMonth(double width) {
+    if (width <= 0 || _dragPx == 0) return _month;
+    final shown = -_dragPx / width;
+    if (shown >= _monthLabelSwitch) return _nextMonth;
+    if (shown <= -_monthLabelSwitch) return _prevMonth;
+    return _month;
+  }
 
   @override
   void initState() {
@@ -704,7 +723,11 @@ class _CalendarScreenState extends State<CalendarScreen>
   @override
   Widget build(BuildContext context) {
     final dates = widget.strings.dates;
-    final monthLabel = dates.monthYear(_month);
+    final monthLabel = dates.monthYear(
+      _headerMonth(
+        _carouselWidth > 0 ? _carouselWidth : MediaQuery.sizeOf(context).width,
+      ),
+    );
     final scheme = Theme.of(context).colorScheme;
     final text = Theme.of(context).textTheme;
     final brightness = Theme.of(context).brightness;
@@ -927,21 +950,27 @@ class _CalendarScreenState extends State<CalendarScreen>
                 child: LayoutBuilder(
                   builder: (context, constraints) {
                     final pageW = constraints.maxWidth;
-                    final gridBottom = _MonthGrid.contentHeight(
-                      _month,
-                      constraints.biggest,
-                      bottomInset: 12,
-                    );
+                    _carouselWidth = pageW;
+                    double bottomOf(DateTime month) => _MonthGrid.contentHeight(
+                          month,
+                          constraints.biggest,
+                          bottomInset: 12,
+                        );
+                    // While months slide, the incoming month may be a week
+                    // taller: keep the note clear of both grids on screen
+                    // so it stays put instead of vanishing mid-swipe.
+                    var gridBottom = bottomOf(_month);
+                    if (_dragPx < 0) {
+                      gridBottom = math.max(gridBottom, bottomOf(_nextMonth));
+                    } else if (_dragPx > 0) {
+                      gridBottom = math.max(gridBottom, bottomOf(_prevMonth));
+                    }
                     // The note goes in the room the grid leaves below itself,
                     // when there is enough for a line or two, anchored right
                     // above the tags so 5- and 6-week months do not move it.
                     final noteRoom = constraints.maxHeight - gridBottom - 12;
-                    // Hidden while months slide: the incoming month may be
-                    // a week taller than the room measured for this one.
-                    final showNote = selectedNotes.isNotEmpty &&
-                        noteRoom >= 52 &&
-                        !_monthDragging &&
-                        !_monthSnap.isAnimating;
+                    final showNote =
+                        selectedNotes.isNotEmpty && noteRoom >= 52;
                     // Web touchpad swipes arrive as scroll signals; native
                     // touchpad pan/zoom reaches the horizontal drag below.
                     final carousel = Listener(
