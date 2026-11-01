@@ -221,7 +221,8 @@ class DaySummaryBar extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             if (note.isNotEmpty && !noteAsTag) ...[
-              DayNotePanel(notes: note, maxLines: 3),
+              // Capped to three lines; tapping opens the whole note.
+              DayNotePanel(notes: note, maxLines: 3, onTap: onOpenNote),
               const SizedBox(height: 8),
             ],
             _summary(compact, tagWrap, button),
@@ -233,28 +234,28 @@ class DaySummaryBar extends StatelessWidget {
 
   Widget _summary(bool compact, Widget tagWrap, Widget? button) {
     return compact
-            ? Row(
-                key: const ValueKey('day-summary'),
-                children: [
-                  Expanded(child: tagWrap),
-                  if (button != null) ...[
-                    const SizedBox(width: 12),
-                    button,
-                  ],
-                ],
-              )
-            : Column(
-                key: const ValueKey('day-summary'),
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  tagWrap,
-                  if (button != null) ...[
-                    const SizedBox(height: 10),
-                    button,
-                  ],
-                ],
-              );
+        ? Row(
+            key: const ValueKey('day-summary'),
+            children: [
+              Expanded(child: tagWrap),
+              if (button != null) ...[
+                const SizedBox(width: 12),
+                button,
+              ],
+            ],
+          )
+        : Column(
+            key: const ValueKey('day-summary'),
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              tagWrap,
+              if (button != null) ...[
+                const SizedBox(height: 10),
+                button,
+              ],
+            ],
+          );
   }
 }
 
@@ -295,6 +296,7 @@ class _DayTagState extends State<_DayTag> {
         setState(() => _open = !_open);
       }
     }
+
     return Semantics(
       button: true,
       label: widget.label,
@@ -359,9 +361,13 @@ class DayNotePanel extends StatelessWidget {
     required this.notes,
     this.alignment = Alignment.topCenter,
     this.maxLines,
+    this.onTap,
   });
 
   final String notes;
+
+  /// Opens the full note; without it the panel ignores taps.
+  final VoidCallback? onTap;
 
   /// Fixed line cap; when null the panel fits the room it is given.
   final int? maxLines;
@@ -375,6 +381,7 @@ class DayNotePanel extends StatelessWidget {
     final text = Theme.of(context).textTheme;
     final style = text.bodyLarge?.copyWith(color: scheme.onSurface);
     return IgnorePointer(
+      ignoring: onTap == null,
       child: LayoutBuilder(
         builder: (context, constraints) {
           // Same text scaling the Text below gets from the device setting.
@@ -384,46 +391,59 @@ class DayNotePanel extends StatelessWidget {
           // 24px of vertical padding inside the panel.
           final lines = maxLines ??
               ((constraints.maxHeight - 24) / lineHeight).floor().clamp(1, 12);
-          return Align(
-            alignment: alignment,
-            child: Container(
-              key: const ValueKey('day-note'),
-              width: double.infinity,
-              padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-              // Tinted with the accent, like the note tag it stands for.
-              decoration: BoxDecoration(
-                color: Color.alphaBlend(
-                  scheme.primary.withValues(alpha: 0.14),
-                  scheme.surface,
-                ),
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(
-                  color: scheme.primary.withValues(alpha: 0.5),
-                ),
+          final panel = Container(
+            key: const ValueKey('day-note'),
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+            // Tinted with the accent, like the note tag it stands for.
+            decoration: BoxDecoration(
+              color: Color.alphaBlend(
+                scheme.primary.withValues(alpha: 0.14),
+                scheme.surface,
               ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.only(top: 3),
-                    child: Icon(
-                      Icons.sticky_note_2_outlined,
-                      size: 18,
-                      color: scheme.primary,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      notes,
-                      maxLines: lines,
-                      overflow: TextOverflow.ellipsis,
-                      style: style,
-                    ),
-                  ),
-                ],
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(
+                color: scheme.primary.withValues(alpha: 0.5),
               ),
             ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 3),
+                  child: Icon(
+                    Icons.sticky_note_2_outlined,
+                    size: 18,
+                    color: scheme.primary,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    notes,
+                    maxLines: lines,
+                    overflow: TextOverflow.ellipsis,
+                    style: style,
+                  ),
+                ),
+              ],
+            ),
+          );
+          return Align(
+            alignment: alignment,
+            child: onTap == null
+                ? panel
+                : Semantics(
+                    button: true,
+                    child: Material(
+                      type: MaterialType.transparency,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(18),
+                        onTap: onTap,
+                        child: panel,
+                      ),
+                    ),
+                  ),
           );
         },
       ),

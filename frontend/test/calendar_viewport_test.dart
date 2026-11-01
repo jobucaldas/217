@@ -680,6 +680,51 @@ void main() {
     expect(find.textContaining('Long note.'), findsOneWidget);
   });
 
+  testWidgets('tapping a long inline note opens the whole note',
+      (tester) async {
+    const size = Size(390, 844);
+    await tester.binding.setSurfaceSize(size);
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day)
+        .toIso8601String()
+        .substring(0, 10);
+    final note = 'Long note. ' * 60;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildApp217Theme(
+          brightness: Brightness.light,
+          palette: AppPalette.blue,
+        ),
+        home: MediaQuery(
+          data: const MediaQueryData(size: size),
+          child: CalendarScreen(
+            api: _FakeCalendarApi([
+              Entry(date: today, taken: true, notes: note),
+            ]),
+            user: const User(
+              id: 'u1',
+              email: 'shot@example.invalid',
+              name: 'Shot',
+            ),
+            strings: const Strings(AppLanguage.en),
+            onOpenSettings: () {},
+            palette: AppPalette.blue,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Inline, capped to three lines, and no separate note tag.
+    expect(find.byKey(const ValueKey('day-tag-note')), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('day-note')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('day-note-card')), findsOneWidget);
+    expect(find.text(note.trim()), findsNWidgets(2));
+  });
+
   testWidgets('horizontal carousel swipe changes month with snap',
       (tester) async {
     const size = Size(390, 844);

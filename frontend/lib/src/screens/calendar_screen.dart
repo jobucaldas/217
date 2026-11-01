@@ -127,6 +127,10 @@ class _CalendarScreenState extends State<CalendarScreen>
 
   /// Body height from which the note is drawn above the day tags.
   static const _inlineNoteMinBodyHeight = 640.0;
+
+  /// Extra body height the inline note needs per unit of text scale above 1
+  /// (three note lines plus the tags and button growing with the text).
+  static const _inlineNoteGrowthPerTextScale = 160.0;
   Animation<double>? _monthSnapAnim;
 
   /// Web touchpad scroll has no end event: an idle gap ends the gesture,
@@ -751,15 +755,19 @@ class _CalendarScreenState extends State<CalendarScreen>
     final selectedEntry = _visibleEntry(selectedKey);
     final selectedNotes = selectedEntry?.notes.trim() ?? '';
     // Below this much room under the app bar the note would squeeze the
-    // month grid, so it becomes a tag that opens it in a card.
+    // month grid, so it becomes a tag that opens it in a card. An open
+    // keyboard shrinks the body too, and larger text grows the inline note.
     final bodyHeight = MediaQuery.sizeOf(context).height -
         MediaQuery.paddingOf(context).vertical -
+        MediaQuery.viewInsetsOf(context).bottom -
         kToolbarHeight;
-    final noteAsTag = bodyHeight < _inlineNoteMinBodyHeight;
+    final textScale = MediaQuery.textScalerOf(context).scale(1);
+    final noteAsTag = bodyHeight <
+        _inlineNoteMinBodyHeight +
+            (textScale - 1).clamp(0.0, 2.0) * _inlineNoteGrowthPerTextScale;
     // The open note card follows this, so it closes if the data is cleared.
     if (_liveNote.value != selectedNotes) {
-      WidgetsBinding.instance
-          .addPostFrameCallback((_) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _liveNote.value = selectedNotes;
       });
     }
@@ -793,8 +801,7 @@ class _CalendarScreenState extends State<CalendarScreen>
         cycleLines.add((
           pms: true,
           now: false,
-          text:
-              widget.strings.cyclePmsFrom(dates.shortDayMonth(next.pmsStart)),
+          text: widget.strings.cyclePmsFrom(dates.shortDayMonth(next.pmsStart)),
         ));
       }
       cycleLines.add((
