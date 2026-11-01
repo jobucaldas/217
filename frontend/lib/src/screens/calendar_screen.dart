@@ -765,7 +765,19 @@ class _CalendarScreenState extends State<CalendarScreen>
 
     return Scaffold(
       appBar: AppBar(
-        title: Wordmark(widget.strings.brand),
+        title: widget.share.canEditCalendar
+            ? Wordmark(widget.strings.brand)
+            : Row(
+                children: [
+                  Wordmark(widget.strings.brand),
+                  const SizedBox(width: 10),
+                  Flexible(
+                    child: _ReadOnlyChip(
+                      label: widget.strings.readOnlyCalendar,
+                    ),
+                  ),
+                ],
+              ),
         actions: [
           InboxButton(
             api: widget.api,
@@ -796,17 +808,6 @@ class _CalendarScreenState extends State<CalendarScreen>
           Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (!widget.share.canEditCalendar)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
-                  child: Text(
-                    widget.strings.readOnlyCalendar,
-                    style: text.labelLarge?.copyWith(
-                      color: scheme.primary,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
                 child: Column(
@@ -1859,6 +1860,50 @@ class _MarkButton extends StatelessWidget {
       ),
       icon: Icon(icon),
       selectedIcon: Icon(selectedIcon),
+    );
+  }
+}
+
+/// Compact "read-only" badge beside the brand in the partner's app bar.
+/// Ellipsizes rather than pushing the action icons off narrow screens.
+class _ReadOnlyChip extends StatelessWidget {
+  const _ReadOnlyChip({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final fg = scheme.onSecondaryContainer;
+    return Tooltip(
+      message: label,
+      child: Container(
+        key: const ValueKey('read-only-chip'),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: scheme.secondaryContainer,
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.visibility_outlined, size: 14, color: fg),
+            const SizedBox(width: 4),
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 1,
+                softWrap: false,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      color: fg,
+                      fontWeight: FontWeight.w600,
+                    ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
