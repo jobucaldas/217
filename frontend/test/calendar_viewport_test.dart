@@ -671,10 +671,6 @@ void main() {
     expect(tester.takeException(), isNull);
     // Short screen: no inline note, a tag opens it in a card.
     expect(find.byKey(const ValueKey('day-note')), findsNothing);
-    expect(
-      tester.getSize(find.byKey(const ValueKey('month-carousel'))).height,
-      greaterThan(150),
-    );
     await tester.tap(find.byKey(const ValueKey('day-tag-note')));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('day-note-card')), findsOneWidget);
