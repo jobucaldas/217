@@ -596,6 +596,154 @@ Future<void> showDayNoteCard(
   );
 }
 
+/// A day sheet (editable for the owner, read-only for a partner) that can be
+/// pulled up: at rest it is just [sheet]; open it also lists the day's
+/// predictions and the whole note. Swiping it down past its resting height
+/// dismisses it.
+class ExpandableDaySheet extends StatelessWidget {
+  const ExpandableDaySheet({
+    super.key,
+    required this.strings,
+    required this.palette,
+    required this.day,
+    required this.notes,
+    required this.cycleKind,
+    required this.sheet,
+  });
+
+  final Strings strings;
+  final AppPalette palette;
+  final DateTime day;
+
+  /// The day's note, followed live (the owner can change it from [sheet]).
+  final ValueListenable<String> notes;
+  final CycleDayKind cycleKind;
+
+  /// The sheet shown at rest.
+  final Widget sheet;
+
+  /// Height the resting sheet needs, before text scaling.
+  static const _restingHeight = 190.0;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    final brightness = Theme.of(context).brightness;
+    final period = App217Colors.period(brightness, palette);
+    final pms = App217Colors.pms(brightness, palette);
+
+    Widget row(Key key, String label, Widget mark) => Padding(
+          key: key,
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Row(children: [
+            SizedBox(width: 20, child: Center(child: mark)),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(label,
+                  style: textTheme.bodyLarge?.copyWith(color: scheme.onSurface)),
+            ),
+          ]),
+        );
+
+    List<Widget> extraFor(String notes) => <Widget>[
+      if (cycleKind == CycleDayKind.predictedPeriod)
+        row(
+          const ValueKey('day-more-predicted-period'),
+          strings.predictedPeriod,
+          DayMark(color: period, icon: Icons.water_drop_outlined),
+        ),
+      if (cycleKind == CycleDayKind.pms)
+        row(
+          const ValueKey('day-more-pms'),
+          strings.expectedPms,
+          DayMark(color: pms, dashed: true),
+        ),
+      if (notes.isNotEmpty)
+        Container(
+          key: const ValueKey('day-more-note'),
+          margin: const EdgeInsets.only(top: 8),
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Color.alphaBlend(
+              scheme.onSurface.withValues(alpha: 0.06),
+              scheme.surface,
+            ),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: scheme.outline),
+          ),
+          child: Text(
+            notes,
+            style: textTheme.bodyLarge?.copyWith(
+              color: scheme.onSurface,
+              fontSize: 17,
+              height: 1.35,
+            ),
+          ),
+        ),
+    ];
+
+    return ValueListenableBuilder<String>(
+      valueListenable: notes,
+      builder: (context, note, _) => _build(context, extraFor(note)),
+    );
+  }
+
+  Widget _build(BuildContext context, List<Widget> extra) {
+    final scheme = Theme.of(context).colorScheme;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final scale = MediaQuery.textScalerOf(context).scale(1);
+        final resting = (_restingHeight * scale / constraints.maxHeight)
+            .clamp(0.15, 0.6);
+        // Nothing more to show: it stays the owner's sheet, size and all.
+        final expandable = extra.isNotEmpty;
+        return DraggableScrollableSheet(
+          expand: false,
+          snap: true,
+          initialChildSize: resting,
+          minChildSize: resting,
+          maxChildSize: expandable ? 0.7 : resting,
+          builder: (context, controller) => Material(
+            color: scheme.surfaceContainerLow,
+            clipBehavior: Clip.antiAlias,
+            shape: const RoundedRectangleBorder(
+              borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+            ),
+            child: ListView(
+              key: const ValueKey('expandable-day-sheet'),
+              controller: controller,
+              padding: EdgeInsets.zero,
+              children: [
+                Center(
+                  child: Container(
+                    width: 32,
+                    height: 4,
+                    margin: const EdgeInsets.only(top: 12, bottom: 4),
+                    decoration: BoxDecoration(
+                      color: scheme.onSurfaceVariant.withValues(alpha: 0.4),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                sheet,
+                if (extra.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: extra,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
 /// Pops the dialog it sits in when [signal] changes.
 class CloseOnSignal extends StatefulWidget {
   const CloseOnSignal({super.key, required this.signal, required this.child});
