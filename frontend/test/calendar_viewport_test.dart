@@ -445,7 +445,8 @@ void main() {
             data: const MediaQueryData(size: size),
             child: CalendarScreen(
               api: _FakeCalendarApi([
-                Entry(date: today, taken: true, notes: 'Felt fine', heart: true),
+                Entry(
+                    date: today, taken: true, notes: 'Felt fine', heart: true),
               ]),
               user: const User(
                 id: 'u1',
@@ -830,4 +831,52 @@ void main() {
     expect(find.byType(LinearProgressIndicator), findsNothing);
     expect(tester.getSize(carousel), sizeBefore);
   });
+
+  for (final (name, size, inlineNote, header) in [
+    ('tall', const Size(390, 844), true, true),
+    ('medium', const Size(390, 650), false, true),
+    ('short', const Size(390, 560), false, false),
+  ]) {
+    testWidgets('$name screen: note inline=$inlineNote, header=$header',
+        (tester) async {
+      await tester.binding.setSurfaceSize(size);
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day)
+          .toIso8601String()
+          .substring(0, 10);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildApp217Theme(
+            brightness: Brightness.light,
+            palette: AppPalette.blue,
+          ),
+          home: MediaQuery(
+            data: MediaQueryData(size: size),
+            child: CalendarScreen(
+              api: _FakeCalendarApi([
+                Entry(date: today, taken: true, notes: 'Felt fine'),
+              ]),
+              user: const User(id: 'u1', email: 'a@example.invalid', name: 'A'),
+              strings: const Strings(AppLanguage.en),
+              onOpenSettings: () {},
+              palette: AppPalette.blue,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(
+        find.byKey(const ValueKey('day-note')),
+        inlineNote ? findsOneWidget : findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('today-header')),
+        header ? findsOneWidget : findsNothing,
+      );
+      // The status stays reachable in the bottom bar.
+      expect(find.byKey(const ValueKey('day-tag-status')), findsOneWidget);
+    });
+  }
 }
