@@ -555,7 +555,10 @@ void main() {
     );
     expect(find.text('Felt fine'), findsOneWidget);
 
-    await tester.tap(find.descendant(of: grid, matching: find.text('15')));
+    final cell = find.descendant(of: grid, matching: find.text('15'));
+    await tester.tap(cell);
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(cell);
     await tester.pumpAndSettle();
     expect(find.byType(DayEditorSheet), findsOneWidget);
   });
@@ -698,9 +701,9 @@ void main() {
       find.text(DateFormat.yMMMM('en_US').format(target)),
       findsOneWidget,
     );
-    // The first swipe loads at once; the burst after it waits to calm down
-    // and then reads one set of three months.
-    expect(api.calls - before, lessThanOrEqualTo(9));
+    // The burst waits to calm down, then reads one set of months (the three
+    // in view, plus today's for the summary).
+    expect(api.calls - before, lessThanOrEqualTo(4));
   });
 
   testWidgets('short screens show the note as a tag that opens a card',

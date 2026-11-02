@@ -124,6 +124,10 @@ class _CalendarScreenState extends State<CalendarScreen>
   /// ends; 0 when it only springs back.
   int _snapCommit = 0;
 
+  /// Month the running snap lands on when it is not simply the next or
+  /// previous one (jump to today).
+  DateTime? _snapCommitMonth;
+
   /// Moves on every shown month and on clearing the data, so a read of the
   /// device's copy that comes back late does not repopulate stale months.
   int _dataEpoch = 0;
@@ -131,8 +135,7 @@ class _CalendarScreenState extends State<CalendarScreen>
   /// Month changes reload from the server once the swiping calms down; the
   /// months themselves are drawn at once from memory or the device's copy.
   Timer? _loadDebounce;
-  DateTime? _lastShift;
-  static const _loadDebounceGap = Duration(milliseconds: 200);
+  static const _loadDebounceGap = Duration(milliseconds: 150);
 
   /// Carousel width from the last layout; the month header, built above
   /// the carousel, reads it to follow the drag.
@@ -241,6 +244,7 @@ class _CalendarScreenState extends State<CalendarScreen>
     widget.cycleRefreshSignal?.removeListener(_onCycleRefresh);
     _wheelIdle?.cancel();
     _loadDebounce?.cancel();
+    _tapTimer?.cancel();
     _monthSnap.dispose();
     _liveNote.dispose();
     super.dispose();
@@ -524,11 +528,13 @@ class _CalendarScreenState extends State<CalendarScreen>
   /// caller redraws and calls [_monthShown].
   bool _settleSnap() {
     final commit = _snapCommit;
+    final landing = _snapCommitMonth;
     _monthSnap.stop();
     _monthSnapAnim = null;
     _snapCommit = 0;
+    _snapCommitMonth = null;
     if (commit == 0) return false;
-    _month = DateTime(_month.year, _month.month + commit);
+    _month = landing ?? DateTime(_month.year, _month.month + commit);
     final width = _carouselWidth > 0
         ? _carouselWidth
         : MediaQuery.sizeOf(context).width;
@@ -605,7 +611,8 @@ class _CalendarScreenState extends State<CalendarScreen>
     _animateMonthTo(0, commitDelta: 0);
   }
 
-  void _animateMonthTo(double target, {required int commitDelta}) {
+  void _animateMonthTo(double target,
+      {required int commitDelta, DateTime? commitMonth}) {
     // A snap still running (fast chevron taps) lands its month first.
     final settled = _settleSnap();
     if (settled) {
@@ -614,6 +621,7 @@ class _CalendarScreenState extends State<CalendarScreen>
     }
     final begin = _dragPx;
     _snapCommit = commitDelta;
+    _snapCommitMonth = commitMonth;
     // Slight overshoot on settle (recoil), not overblown.
     const recoil = Cubic(0.34, 1.22, 0.64, 1);
     final curve = commitDelta == 0 ? Curves.easeOutCubic : recoil;
@@ -631,9 +639,11 @@ class _CalendarScreenState extends State<CalendarScreen>
       // Settled early by a new gesture: that one owns the state now.
       if (!mounted || !identical(anim, _monthSnapAnim)) return;
       _snapCommit = 0;
+      _snapCommitMonth = null;
       if (commitDelta != 0) {
         setState(() {
-          _month = DateTime(_month.year, _month.month + commitDelta);
+          _month = commitMonth ??
+              DateTime(_month.year, _month.month + commitDelta);
           _dragPx = 0;
           _monthSnapAnim = null;
           _showCachedMonths();
@@ -649,20 +659,11 @@ class _CalendarScreenState extends State<CalendarScreen>
   }
 
   /// The visible month changed: fill what is missing from the device's copy
-  /// now, and refresh from the server (at once for a lone change, after the
-  /// swiping calms down when months go by quickly).
+  /// now, and refresh from the server once the swiping calms down (the
+  /// months already draw from memory or the device's copy meanwhile).
   void _monthShown() {
     unawaited(_hydrateFromLocal());
-    final now = DateTime.now();
-    final last = _lastShift;
-    _lastShift = now;
-    final waiting = _loadDebounce != null;
     _loadDebounce?.cancel();
-    _loadDebounce = null;
-    if (!waiting && (last == null || now.difference(last) > _loadDebounceGap)) {
-      _load();
-      return;
-    }
     _loadDebounce = Timer(_loadDebounceGap, () {
       _loadDebounce = null;
       if (mounted) _load();
@@ -798,6 +799,52 @@ class _CalendarScreenState extends State<CalendarScreen>
     } else {
       unawaited(_loadCycle());
     }
+  }
+
+  /// Day tapped within [_doubleTapGap] ago; a second tap on it opens the
+  /// editor. Selecting never waits on this (unlike a GestureDetector
+  /// double-tap recognizer, which delays the single tap).
+  DateTime? _tappedDay;
+  Timer? _tapTimer;
+  static const _doubleTapGap = Duration(milliseconds: 300);
+
+  /// A tap only selects; a quick second tap on the same day opens its editor.
+  Future<void> _tapDay(DateTime day) async {
+    final again = _tappedDay != null && _isSameDay(_tappedDay!, day);
+    _tapTimer?.cancel();
+    if (again) {
+      _tappedDay = null;
+      return _openDay(day);
+    }
+    _tappedDay = day;
+    _tapTimer = Timer(_doubleTapGap, () => _tappedDay = null);
+    setState(() => _selected = _isSameDay(day, _today) ? null : day);
+  }
+
+  bool get _awayFromToday =>
+      _selected != null ||
+      _month.year != _today.year ||
+      _month.month != _today.month;
+
+  /// Selects today and slides the carousel back to the current month.
+  void _jumpToToday() {
+    setState(() => _selected = null);
+    final now = _today;
+    final target = DateTime(now.year, now.month);
+    final delta = (target.year - _month.year) * 12 + target.month - _month.month;
+    if (delta == 0 || _monthSnap.isAnimating) return;
+    final width = MediaQuery.sizeOf(context).width;
+    if (width <= 0) {
+      setState(() {
+        _month = target;
+        _dragPx = 0;
+        _showCachedMonths();
+      });
+      _monthShown();
+      return;
+    }
+    _animateMonthTo(delta > 0 ? -width : width,
+        commitDelta: delta.sign, commitMonth: target);
   }
 
   /// Selects [day] for the summary; on an editable calendar, also opens
@@ -1120,7 +1167,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                                     today: _today,
                                     entries: _prevEntries,
                                     cycle: _cycle,
-                                    onDayTap: _openDay,
+                                    onDayTap: _tapDay,
                                     todayLabel: widget.strings.today,
                                     weekdayLabels:
                                         widget.strings.weekdayInitials,
@@ -1139,7 +1186,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                                     today: _today,
                                     entries: _entries,
                                     cycle: _cycle,
-                                    onDayTap: _openDay,
+                                    onDayTap: _tapDay,
                                     todayLabel: widget.strings.today,
                                     weekdayLabels:
                                         widget.strings.weekdayInitials,
@@ -1158,7 +1205,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                                     today: _today,
                                     entries: _nextEntries,
                                     cycle: _cycle,
-                                    onDayTap: _openDay,
+                                    onDayTap: _tapDay,
                                     todayLabel: widget.strings.today,
                                     weekdayLabels:
                                         widget.strings.weekdayInitials,
@@ -1186,6 +1233,9 @@ class _CalendarScreenState extends State<CalendarScreen>
                 palette: widget.palette,
                 onEdit: widget.share.canEditCalendar
                     ? () => _openDay(selectedDay)
+                    : null,
+                onJumpToToday: widget.share.canEditCalendar && _awayFromToday
+                    ? _jumpToToday
                     : null,
                 isFuture: selectedDay.isAfter(_today),
                 note: selectedNotes,

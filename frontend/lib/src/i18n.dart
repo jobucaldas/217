@@ -245,6 +245,8 @@ class Strings {
   String get paletteCyan => _t('Cyan', 'Ciano', 'Cian');
   String get palettePurple => _t('Purple', 'Roxo', 'Morado');
   String get today => _t('Today', 'Hoje', 'Hoy');
+  String get jumpToToday =>
+      _t('Jump to today', 'Ir para hoje', 'Ir a hoy');
   String get previousMonth =>
       _t('Previous month', 'Mês anterior', 'Mes anterior');
   String get nextMonth => _t('Next month', 'Próximo mês', 'Mes siguiente');
@@ -459,14 +461,9 @@ class Strings {
         '$count mensajes nuevos',
       );
   String get messageNotifsTitle => _t(
-        'Message notifications',
-        'Notificações de mensagens',
-        'Notificaciones de mensajes',
-      );
-  String get messageNotifsSubtitle => _t(
-        'Tells you about new messages, also with 217 closed (checked about every 15 minutes).',
-        'Avisa sobre mensagens novas, também com o 217 fechado (verifica a cada 15 minutos, aproximadamente).',
-        'Te avisa de mensajes nuevos, también con 217 cerrado (revisa cada 15 minutos, aproximadamente).',
+        'Messages',
+        'Mensagens',
+        'Mensajes',
       );
   String get partnerRevokedTitle => _t(
         'You are not invited to her 217 calendar',
@@ -603,7 +600,8 @@ class Strings {
       'El SPM no se cuenta mientras esté seleccionada la menopausia.');
 
   // Partner alerts
-  String get partnerAlerts => _t('Alerts', 'Avisos', 'Avisos');
+  String get partnerAlerts =>
+      _t('Notifications', 'Notificações', 'Notificaciones');
   String get partnerAlertsSubtitle => _t(
         'PMS and pill not logged',
         'TPM e pílula não registrada',
@@ -614,23 +612,15 @@ class Strings {
         'TPM, pílula não registrada e mensagens',
         'SPM, píldora no registrada y mensajes',
       );
-  String get pmsAlertTitle =>
-      _t('Expected PMS heads-up', 'Aviso de TPM prevista',
-          'Aviso de SPM previsto');
-  String get pmsAlertBody => _t(
-        'On the day her expected PMS window starts (an estimate)',
-        'No dia em que a TPM prevista dela começa (uma estimativa)',
-        'El día en que empieza su SPM previsto (una estimación)',
+  String get pmsAlertTitle => _t(
+        'PMS forecast',
+        'Previsão de TPM',
+        'Previsión de SPM',
       );
   String get pillAlertTitle => _t(
-        'Pill not logged',
-        'Pílula não registrada',
-        'Píldora no registrada',
-      );
-  String get pillAlertBody => _t(
-        "If today's pill isn't logged by this time",
-        'Se a pílula de hoje não estiver registrada até esse horário',
-        'Si la píldora de hoy no está registrada a esta hora',
+        'Medication Not Logged',
+        'Remédio Não Registrado',
+        'Medicamento No Registrado',
       );
   String get pillRepeatTitle => _t('Repeat', 'Repetir', 'Repetir');
   String get pillRepeatSubtitle => _t(
@@ -652,14 +642,14 @@ class Strings {
         'Se repite cada $minutes min hasta que registres la píldora, hasta el final del día',
       );
   String get partnerAlertsNote => _t(
-        'Alerts are scheduled on this phone from her latest calendar each time 217 syncs, so open it now and then.',
-        'Os avisos são agendados neste celular com o calendário mais recente dela sempre que o 217 sincroniza, então abra o app de vez em quando.',
-        'Los avisos se programan en este teléfono con su calendario más reciente cada vez que 217 se sincroniza, así que ábrelo de vez en cuando.',
+        'Notifications are scheduled on this phone from her latest calendar each time 217 syncs, so open it now and then.',
+        'As notificações são agendadas neste celular com o calendário mais recente dela sempre que o 217 sincroniza, então abra o app de vez em quando.',
+        'Las notificaciones se programan en este teléfono con su calendario más reciente cada vez que 217 se sincroniza, así que ábrelo de vez en cuando.',
       );
   String get partnerAlertsWeb => _t(
-        'Alerts are delivered by the Android app.',
-        'Os avisos são entregues pelo app Android.',
-        'Los avisos los entrega la app de Android.',
+        'Notifications are delivered by the Android app.',
+        'As notificações são entregues pelo app Android.',
+        'Las notificaciones las entrega la app de Android.',
       );
   String get partnerAlertsNeedLink => _t(
         'Alerts start once you join her calendar.',
