@@ -139,9 +139,9 @@ If any command fails, stop and resolve the error before continuing. Keep `217.du
 
 Optional server variables for the `backend` service: `PRIVACY_CONTACT` (email or URL for privacy requests, shown on the privacy notice page), `SESSION_TTL` (e.g. `720h`), `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` (web push).
 
-Owners can record cycling, perimenopause, or menopause; menopause suppresses PMS predictions while perimenopause keeps PMS when periods are logged.
+Owners can record cycling, perimenopause, menopause, or no cycles; menopause suppresses PMS predictions while perimenopause keeps PMS when periods are logged.
 
-API: `PUT /api/account/stage` with `{stage: cycling|perimenopause|menopause}` (owner only).
+API: `PUT /api/account/stage` with `{stage: cycling|perimenopause|menopause|no_cycles}` (owner only).
 
 ## Get the apps
 

@@ -5,8 +5,10 @@ import 'prefs.dart';
 /// The reproductive stage the server suggests to an owner (`suggested_stage`
 /// from `/api/cycle`), and what she did with it on this device.
 ///
-/// The calendar shows it as a banner until it times out ([markSeen]); after
-/// that it lives in Settings › Personal with a dot on the settings button,
+/// The calendar shows it as a banner once per suggested value: it is
+/// remembered as seen as soon as it is first displayed ([markShown]) and
+/// stays up for that display until it times out ([hideBanner]), is dismissed
+/// or accepted. After that it lives in Settings › Personal with a dot on the settings button,
 /// until it is accepted ([clear]) or dismissed ([dismiss]). Both are
 /// remembered per suggested value, so a different suggestion shows again.
 class StageSuggestion extends ChangeNotifier {
@@ -19,6 +21,9 @@ class StageSuggestion extends ChangeNotifier {
   String? _suggested;
   String? _dismissed;
   String? _seen;
+
+  /// The stage whose banner is on screen right now (until it times out).
+  String? _showing;
 
   /// False while what was dismissed or seen is read back from storage, so a
   /// dismissed suggestion does not flash.
@@ -34,7 +39,7 @@ class StageSuggestion extends ChangeNotifier {
       : null;
 
   /// Whether the calendar should show the banner (not timed out yet).
-  bool get showBanner => stage != null && stage != _seen;
+  bool get showBanner => stage != null && (stage != _seen || stage == _showing);
 
   /// Whether the settings button carries a dot for it.
   bool get showDot => stage != null && !showBanner;
@@ -55,6 +60,7 @@ class StageSuggestion extends ChangeNotifier {
     _suggested = null;
     _dismissed = null;
     _seen = null;
+    _showing = null;
     final prefs = _prefs;
     if (prefs == null) return;
     _loaded = false;
@@ -75,13 +81,22 @@ class StageSuggestion extends ChangeNotifier {
     }();
   }
 
-  /// The calendar banner timed out: from now on Settings and the dot carry it.
-  void markSeen() {
+  /// The calendar banner is on screen: remembered at once, so it never
+  /// comes back for this stage, but it stays up until [hideBanner].
+  void markShown() {
     final current = stage;
-    if (current == null || current == _seen) return;
+    if (current == null || current == _showing) return;
+    _showing = current;
+    if (current == _seen) return;
     _seen = current;
-    notifyListeners();
     _save((prefs, user) => prefs.saveStageSuggestionSeen(user, current));
+  }
+
+  /// The calendar banner timed out: from now on Settings and the dot carry it.
+  void hideBanner() {
+    if (_showing == null) return;
+    _showing = null;
+    notifyListeners();
   }
 
   /// Not wanted: hidden everywhere until a different stage is suggested.

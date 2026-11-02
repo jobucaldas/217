@@ -396,7 +396,7 @@ func (s *PGStore) ListAccountSubscriptions(userID string) ([]model.ExportPushSub
 }
 
 func (s *PGStore) SetStage(userID, stage string) (*model.User, error) {
-	if stage != "cycling" && stage != "perimenopause" && stage != "menopause" {
+	if !model.ValidStage(stage) {
 		return nil, fmt.Errorf("invalid stage")
 	}
 	user, err := s.GetUserByID(userID)

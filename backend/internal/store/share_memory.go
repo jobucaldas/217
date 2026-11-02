@@ -423,7 +423,7 @@ func (s *MemoryStore) ListAccountSubscriptions(userID string) ([]model.ExportPus
 }
 
 func (s *MemoryStore) SetStage(userID, stage string) (*model.User, error) {
-	if stage != "cycling" && stage != "perimenopause" && stage != "menopause" {
+	if !model.ValidStage(stage) {
 		return nil, fmt.Errorf("invalid stage")
 	}
 	s.mu.Lock()

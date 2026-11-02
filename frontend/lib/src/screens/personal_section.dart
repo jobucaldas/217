@@ -234,7 +234,8 @@ class _PersonalSectionState extends State<PersonalSection> {
               for (final stage in const [
                 'cycling',
                 'perimenopause',
-                'menopause'
+                'menopause',
+                'no_cycles'
               ])
                 DropdownMenuEntry(
                     value: stage, label: strings.stageLabel(stage)),
@@ -437,8 +438,9 @@ class _CalendarStageBannerState extends State<CalendarStageBanner> {
       _timer = null;
       _timing = stage;
       if (stage != null) {
+        widget.suggestion.markShown();
         _timer = Timer(CalendarStageBanner.timeout, () {
-          if (widget.suggestion.stage == stage) widget.suggestion.markSeen();
+          if (widget.suggestion.stage == stage) widget.suggestion.hideBanner();
         });
       }
     }
