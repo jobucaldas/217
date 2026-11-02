@@ -727,7 +727,7 @@ void main() {
     );
     // The burst waits to calm down, then reads one set of months (the three
     // in view, plus today's for the summary).
-    expect(api.calls - before, lessThanOrEqualTo(4));
+    expect(api.calls - before, inInclusiveRange(3, 4));
   });
 
   testWidgets('a read for a month left behind never lands on the new one',

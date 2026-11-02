@@ -130,7 +130,12 @@ class _CalendarScreenState extends State<CalendarScreen>
 
   /// Moves on every shown month and on clearing the data, so a read of the
   /// device's copy that comes back late does not repopulate stale months.
+  /// (Only the newest read applies; it covers the months in view then.)
   int _dataEpoch = 0;
+
+  /// Set when the server refused the calendar (consent); the device's copy
+  /// must not be drawn again until a read succeeds.
+  bool _dataBlocked = false;
 
   /// Month changes reload from the server once the swiping calms down; the
   /// months themselves are drawn at once from memory or the device's copy.
@@ -319,6 +324,7 @@ class _CalendarScreenState extends State<CalendarScreen>
         return;
       }
       _confirmed.clear();
+      _dataBlocked = false;
       setState(() {
         // Today's month included, so its grid matches _todayEntry.
         _monthCache.addAll(fresh);
@@ -368,6 +374,7 @@ class _CalendarScreenState extends State<CalendarScreen>
       }
     }
     _dataEpoch++;
+    _dataBlocked = true;
     _monthCache.clear();
     _confirmed.clear();
     setState(() {
@@ -547,7 +554,12 @@ class _CalendarScreenState extends State<CalendarScreen>
   }
 
   void _onMonthDragUpdate(DragUpdateDetails details) {
-    setState(() => _dragPx += details.delta.dx);
+    // Only three pages are laid out: never drag past the outer ones.
+    final w = _carouselWidth;
+    setState(() {
+      final next = _dragPx + details.delta.dx;
+      _dragPx = w > 0 ? next.clamp(-w, w) : next;
+    });
   }
 
   void _onMonthDragEnd(DragEndDetails details, double width) {
@@ -680,24 +692,31 @@ class _CalendarScreenState extends State<CalendarScreen>
   /// Months in view that were never fetched this session come from the
   /// device's copy, so a fast swipe lands on days instead of an empty grid.
   Future<void> _hydrateFromLocal() async {
-    final epoch = _dataEpoch;
-    for (final month in [_month, _prevMonth, _nextMonth]) {
-      final key = _monthKey(month);
-      if (_monthCache.containsKey(key)) continue;
-      List<Entry>? list;
-      try {
-        list = await widget.api.cachedMonth(month.year, month.month);
-      } catch (_) {
-        continue;
+    if (_dataBlocked) return;
+    // Months shown since are read by their own call; this one stands down.
+    final epoch = ++_dataEpoch;
+    final missing = [
+      for (final month in [_month, _prevMonth, _nextMonth])
+        if (!_monthCache.containsKey(_monthKey(month))) month,
+    ];
+    final lists = await Future.wait([
+      for (final month in missing)
+        widget.api
+            .cachedMonth(month.year, month.month)
+            .then<List<Entry>?>((list) => list)
+            .catchError((Object _) => null),
+    ]);
+    if (!mounted || epoch != _dataEpoch || _dataBlocked) return;
+    setState(() {
+      for (var i = 0; i < missing.length; i++) {
+        final list = lists[i];
+        final key = _monthKey(missing[i]);
+        // A fetch or an edit may have filled it while this was reading.
+        if (list == null || _monthCache.containsKey(key)) continue;
+        _monthCache[key] = {for (final e in list) e.date: e};
       }
-      if (!mounted || epoch != _dataEpoch) return;
-      // A fetch or an edit may have filled it while this was reading.
-      if (list == null || _monthCache.containsKey(key)) continue;
-      setState(() {
-        _monthCache[key] = {for (final e in list!) e.date: e};
-        _showCachedMonths();
-      });
-    }
+      _showCachedMonths();
+    });
   }
 
   static bool _isSameDay(DateTime a, DateTime b) =>
