@@ -1875,11 +1875,23 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
   /// Read-only note card; the note cannot change from here.
   Future<void> _viewNote() {
     final notes = ValueNotifier<String>(_notes);
+    // Emptying it closes the card, so it never outlives cleared access.
+    // The signal can change mid-build, so it waits for the frame to end.
+    var closed = false;
+    void clear() => WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!closed) notes.value = '';
+        });
+    final signal = widget.closeSignal;
+    signal?.addListener(clear);
     return showDayNoteCard(
       context,
       title: widget.strings.notes,
       notes: notes,
-    ).whenComplete(notes.dispose);
+    ).whenComplete(() {
+      closed = true;
+      signal?.removeListener(clear);
+      notes.dispose();
+    });
   }
 
   Future<void> _editNote() async {

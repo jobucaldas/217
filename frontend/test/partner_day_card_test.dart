@@ -182,6 +182,31 @@ void main() {
     expect(find.byType(DayEditorSheet), findsNothing);
   });
 
+  testWidgets('an open note card closes too when the share is revoked',
+      (tester) async {
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final entries = [
+      Entry(date: _key(today), taken: true, notes: 'Private note'),
+    ];
+    await tester.pumpWidget(_app(_calendar(entries: entries)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('view-day-button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.sticky_note_2));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('day-note-card')), findsOneWidget);
+
+    await tester.pumpWidget(_app(_calendar(
+      entries: entries,
+      share: const ShareState(status: 'revoked', canEditCalendar: false),
+    )));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('day-note-card')), findsNothing);
+    expect(find.text('Private note'), findsNothing);
+    expect(find.byType(DayEditorSheet), findsNothing);
+  });
+
   testWidgets('owner still gets the editor, not the read-only sheet',
       (tester) async {
     await tester.binding.setSurfaceSize(const Size(390, 844));
