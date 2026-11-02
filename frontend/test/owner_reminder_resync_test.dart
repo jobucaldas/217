@@ -161,9 +161,10 @@ class _SchedulerLog {
 
 Future<void> _tapTakenOnToday(WidgetTester tester, DateTime today) async {
   final grid = find.byKey(ValueKey('${today.year}-${today.month}'));
-  await tester.tap(
-    find.descendant(of: grid, matching: find.text('${today.day}')),
-  );
+  final cell = find.descendant(of: grid, matching: find.text('${today.day}'));
+  await tester.tap(cell);
+  await tester.pump(const Duration(milliseconds: 50));
+  await tester.tap(cell);
   await tester.pumpAndSettle();
   await tester.tap(find.text('Taken').last);
   await tester.pumpAndSettle();
@@ -171,9 +172,10 @@ Future<void> _tapTakenOnToday(WidgetTester tester, DateTime today) async {
 
 Future<void> _tapMissedOnToday(WidgetTester tester, DateTime today) async {
   final grid = find.byKey(ValueKey('${today.year}-${today.month}'));
-  await tester.tap(
-    find.descendant(of: grid, matching: find.text('${today.day}')),
-  );
+  final cell = find.descendant(of: grid, matching: find.text('${today.day}'));
+  await tester.tap(cell);
+  await tester.pump(const Duration(milliseconds: 50));
+  await tester.tap(cell);
   await tester.pumpAndSettle();
   await tester.tap(find.text('Missed').last);
   await tester.pumpAndSettle();

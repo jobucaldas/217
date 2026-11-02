@@ -245,6 +245,8 @@ class Strings {
   String get paletteCyan => _t('Cyan', 'Ciano', 'Cian');
   String get palettePurple => _t('Purple', 'Roxo', 'Morado');
   String get today => _t('Today', 'Hoje', 'Hoy');
+  String get jumpToToday =>
+      _t('Jump to today', 'Ir para hoje', 'Ir a hoy');
   String get previousMonth =>
       _t('Previous month', 'Mês anterior', 'Mes anterior');
   String get nextMonth => _t('Next month', 'Próximo mês', 'Mes siguiente');

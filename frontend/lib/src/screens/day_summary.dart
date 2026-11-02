@@ -62,6 +62,7 @@ class DaySummaryBar extends StatelessWidget {
     required this.cycleKind,
     required this.palette,
     this.onEdit,
+    this.onJumpToToday,
     this.isFuture = false,
     this.note = '',
     this.noteAsTag = false,
@@ -77,6 +78,9 @@ class DaySummaryBar extends StatelessWidget {
 
   /// Null on read-only calendars: tags only, no button.
   final VoidCallback? onEdit;
+
+  /// Set when the selected day or visible month is not today's.
+  final VoidCallback? onJumpToToday;
 
   /// Future days show only what is expected. The button stays (so the grid
   /// keeps its height) but is disabled: nothing can be logged ahead of time.
@@ -212,6 +216,28 @@ class DaySummaryBar extends StatelessWidget {
             ),
           );
 
+    final barHeight = compact ? 48.0 : 52.0;
+    final jump = onJumpToToday == null
+        ? null
+        : SizedBox.square(
+            dimension: barHeight,
+            child: IconButton.filledTonal(
+              key: const ValueKey('jump-to-today-button'),
+              tooltip: strings.jumpToToday,
+              onPressed: onJumpToToday,
+              icon: const Icon(Icons.today),
+            ),
+          );
+    final actions = button == null
+        ? null
+        : Row(
+            mainAxisSize: compact ? MainAxisSize.min : MainAxisSize.max,
+            children: [
+              if (compact) button else Expanded(child: button),
+              if (jump != null) ...[const SizedBox(width: 8), jump],
+            ],
+          );
+
     return SafeArea(
       top: false,
       child: Padding(
@@ -225,7 +251,7 @@ class DaySummaryBar extends StatelessWidget {
               DayNotePanel(notes: note, maxLines: 3, onTap: onOpenNote),
               const SizedBox(height: 8),
             ],
-            _summary(compact, tagWrap, button),
+            _summary(compact, tagWrap, actions),
           ],
         ),
       ),

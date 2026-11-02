@@ -544,7 +544,10 @@ void main() {
     );
     expect(find.text('Felt fine'), findsOneWidget);
 
-    await tester.tap(find.descendant(of: grid, matching: find.text('15')));
+    final cell = find.descendant(of: grid, matching: find.text('15'));
+    await tester.tap(cell);
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(cell);
     await tester.pumpAndSettle();
     expect(find.byType(DayEditorSheet), findsOneWidget);
   });

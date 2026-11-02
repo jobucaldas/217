@@ -221,6 +221,7 @@ class _CalendarScreenState extends State<CalendarScreen>
     WidgetsBinding.instance.removeObserver(this);
     widget.cycleRefreshSignal?.removeListener(_onCycleRefresh);
     _wheelIdle?.cancel();
+    _tapTimer?.cancel();
     _monthSnap.dispose();
     _liveNote.dispose();
     super.dispose();
@@ -562,7 +563,8 @@ class _CalendarScreenState extends State<CalendarScreen>
     _animateMonthTo(0, commitDelta: 0);
   }
 
-  void _animateMonthTo(double target, {required int commitDelta}) {
+  void _animateMonthTo(double target,
+      {required int commitDelta, DateTime? commitMonth}) {
     final begin = _dragPx;
     // Slight overshoot on settle (recoil), not overblown.
     const recoil = Cubic(0.34, 1.22, 0.64, 1);
@@ -580,7 +582,8 @@ class _CalendarScreenState extends State<CalendarScreen>
       if (!mounted) return;
       if (commitDelta != 0) {
         setState(() {
-          _month = DateTime(_month.year, _month.month + commitDelta);
+          _month = commitMonth ??
+              DateTime(_month.year, _month.month + commitDelta);
           _dragPx = 0;
           _monthSnapAnim = null;
           _showCachedMonths();
@@ -701,6 +704,52 @@ class _CalendarScreenState extends State<CalendarScreen>
     } else {
       unawaited(_loadCycle());
     }
+  }
+
+  /// Day tapped within [_doubleTapGap] ago; a second tap on it opens the
+  /// editor. Selecting never waits on this (unlike a GestureDetector
+  /// double-tap recognizer, which delays the single tap).
+  DateTime? _tappedDay;
+  Timer? _tapTimer;
+  static const _doubleTapGap = Duration(milliseconds: 300);
+
+  /// A tap only selects; a quick second tap on the same day opens its editor.
+  Future<void> _tapDay(DateTime day) async {
+    final again = _tappedDay != null && _isSameDay(_tappedDay!, day);
+    _tapTimer?.cancel();
+    if (again) {
+      _tappedDay = null;
+      return _openDay(day);
+    }
+    _tappedDay = day;
+    _tapTimer = Timer(_doubleTapGap, () => _tappedDay = null);
+    setState(() => _selected = _isSameDay(day, _today) ? null : day);
+  }
+
+  bool get _awayFromToday =>
+      _selected != null ||
+      _month.year != _today.year ||
+      _month.month != _today.month;
+
+  /// Selects today and slides the carousel back to the current month.
+  void _jumpToToday() {
+    setState(() => _selected = null);
+    final now = _today;
+    final target = DateTime(now.year, now.month);
+    final delta = (target.year - _month.year) * 12 + target.month - _month.month;
+    if (delta == 0 || _monthSnap.isAnimating) return;
+    final width = MediaQuery.sizeOf(context).width;
+    if (width <= 0) {
+      setState(() {
+        _month = target;
+        _dragPx = 0;
+        _showCachedMonths();
+      });
+      _load();
+      return;
+    }
+    _animateMonthTo(delta > 0 ? -width : width,
+        commitDelta: delta.sign, commitMonth: target);
   }
 
   /// Selects [day] for the summary; on an editable calendar, also opens
@@ -1023,7 +1072,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                                     today: _today,
                                     entries: _prevEntries,
                                     cycle: _cycle,
-                                    onDayTap: _openDay,
+                                    onDayTap: _tapDay,
                                     todayLabel: widget.strings.today,
                                     weekdayLabels:
                                         widget.strings.weekdayInitials,
@@ -1042,7 +1091,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                                     today: _today,
                                     entries: _entries,
                                     cycle: _cycle,
-                                    onDayTap: _openDay,
+                                    onDayTap: _tapDay,
                                     todayLabel: widget.strings.today,
                                     weekdayLabels:
                                         widget.strings.weekdayInitials,
@@ -1061,7 +1110,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                                     today: _today,
                                     entries: _nextEntries,
                                     cycle: _cycle,
-                                    onDayTap: _openDay,
+                                    onDayTap: _tapDay,
                                     todayLabel: widget.strings.today,
                                     weekdayLabels:
                                         widget.strings.weekdayInitials,
@@ -1089,6 +1138,9 @@ class _CalendarScreenState extends State<CalendarScreen>
                 palette: widget.palette,
                 onEdit: widget.share.canEditCalendar
                     ? () => _openDay(selectedDay)
+                    : null,
+                onJumpToToday: widget.share.canEditCalendar && _awayFromToday
+                    ? _jumpToToday
                     : null,
                 isFuture: selectedDay.isAfter(_today),
                 note: selectedNotes,
