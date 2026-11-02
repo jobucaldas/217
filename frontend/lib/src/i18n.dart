@@ -597,6 +597,49 @@ class Strings {
       'This is what you told 217; it is not a diagnosis.',
       'Isto é o que você informou ao 217; não é um diagnóstico.',
       'Esto es lo que le dijiste a 217; no es un diagnóstico.');
+  String stageLabel(String stage) => switch (stage) {
+        'perimenopause' => stagePerimenopause,
+        'menopause' => stageMenopause,
+        _ => stageCycling,
+      };
+
+  // Personal section (Settings)
+  String get personal => _t('Personal', 'Pessoal', 'Personal');
+  String get displayName =>
+      _t('Display name', 'Nome de exibição', 'Nombre visible');
+  String displayNameHelp(String fallback) => fallback.trim().isEmpty
+      ? _t(
+          'Shown to the other person in Messages and on the shared calendar.',
+          'Mostrado à outra pessoa nas Mensagens e no calendário compartilhado.',
+          'Lo ve la otra persona en Mensajes y en el calendario compartido.')
+      : _t(
+          'Shown to the other person in Messages and on the shared calendar. Empty uses "$fallback".',
+          'Mostrado à outra pessoa nas Mensagens e no calendário compartilhado. Vazio usa "$fallback".',
+          'Lo ve la otra persona en Mensajes y en el calendario compartido. Vacío usa "$fallback".');
+  String get displayNameSaved =>
+      _t('Display name saved.', 'Nome de exibição salvo.', 'Nombre visible guardado.');
+  String get birthDate =>
+      _t('Birth month', 'Mês de nascimento', 'Mes de nacimiento');
+  String get birthDateHelp => _t(
+      'Month and year are enough. Used only to suggest your reproductive stage.',
+      'Mês e ano bastam. Usado só para sugerir sua fase reprodutiva.',
+      'Mes y año bastan. Solo se usa para sugerir tu etapa reproductiva.');
+  String get notSet => _t('Not set', 'Não informado', 'Sin indicar');
+  String get month => _t('Month', 'Mês', 'Mes');
+  String get year => _t('Year', 'Ano', 'Año');
+  String get clear => _t('Clear', 'Limpar', 'Borrar');
+  String stageSuggestionBody(String stage) => stage == 'menopause'
+      ? _t(
+          'No period logged for 12 months: your stage looks like ${stageLabel(stage)}.',
+          'Nenhuma menstruação registrada há 12 meses: sua fase parece ser ${stageLabel(stage)}.',
+          'Ninguna regla registrada en 12 meses: tu etapa parece ser ${stageLabel(stage)}.')
+      : _t(
+          'Based on your age, your stage looks like ${stageLabel(stage)}.',
+          'Pela sua idade, sua fase parece ser ${stageLabel(stage)}.',
+          'Por tu edad, tu etapa parece ser ${stageLabel(stage)}.');
+  String get stageSuggestionUpdate => _t('Update', 'Atualizar', 'Actualizar');
+  String get stageUpdated => _t('Updated successfully', 'Atualizado com sucesso',
+      'Actualizado correctamente');
   String get pmsNotCounted => _t(
       'PMS is not counted while menopause is selected.',
       'A TPM não é contada enquanto menopausa estiver selecionada.',

@@ -5,6 +5,8 @@ class User {
     required this.name,
     this.role = 'owner',
     this.stage = 'cycling',
+    this.displayName = '',
+    this.birthDate = '',
   });
 
   final String id;
@@ -12,6 +14,12 @@ class User {
   final String name;
   final String role;
   final String stage;
+
+  /// Name chosen to show the other side; empty falls back to [name].
+  final String displayName;
+
+  /// Owner's birth month, `YYYY-MM` (empty: not given).
+  final String birthDate;
 
   /// Takes the pill and fills the calendar.
   bool get isOwner => role == 'owner';
@@ -22,8 +30,14 @@ class User {
   /// False until the user picks owner or partner after first sign-in.
   bool get hasRole => isOwner || isPartner;
 
-  User withRole(String next) =>
-      User(id: id, email: email, name: name, role: next, stage: stage);
+  User withRole(String next) => User(
+      id: id,
+      email: email,
+      name: name,
+      role: next,
+      stage: stage,
+      displayName: displayName,
+      birthDate: birthDate);
 
   factory User.fromJson(Map<String, dynamic> json) {
     return User(
@@ -32,6 +46,8 @@ class User {
       name: (json['name'] as String?) ?? '',
       role: (json['role'] as String?) ?? '',
       stage: (json['stage'] as String?) ?? 'cycling',
+      displayName: (json['display_name'] as String?) ?? '',
+      birthDate: (json['birth_date'] as String?) ?? '',
     );
   }
 }
@@ -244,6 +260,7 @@ class CycleInfo {
     this.predictions = const [],
     this.note = '',
     this.stage = 'cycling',
+    this.suggestedStage,
   });
 
   static const empty = CycleInfo();
@@ -257,6 +274,10 @@ class CycleInfo {
   final List<CycleWindow> predictions;
   final String note;
   final String stage;
+
+  /// Owner only: the stage her age or period history points to, when it is
+  /// further along than [stage].
+  final String? suggestedStage;
 
   bool get hasPredictions => predictions.isNotEmpty;
 
@@ -296,6 +317,10 @@ class CycleInfo {
             .toList(),
         note: (json['note'] as String?) ?? '',
         stage: (json['stage'] as String?) ?? 'cycling',
+        suggestedStage: switch (json['suggested_stage']) {
+          final String s when s.isNotEmpty => s,
+          _ => null,
+        },
       );
 }
 

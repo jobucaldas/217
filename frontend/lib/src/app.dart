@@ -25,6 +25,7 @@ import 'screens/role_screen.dart';
 import 'screens/server_setup_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/share_screens.dart';
+import 'stage_suggestion.dart';
 import 'theme/app_theme.dart';
 import 'screens/dialog_actions.dart';
 import 'updates/update_check.dart';
@@ -108,6 +109,8 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
   /// here to pick up theme, language and session changes made from them.
   final _changes = _ChangeTicker();
   final ValueNotifier<int> _stageChanges = ValueNotifier(0);
+  late final StageSuggestion _stageSuggestion =
+      StageSuggestion(prefs: _prefs);
   late final DailyReminderSyncQueue _dailyReminderSyncQueue =
       DailyReminderSyncQueue(
     widget.dailyReminderScheduler ?? syncLocalDailyReminder,
@@ -251,6 +254,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     _messagePoll?.cancel();
     _changes.dispose();
     _stageChanges.dispose();
+    _stageSuggestion.dispose();
     if (widget.updateClient == null) _updateHttp.close();
     super.dispose();
   }
@@ -827,7 +831,18 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     setState(() {});
   }
 
-  void _openSettings({bool expandServer = false}) {
+  /// A suggested stage was saved from the calendar banner: show it in
+  /// Settings › Personal.
+  void _onStageSuggestionAccepted(SessionSnapshot session) {
+    _onStageChanged(session);
+    _openSettings(focusPersonal: true, stageUpdated: true);
+  }
+
+  void _openSettings({
+    bool expandServer = false,
+    bool focusPersonal = false,
+    bool stageUpdated = false,
+  }) {
     _navKey.currentState?.push(
       MaterialPageRoute(
         builder: (_) => ListenableBuilder(
@@ -858,6 +873,10 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
             messageNotifications: _messageNotifs,
             onMessageNotificationsChanged: _setMessageNotifs,
             expandServer: expandServer,
+            onProfileChanged: _user == null ? null : _applySession,
+            stageSuggestion: _stageSuggestion,
+            focusPersonal: focusPersonal,
+            stageUpdated: stageUpdated,
           ),
         ),
       ),
@@ -980,6 +999,8 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
           !_reminderHintDismissed &&
           _share.canEditCalendar,
       onDismissReminderHint: _dismissReminderHint,
+      stageSuggestion: _stageSuggestion,
+      onStageSuggestionAccepted: _onStageSuggestionAccepted,
     );
   }
 

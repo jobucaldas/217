@@ -4,14 +4,15 @@ import 'package:flutter/services.dart';
 
 import '../api/client.dart';
 import '../config.dart';
-import '../errors.dart';
 import '../i18n.dart';
 import '../models.dart';
 import '../notifications/daily_reminder_sync_queue.dart';
 import '../notifications/partner_alert_sync_queue.dart';
 import '../platform/open_url.dart';
+import '../stage_suggestion.dart';
 import '../theme/app_theme.dart';
 import 'partner_alerts_screen.dart';
+import 'personal_section.dart';
 import 'privacy_screens.dart';
 import 'reminder_settings_screen.dart';
 import 'role_screen.dart';
@@ -46,6 +47,10 @@ class SettingsPage extends StatefulWidget {
     this.messageNotifications = true,
     this.onMessageNotificationsChanged,
     this.expandServer = false,
+    this.onProfileChanged,
+    this.stageSuggestion,
+    this.focusPersonal = false,
+    this.stageUpdated = false,
   });
 
   final ApiClient api;
@@ -89,6 +94,19 @@ class SettingsPage extends StatefulWidget {
   /// Open with the self-hosted server field already expanded.
   final bool expandServer;
 
+  /// Called after the display name or birth month was saved.
+  final ValueChanged<SessionSnapshot>? onProfileChanged;
+
+  /// Owner's pending stage suggestion, shown in the Personal section.
+  final StageSuggestion? stageSuggestion;
+
+  /// Open scrolled to the Personal section.
+  final bool focusPersonal;
+
+  /// Open with the "updated" notice in the Personal section (a suggested
+  /// stage was just accepted on the calendar).
+  final bool stageUpdated;
+
   @override
   State<SettingsPage> createState() => _SettingsPageState();
 }
@@ -103,8 +121,23 @@ class _SettingsPageState extends State<SettingsPage> {
       widget.expandServer || widget.api.config.usesCustomApiBase;
   bool _testing = false;
   String? _serverError;
-  bool _savingStage = false;
-  int _stageResets = 0;
+  final GlobalKey _personalKey = GlobalKey();
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.focusPersonal) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final target = _personalKey.currentContext;
+        if (!mounted || target == null) return;
+        Scrollable.ensureVisible(
+          target,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      });
+    }
+  }
 
   @override
   void dispose() {
@@ -116,24 +149,6 @@ class _SettingsPageState extends State<SettingsPage> {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(content: Text(message)));
-  }
-
-  Future<void> _saveStage(String stage) async {
-    setState(() => _savingStage = true);
-    try {
-      final session = await widget.api.setStage(stage);
-      if (!mounted) return;
-      setState(() => _savingStage = false);
-      widget.onStageChanged?.call(session);
-    } catch (error) {
-      if (mounted) {
-        setState(() {
-          _savingStage = false;
-          _stageResets++;
-        });
-        _showSnack(friendlyError(widget.strings, error));
-      }
-    }
   }
 
   Future<void> _saveServer() async {
@@ -287,6 +302,23 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
             const SizedBox(height: 20),
           ],
+          if (widget.onLogout != null &&
+              !widget.consentPending &&
+              (widget.user?.hasRole ?? false)) ...[
+            _SectionLabel(widget.strings.personal, key: _personalKey),
+            PersonalSection(
+              api: widget.api,
+              strings: widget.strings,
+              user: widget.user!,
+              suggestion:
+                  widget.user!.isOwner ? widget.stageSuggestion : null,
+              showUpdated: widget.stageUpdated,
+              onStageChanged: widget.onStageChanged,
+              onProfileChanged: widget.onProfileChanged,
+              group: (children) => _SettingsSection(children: children),
+            ),
+            const SizedBox(height: 20),
+          ],
           _SectionLabel(widget.strings.appearance),
           _SettingsSection(
             children: [
@@ -428,41 +460,6 @@ class _SettingsPageState extends State<SettingsPage> {
                 ],
               ),
             ],
-          ],
-          if ((widget.user?.isOwner ?? false) && !widget.consentPending) ...[
-            const SizedBox(height: 20),
-            _SectionLabel(widget.strings.reproductiveStage),
-            _SettingsSection(children: [
-              Padding(
-                key: const ValueKey('stage-dropdown'),
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-                child: DropdownMenu<String>(
-                  // Rebuilt from the saved stage (and after a failed save) so
-                  // the field never shows a choice the server did not keep.
-                  key: ValueKey('stage-${widget.user!.stage}-$_stageResets'),
-                  initialSelection: widget.user!.stage,
-                  expandedInsets: EdgeInsets.zero,
-                  enabled: !_savingStage,
-                  dropdownMenuEntries: [
-                    for (final option in <(String, String)>[
-                      ('cycling', widget.strings.stageCycling),
-                      ('perimenopause', widget.strings.stagePerimenopause),
-                      ('menopause', widget.strings.stageMenopause),
-                    ])
-                      DropdownMenuEntry(value: option.$1, label: option.$2),
-                  ],
-                  onSelected: (value) {
-                    if (value == null || value == widget.user!.stage) return;
-                    _saveStage(value);
-                  },
-                ),
-              ),
-              Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                  child: Text(widget.strings.stageSelfReport,
-                      style: text.bodySmall
-                          ?.copyWith(color: scheme.onSurfaceVariant))),
-            ]),
           ],
           // Signed out only: the server is picked before signing in, since
           // an account lives on one server. Never on web, which is served by
@@ -621,7 +618,7 @@ class _SettingsPageState extends State<SettingsPage> {
 }
 
 class _SectionLabel extends StatelessWidget {
-  const _SectionLabel(this.label);
+  const _SectionLabel(this.label, {super.key});
 
   final String label;
 

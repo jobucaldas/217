@@ -11,8 +11,10 @@ import '../i18n.dart';
 import '../models.dart';
 import '../notifications/local_reminders.dart';
 import '../notifications/partner_alert_sync_queue.dart';
+import '../stage_suggestion.dart';
 import '../theme/app_theme.dart';
 import 'dialog_actions.dart';
+import 'personal_section.dart';
 import 'reminder_hint.dart';
 import 'share_screens.dart';
 import 'day_summary.dart';
@@ -36,6 +38,8 @@ class CalendarScreen extends StatefulWidget {
     this.palette = AppPalette.blue,
     this.showReminderHint = false,
     this.onDismissReminderHint,
+    this.stageSuggestion,
+    this.onStageSuggestionAccepted,
   });
 
   final ApiClient api;
@@ -66,6 +70,12 @@ class CalendarScreen extends StatefulWidget {
   /// Bubble pointing at the reminder setting; closes itself after a while.
   final bool showReminderHint;
   final VoidCallback? onDismissReminderHint;
+
+  /// Owner only: fed from `/api/cycle` and shown as a banner at the top.
+  final StageSuggestion? stageSuggestion;
+
+  /// The suggested stage was saved from the banner.
+  final ValueChanged<SessionSnapshot>? onStageSuggestionAccepted;
 
   @override
   State<CalendarScreen> createState() => _CalendarScreenState();
@@ -162,6 +172,21 @@ class _CalendarScreenState extends State<CalendarScreen>
     if (oldWidget.cycleRefreshSignal != widget.cycleRefreshSignal) {
       oldWidget.cycleRefreshSignal?.removeListener(_onCycleRefresh);
       widget.cycleRefreshSignal?.addListener(_onCycleRefresh);
+    }
+  }
+
+  Future<void> _acceptStage(String stage) async {
+    try {
+      final session = await widget.api.setStage(stage);
+      if (!mounted) return;
+      widget.stageSuggestion?.clear();
+      widget.onStageSuggestionAccepted?.call(session);
+    } catch (err) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+            SnackBar(content: Text(friendlyError(widget.strings, err))));
     }
   }
 
@@ -341,6 +366,9 @@ class _CalendarScreenState extends State<CalendarScreen>
       return;
     }
     setState(() => _cycle = cycle);
+    // Partners never get one; the server only sends it to the owner.
+    widget.stageSuggestion?.update(
+        widget.user.id, widget.user.isOwner ? cycle.suggestedStage : null);
     if (widget.user.isPartner) {
       await _syncPartnerAlerts(
         cycle,
@@ -778,13 +806,19 @@ class _CalendarScreenState extends State<CalendarScreen>
             onPressed: widget.onOpenSettings,
             // Dot: offline or day edits waiting; Settings says which.
             icon: ListenableBuilder(
-              listenable: Listenable.merge(
-                [widget.api.offline, widget.api.pendingWrites],
-              ),
+              listenable: Listenable.merge([
+                widget.api.offline,
+                widget.api.pendingWrites,
+                if (widget.stageSuggestion != null) widget.stageSuggestion!,
+              ]),
+              // Also a stage suggestion whose banner timed out.
               builder: (context, _) => Badge(
                 key: const ValueKey('settings-sync-dot'),
                 isLabelVisible: widget.api.offline.value ||
-                    widget.api.pendingWrites.value > 0,
+                    widget.api.pendingWrites.value > 0 ||
+                    (widget.user.isOwner &&
+                        widget.stageSuggestion?.userId == widget.user.id &&
+                        (widget.stageSuggestion?.showDot ?? false)),
                 child: const Icon(Icons.settings_outlined),
               ),
             ),
@@ -796,6 +830,13 @@ class _CalendarScreenState extends State<CalendarScreen>
           Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              if (widget.user.isOwner && widget.stageSuggestion != null)
+                CalendarStageBanner(
+                  suggestion: widget.stageSuggestion!,
+                  userId: widget.user.id,
+                  strings: widget.strings,
+                  onUpdate: _acceptStage,
+                ),
               if (!widget.share.canEditCalendar)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),

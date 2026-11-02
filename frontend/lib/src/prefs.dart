@@ -21,6 +21,22 @@ class AppearancePrefs {
   static const messagesNotifiedKeyPrefix = 'messages_notified_';
   static const messagePermissionAskedKey = 'message_permission_asked';
   static const messagesForegroundAtKey = 'messages_foreground_at';
+  static const stageSuggestionDismissedPrefix = 'stage_suggestion_dismissed_';
+  static const stageSuggestionSeenPrefix = 'stage_suggestion_seen_';
+
+  /// Stage suggestion [userId] dismissed on this device (null: none).
+  Future<String?> stageSuggestionDismissed(String userId) =>
+      _storage.read(key: stageSuggestionDismissedPrefix + userId);
+
+  Future<void> saveStageSuggestionDismissed(String userId, String stage) =>
+      _storage.write(key: stageSuggestionDismissedPrefix + userId, value: stage);
+
+  /// Stage suggestion whose calendar banner already timed out for [userId].
+  Future<String?> stageSuggestionSeen(String userId) =>
+      _storage.read(key: stageSuggestionSeenPrefix + userId);
+
+  Future<void> saveStageSuggestionSeen(String userId, String stage) =>
+      _storage.write(key: stageSuggestionSeenPrefix + userId, value: stage);
 
   Future<({ThemeMode mode, AppPalette palette})> load() async {
     final modeRaw = await _storage.read(key: themeModeKey);
