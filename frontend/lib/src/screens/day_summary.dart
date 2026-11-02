@@ -62,6 +62,7 @@ class DaySummaryBar extends StatelessWidget {
     required this.cycleKind,
     required this.palette,
     this.onEdit,
+    this.onView,
     this.onJumpToToday,
     this.isFuture = false,
     this.note = '',
@@ -76,8 +77,11 @@ class DaySummaryBar extends StatelessWidget {
   final CycleDayKind cycleKind;
   final AppPalette palette;
 
-  /// Null on read-only calendars: tags only, no button.
+  /// Null on read-only calendars: they get [onView] instead.
   final VoidCallback? onEdit;
+
+  /// Read-only calendars: opens the day card (see [showDayInfoCard]).
+  final VoidCallback? onView;
 
   /// Set when the selected day or visible month is not today's.
   final VoidCallback? onJumpToToday;
@@ -201,19 +205,23 @@ class DaySummaryBar extends StatelessWidget {
     final size = MediaQuery.sizeOf(context);
     final compact =
         size.width >= 600 || (size.height < 600 && size.width >= 480);
-    final button = onEdit == null
+    final viewing = onEdit == null && onView != null;
+    final button = onEdit == null && onView == null
         ? null
         : FilledButton.icon(
-            key: const ValueKey('update-day-button'),
-            onPressed: isFuture ? null : onEdit,
+            key: ValueKey(viewing ? 'view-day-button' : 'update-day-button'),
+            // Viewing stays enabled on future days: they show predictions.
+            onPressed: viewing ? onView : (isFuture ? null : onEdit),
             // The theme's full-width minimum would not fit beside the tags.
             style: compact
                 ? FilledButton.styleFrom(minimumSize: const Size(0, 48))
                 : null,
-            icon: const Icon(Icons.edit_calendar_outlined),
-            label: Text(
-              isToday ? strings.updateToday : strings.updateDay(shortDay),
-            ),
+            icon: Icon(viewing
+                ? Icons.visibility_outlined
+                : Icons.edit_calendar_outlined),
+            label: Text(viewing
+                ? (isToday ? strings.viewToday : strings.viewDay(shortDay))
+                : (isToday ? strings.updateToday : strings.updateDay(shortDay))),
           );
 
     final barHeight = compact ? 48.0 : 52.0;
@@ -233,13 +241,15 @@ class DaySummaryBar extends StatelessWidget {
               icon: const Icon(Icons.today),
             ),
           );
-    final actions = button == null
+    final actions = button == null && jump == null
         ? null
         : Row(
             mainAxisSize: compact ? MainAxisSize.min : MainAxisSize.max,
             children: [
-              if (compact) button else Expanded(child: button),
-              if (jump != null) ...[const SizedBox(width: 8), jump],
+              if (button != null)
+                if (compact) button else Expanded(child: button),
+              if (button != null && jump != null) const SizedBox(width: 8),
+              if (jump != null) jump,
             ],
           );
 
@@ -584,4 +594,174 @@ Future<void> showDayNoteCard(
       );
     },
   );
+}
+
+/// Read-only card with everything known about [day], for calendars that
+/// cannot edit. Closes itself when [closeSignal] changes, so it never
+/// outlives the data it shows (calendar access cleared or revoked).
+Future<void> showDayInfoCard(
+  BuildContext context, {
+  required Strings strings,
+  required DateTime day,
+  required Entry? entry,
+  required CycleDayKind cycleKind,
+  required AppPalette palette,
+  required ValueListenable<int> closeSignal,
+}) {
+  return showDialog<void>(
+    context: context,
+    useRootNavigator: true,
+    builder: (dialogContext) {
+      final scheme = Theme.of(dialogContext).colorScheme;
+      final textTheme = Theme.of(dialogContext).textTheme;
+      final brightness = Theme.of(dialogContext).brightness;
+      final taken = entry?.taken;
+      final period = App217Colors.period(brightness, palette);
+      final note = entry?.notes.trim() ?? '';
+      final isFuture = day.isAfter(DateTime.now());
+
+      Widget row(Key key, String label, Color color, Widget mark) => Padding(
+            key: key,
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: Row(children: [
+              SizedBox(width: 20, child: Center(child: mark)),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(label,
+                    style: textTheme.bodyLarge?.copyWith(color: scheme.onSurface)),
+              ),
+            ]),
+          );
+
+      final rows = <Widget>[
+        if (taken == null && !isFuture)
+          row(
+            const ValueKey('day-card-status'),
+            strings.unrecorded,
+            scheme.onSurfaceVariant,
+            DayMark(color: scheme.onSurfaceVariant, outlined: true),
+          )
+        else if (taken != null)
+          () {
+            final c = taken
+                ? App217Colors.statusTaken(brightness, palette)
+                : App217Colors.statusMissed(brightness, palette);
+            return row(const ValueKey('day-card-status'),
+                taken ? strings.taken : strings.missed, c, DayMark(color: c));
+          }(),
+        if (entry?.heart ?? false)
+          row(
+            const ValueKey('day-card-heart'),
+            strings.heartLabel,
+            App217Colors.intimacy(brightness, palette),
+            DayMark(
+              color: App217Colors.intimacy(brightness, palette),
+              icon: Icons.favorite,
+            ),
+          ),
+        if (entry?.period ?? false)
+          row(const ValueKey('day-card-period'), strings.periodLabel, period,
+              DayMark(color: period, icon: Icons.water_drop))
+        else if (cycleKind == CycleDayKind.predictedPeriod)
+          row(const ValueKey('day-card-predicted-period'),
+              strings.predictedPeriod, period,
+              DayMark(color: period, icon: Icons.water_drop_outlined)),
+        if (cycleKind == CycleDayKind.pms)
+          row(
+            const ValueKey('day-card-pms'),
+            strings.expectedPms,
+            App217Colors.pms(brightness, palette),
+            DayMark(color: App217Colors.pms(brightness, palette), dashed: true),
+          ),
+      ];
+
+      return _CloseOnSignal(
+          signal: closeSignal,
+          child: AlertDialog(
+            key: const ValueKey('day-info-card'),
+            backgroundColor: scheme.surface,
+            title: Text(
+              strings.dates.fullDate(day),
+              style: textTheme.titleLarge?.copyWith(color: scheme.onSurface),
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  ...rows,
+                  if (note.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Container(
+                      key: const ValueKey('day-card-note'),
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Color.alphaBlend(
+                          scheme.onSurface.withValues(alpha: 0.06),
+                          scheme.surface,
+                        ),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: scheme.outline),
+                      ),
+                      child: Text(
+                        note,
+                        style: textTheme.bodyLarge?.copyWith(
+                          color: scheme.onSurface,
+                          fontSize: 17,
+                          height: 1.35,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                key: const ValueKey('day-card-close'),
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: Text(strings.close),
+              ),
+            ],
+          ),
+      );
+    },
+  );
+}
+
+/// Pops the dialog it sits in when [signal] changes.
+class _CloseOnSignal extends StatefulWidget {
+  const _CloseOnSignal({required this.signal, required this.child});
+
+  final ValueListenable<int> signal;
+  final Widget child;
+
+  @override
+  State<_CloseOnSignal> createState() => _CloseOnSignalState();
+}
+
+class _CloseOnSignalState extends State<_CloseOnSignal> {
+  late final int _opened;
+
+  @override
+  void initState() {
+    super.initState();
+    _opened = widget.signal.value;
+    widget.signal.addListener(_check);
+  }
+
+  @override
+  void dispose() {
+    widget.signal.removeListener(_check);
+    super.dispose();
+  }
+
+  void _check() {
+    if (widget.signal.value != _opened && mounted) {
+      Navigator.of(context).maybePop();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }

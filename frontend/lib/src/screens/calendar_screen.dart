@@ -162,6 +162,10 @@ class _CalendarScreenState extends State<CalendarScreen>
 
   final _liveNote = ValueNotifier<String>('');
 
+  /// Bumped whenever calendar access is cleared; the read-only day card
+  /// closes on it so it never keeps showing private data.
+  final _accessCleared = ValueNotifier<int>(0);
+
   /// Body height from which the note is drawn above the day tags.
   static const _inlineNoteMinBodyHeight = 640.0;
 
@@ -237,6 +241,10 @@ class _CalendarScreenState extends State<CalendarScreen>
       oldWidget.cycleRefreshSignal?.removeListener(_onCycleRefresh);
       widget.cycleRefreshSignal?.addListener(_onCycleRefresh);
     }
+    // Share revoked (or otherwise inactive): the day card must go.
+    if (oldWidget.share.isActive && !widget.share.isActive) {
+      _accessCleared.value++;
+    }
   }
 
   Future<void> _acceptStage(String stage) async {
@@ -285,6 +293,7 @@ class _CalendarScreenState extends State<CalendarScreen>
     _tapTimer?.cancel();
     _monthSnap.dispose();
     _liveNote.dispose();
+    _accessCleared.dispose();
     super.dispose();
   }
 
@@ -397,6 +406,7 @@ class _CalendarScreenState extends State<CalendarScreen>
   }
 
   void _clearCalendarData({String? error, bool cancelPartnerAlerts = true}) {
+    _accessCleared.value++;
     _loadGeneration++;
     _cycleLoadGeneration++;
     final alertGeneration = ++_alertSyncGeneration;
@@ -914,9 +924,10 @@ class _CalendarScreenState extends State<CalendarScreen>
   /// expected, and nothing can be logged yet.
   Future<void> _openDay(DateTime day) async {
     setState(() => _selected = _isSameDay(day, _today) ? null : day);
-    if (!widget.share.canEditCalendar || day.isAfter(_today)) {
-      return;
+    if (!widget.share.canEditCalendar) {
+      return _viewDay(day);
     }
+    if (day.isAfter(_today)) return;
     final key = DateFormat('yyyy-MM-dd').format(day);
     final existing = _visibleEntry(key);
     // Persist via onCommit — not the sheet's pop value. Nested note-dialog
@@ -942,6 +953,19 @@ class _CalendarScreenState extends State<CalendarScreen>
           });
         },
       ),
+    );
+  }
+
+  /// Read-only card with everything known about [day].
+  Future<void> _viewDay(DateTime day) {
+    return showDayInfoCard(
+      context,
+      strings: widget.strings,
+      day: day,
+      entry: _visibleEntry(DateFormat('yyyy-MM-dd').format(day)),
+      cycleKind: _cycle.kindOf(day),
+      palette: widget.palette,
+      closeSignal: _accessCleared,
     );
   }
 
@@ -1310,7 +1334,10 @@ class _CalendarScreenState extends State<CalendarScreen>
                 onEdit: widget.share.canEditCalendar
                     ? () => _openDay(selectedDay)
                     : null,
-                onJumpToToday: widget.share.canEditCalendar && _awayFromToday
+                onView: widget.share.canEditCalendar
+                    ? null
+                    : () => _viewDay(selectedDay),
+                onJumpToToday: _awayFromToday
                     ? _jumpToToday
                     : null,
                 isFuture: selectedDay.isAfter(_today),
