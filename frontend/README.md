@@ -10,7 +10,7 @@ With the stack up (`make dev-up` from the repo root):
 make web
 ```
 
-Open <http://localhost:8787/>. Sign-in fetches `GET /api/auth/workos` (JSON + binding cookie), then navigates once to AuthKit (branded to match 217). Callback `/api/auth/workos/callback` sets the session cookie and returns you to the app — no second continue screen.
+Open <http://localhost:8787/> (it redirects to `/app/`, where the web app is served; the API stays under `/api/`). Sign-in fetches `GET /api/auth/workos` (JSON + binding cookie), then navigates once to AuthKit (branded to match 217). Callback `/api/auth/workos/callback` sets the session cookie and returns you to the app — no second continue screen.
 
 Web defaults to an empty `API_BASE_URL` (same origin). Browser HTTP uses credentials so the session cookie is sent.
 

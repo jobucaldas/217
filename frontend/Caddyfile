@@ -40,13 +40,24 @@
         }
     }
 
-    # SPA fallback so deep links / refresh serve the Flutter shell.
-    # Revalidate on every load (ETag keeps it cheap) so a new deploy shows up
-    # at once instead of an old bundle lingering in the browser cache.
-    handle {
+    # The web app lives under /app/ (built with --base-href /app/), so the API
+    # keeps the root of the origin. SPA fallback so deep links / refresh serve
+    # the Flutter shell. Revalidate on every load (ETag keeps it cheap) so a new
+    # deploy shows up at once instead of an old bundle lingering in the cache.
+    handle /app {
+        redir * /app/ 308
+    }
+
+    handle_path /app/* {
         root * /app/dist
         header Cache-Control "no-cache"
         try_files {path} /index.html
         file_server
+    }
+
+    # The API redirects to the bare origin after sign-in and builds invite links
+    # as /?invite=..., so everything else lands in the app.
+    handle {
+        redir * /app{uri} 302
     }
 }

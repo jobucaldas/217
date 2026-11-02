@@ -228,6 +228,6 @@ Windows and Linux builds need their own OS: `flutter build windows|linux --relea
 | Path | Role |
 |---|---|
 | `backend/` | Go API. `Dockerfile`: `dev` stage (toolchain used by compose) and the production image |
-| `frontend/` | Flutter app (web, Android, Windows, Linux). `Dockerfile`: `local` builds the web bundle from source, `prebuilt` (default, what CI publishes) copies `build/web`; `Caddyfile` serves it and proxies `/api/*` (`SITE_ADDRESS`, `BACKEND_UPSTREAM`) |
+| `frontend/` | Flutter app (web, Android, Windows, Linux). `Dockerfile`: `local` builds the web bundle from source, `prebuilt` (default, what CI publishes) copies `build/web`; `Caddyfile` serves it under `/app/` and proxies `/api/*` (`SITE_ADDRESS`, `BACKEND_UPSTREAM`) |
 | `docker-compose.yml` | Dev stack and tooling |
 | `.github/workflows/ci.yml` | Checks on every PR; on `main`, publishes the GHCR images and the app releases |
