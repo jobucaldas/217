@@ -227,6 +227,14 @@ class _CalendarScreenState extends State<CalendarScreen>
     }
   }
 
+  bool get _stageBannerShown {
+    final suggestion = widget.stageSuggestion;
+    return widget.user.isOwner &&
+        suggestion != null &&
+        suggestion.userId == widget.user.id &&
+        suggestion.showBanner;
+  }
+
   void _onCycleRefresh() {
     if (mounted) _loadCycle();
   }
@@ -1234,10 +1242,16 @@ class _CalendarScreenState extends State<CalendarScreen>
               left: 20,
               right: 20,
               top: 8,
-              child: ReminderHint(
-                key: const ValueKey('reminder-hint'),
-                strings: widget.strings,
-                onDismiss: widget.onDismissReminderHint!,
+              // Waits while the stage banner is up: it would cover its buttons.
+              child: ListenableBuilder(
+                listenable: widget.stageSuggestion ?? const _NoListenable(),
+                builder: (context, _) => _stageBannerShown
+                    ? const SizedBox.shrink()
+                    : ReminderHint(
+                        key: const ValueKey('reminder-hint'),
+                        strings: widget.strings,
+                        onDismiss: widget.onDismissReminderHint!,
+                      ),
               ),
             ),
         ],
@@ -2014,4 +2028,15 @@ class _PartnerModeLabel extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Stands in for a missing [StageSuggestion] in a [ListenableBuilder].
+class _NoListenable implements Listenable {
+  const _NoListenable();
+
+  @override
+  void addListener(VoidCallback listener) {}
+
+  @override
+  void removeListener(VoidCallback listener) {}
 }

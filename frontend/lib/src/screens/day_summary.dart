@@ -223,6 +223,11 @@ class DaySummaryBar extends StatelessWidget {
             dimension: barHeight,
             child: IconButton.filledTonal(
               key: const ValueKey('jump-to-today-button'),
+              // Square, with the corners of the update-day button beside it.
+              style: IconButton.styleFrom(
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14)),
+              ),
               tooltip: strings.jumpToToday,
               onPressed: onJumpToToday,
               icon: const Icon(Icons.today),
