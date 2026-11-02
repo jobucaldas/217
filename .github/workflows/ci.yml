@@ -247,22 +247,55 @@ jobs:
           path: frontend/build/217-setup.exe
           retention-days: 3
 
-  # Re-renders the store-listing screenshots (assets/*-screenshots) from the app's real
-  # screens. On main they ship with the release as 217-store-screenshots.zip.
+  # Pull requests only: when the app's screens (or this tooling) changed, re-renders the
+  # store-listing screenshots (assets/*-screenshots) and commits them to the PR branch.
+  # No loop: a push made with GITHUB_TOKEN starts no workflows, the job skips heads
+  # authored by the bot, and it commits nothing unless the files changed. Fork PRs are
+  # skipped (no write access).
   screenshots:
     name: Store screenshots
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     container:
       image: ghcr.io/cirruslabs/flutter:stable
+    env:
+      HEAD_REF: ${{ github.head_ref }}
+      BASE_REF: ${{ github.base_ref }}
     steps:
       - uses: actions/checkout@v4
-      - run: ./render-screenshots.sh
-      - if: github.event_name == 'push'
-        uses: actions/upload-artifact@v4
         with:
-          name: store-screenshots
-          path: assets/*-screenshots
-          retention-days: 3
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+      - name: Check what changed
+        id: changed
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          if [ "$(git log -1 --format=%an)" = "github-actions[bot]" ]; then
+            echo "value=false" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only "origin/${BASE_REF}...HEAD" \
+              | grep -Eq '^(frontend/(lib/|tool/|assets/fonts/|pubspec\.)|render-screenshots\.sh)'; then
+            echo "value=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::No screen or tooling changes; keeping the committed screenshots."
+            echo "value=false" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.changed.outputs.value == 'true'
+        run: ./render-screenshots.sh
+      - name: Commit the new screenshots
+        if: steps.changed.outputs.value == 'true'
+        run: |
+          git add assets
+          if git diff --cached --quiet; then exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore(assets): re-render store screenshots"
+          git push origin "HEAD:${HEAD_REF}" \
+            || echo "::warning::The branch moved while rendering; the next run re-renders."
 
   # main only: GHCR images + app releases (APK, Windows installer, AppImage), as the
   # rolling `nightly` pre-release and an immutable `0.YY.MMDD-RUN` release marked latest.
@@ -270,7 +303,7 @@ jobs:
   publish:
     name: Publish (GHCR + GitHub Releases)
     if: github.event_name == 'push'
-    needs: [backend, frontend, images, linux, windows, screenshots]
+    needs: [backend, frontend, images, linux, windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -289,10 +322,6 @@ jobs:
         with:
           name: windows-build
           path: dist
-      - uses: actions/download-artifact@v4
-        with:
-          name: store-screenshots
-          path: dist/screenshots
       - name: Compute tags
         id: tags
         env:
@@ -332,7 +361,6 @@ jobs:
           SHORT_SHA="${GITHUB_SHA:0:7}"
           COMMIT_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}"
           APK=frontend/build/app/outputs/flutter-apk/app-release.apk
-          (cd dist/screenshots && zip -qr "$GITHUB_WORKSPACE/217-store-screenshots.zip" .)
           for tag in nightly "${TAG}"; do
             cp "$APK" "217-${tag}.apk"
             cp dist/217-x86_64.AppImage "217-${tag}-x86_64.AppImage"
@@ -345,7 +373,6 @@ jobs:
             "- \`.apk\`: Android (release build, signed with the project's release key; updates install over earlier releases)" \
             "- \`-setup.exe\`: Windows installer (per-user, unsigned: SmartScreen may warn)" \
             "- \`.AppImage\`: Linux (\`chmod +x\` and run)" \
-            "- \`217-store-screenshots.zip\`: store-listing screenshots rendered from this build" \
             "" \
             "Every app asks for your 217 server on first launch (see the README's Self-hosting section).")"
 
@@ -354,6 +381,6 @@ jobs:
           else
             gh release create nightly --title Nightly --target "$GITHUB_SHA" --notes "${NOTES}" --prerelease
           fi
-          gh release upload nightly 217-nightly.apk 217-nightly-x86_64.AppImage 217-nightly-setup.exe 217-store-screenshots.zip --clobber
+          gh release upload nightly 217-nightly.apk 217-nightly-x86_64.AppImage 217-nightly-setup.exe --clobber
           gh release create "$TAG" --title "$TAG" --target "$GITHUB_SHA" --notes "${NOTES}" --latest \
-            "217-${TAG}.apk" "217-${TAG}-x86_64.AppImage" "217-${TAG}-setup.exe" 217-store-screenshots.zip
+            "217-${TAG}.apk" "217-${TAG}-x86_64.AppImage" "217-${TAG}-setup.exe"
