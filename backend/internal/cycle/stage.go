@@ -59,8 +59,11 @@ func LatestPeriodDay(days []string, today time.Time) string {
 
 // SuggestStage returns the reproductive stage the owner's data points to,
 // or "" when there is nothing to suggest:
-//   - menopause: at least one logged period day, the latest at least
-//     MenopauseMonths before today;
+//   - menopause: aged at least PerimenopauseMinAge, with at least one
+//     logged period day, the latest at least MenopauseMonths before today
+//     (the age gate keeps a younger owner who simply stopped logging
+//     periods, or whose pill stops bleeding, from being told it is
+//     menopause);
 //   - perimenopause: aged PerimenopauseMinAge to PerimenopauseMaxAge;
 //   - otherwise cycling.
 //
@@ -71,11 +74,11 @@ func SuggestStage(current, birthMonth string, periodDays []string, today time.Ti
 	today = dateOnly(today)
 	age, hasAge := AgeAt(birthMonth, today)
 	latest := LatestPeriodDay(periodDays, today)
-	if !hasAge && latest == "" {
+	if !hasAge {
 		return ""
 	}
 	suggested := model.StageCycling
-	if latest != "" {
+	if latest != "" && age >= PerimenopauseMinAge {
 		last, _ := time.Parse(layout, latest)
 		if !last.AddDate(0, MenopauseMonths, 0).After(today) {
 			suggested = model.StageMenopause

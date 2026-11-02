@@ -77,7 +77,7 @@ Offline-first client: `ApiClient` keeps the last session, months, cycle and aler
 - `GET /api/entries?year=YYYY&month=MM`
 - `GET|POST|DELETE /api/entries/{date}` — body `{taken, notes, heart, period}`
 - `GET /api/stats?year=YYYY&month=MM`
-- `GET /api/cycle?today=YYYY-MM-DD` — period starts + next predicted periods/PMS windows; for the owner herself also `suggested_stage` (omitted when none) from `cycle.SuggestStage`: menopause when the latest logged period day is ≥ 12 months before `today`, perimenopause at age 45–55, only ever forward from the current stage
+- `GET /api/cycle?today=YYYY-MM-DD` — period starts + next predicted periods/PMS windows; for the owner herself also `suggested_stage` (omitted when none) from `cycle.SuggestStage`: needs a birth month: menopause from age 45 when the latest logged period day is ≥ 12 months before `today`, perimenopause at age 45–55, only ever forward from the current stage
 
 ### Reminders (auth required)
 - `GET|PUT /api/reminders/preferences` — `{enabled, time, timezone, repeat_enabled, repeat_minutes}`; `repeat_minutes` is 1-120 and repeats the owner's own "pill not logged" reminder until logged or day end
