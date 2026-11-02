@@ -207,6 +207,58 @@ void main() {
     expect(find.byType(DayEditorSheet), findsNothing);
   });
 
+
+  testWidgets('partner pulls the sheet up for more, down to close',
+      (tester) async {
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    const longNote = 'A long note that the resting sheet does not spell out '
+        'in full but the expanded one does.';
+    await tester.pumpWidget(_app(_calendar(entries: [
+      Entry(date: _key(today), taken: true, notes: longNote),
+    ])));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('view-day-button')));
+    await tester.pumpAndSettle();
+
+    final sheet = find.byKey(const ValueKey('expandable-day-sheet'));
+    final restingTop = tester.getTopLeft(sheet).dy;
+    expect(find.byKey(const ValueKey('day-more-note')), findsOneWidget);
+    expect(find.byType(DayEditorSheet), findsOneWidget);
+
+    await tester.drag(sheet, const Offset(0, -300));
+    await tester.pumpAndSettle();
+    expect(tester.getTopLeft(sheet).dy, lessThan(restingTop));
+    expect(find.text(longNote), findsOneWidget);
+    expect(
+      tester
+          .widget<SegmentedButton<bool>>(find.byType(SegmentedButton<bool>))
+          .onSelectionChanged,
+      isNull,
+    );
+
+    await tester.fling(sheet, const Offset(0, 600), 2000);
+    await tester.pumpAndSettle();
+    expect(find.byType(DayEditorSheet), findsNothing);
+  });
+
+  testWidgets('a day with nothing more keeps the owner-sized sheet',
+      (tester) async {
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(_app(_calendar(entries: const [])));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('view-day-button')));
+    await tester.pumpAndSettle();
+
+    final sheet = find.byKey(const ValueKey('expandable-day-sheet'));
+    final top = tester.getTopLeft(sheet).dy;
+    expect(find.byKey(const ValueKey('day-more-note')), findsNothing);
+    await tester.drag(sheet, const Offset(0, -300));
+    await tester.pumpAndSettle();
+    expect(tester.getTopLeft(sheet).dy, top);
+  });
+
   testWidgets('owner still gets the editor, not the read-only sheet',
       (tester) async {
     await tester.binding.setSurfaceSize(const Size(390, 844));

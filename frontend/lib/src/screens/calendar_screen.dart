@@ -1025,24 +1025,34 @@ class _CalendarScreenState extends State<CalendarScreen>
   }
 
   /// The owner's day sheet, read-only: a partner sees the same marks and note
-  /// but cannot change them. Closes when calendar access is cleared.
+  /// but cannot change them. Pull it up for what else is known about the day
+  /// (predictions, the whole note). Closes when calendar access is cleared.
   Future<void> _viewDay(DateTime day) {
     final key = DateFormat('yyyy-MM-dd').format(day);
     final existing = _visibleEntry(key);
+    final cycleKind = _cycle.kindOf(day);
     return showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      showDragHandle: true,
-      builder: (context) => DayEditorSheet(
+      // The expandable sheet draws its own surface and handle.
+      backgroundColor: Colors.transparent,
+      builder: (context) => ExpandableDaySheet(
         strings: widget.strings,
-        date: key,
-        initialTaken: existing?.taken,
-        initialNotes: existing?.notes ?? '',
-        initialHeart: existing?.heart ?? false,
-        initialPeriod: existing?.period ?? false,
-        hadEntry: existing != null,
-        readOnly: true,
-        closeSignal: _accessCleared,
+        palette: widget.palette,
+        day: day,
+        notes: existing?.notes.trim() ?? '',
+        cycleKind: cycleKind,
+        sheet: DayEditorSheet(
+          strings: widget.strings,
+          date: key,
+          initialTaken: existing?.taken,
+          initialNotes: existing?.notes ?? '',
+          initialHeart: existing?.heart ?? false,
+          initialPeriod: existing?.period ?? false,
+          hadEntry: existing != null,
+          readOnly: true,
+          closeSignal: _accessCleared,
+        ),
       ),
     );
   }
