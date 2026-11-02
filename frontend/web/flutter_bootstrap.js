@@ -6,6 +6,6 @@
 // never send users' IP addresses to Google.
 _flutter.loader.load({
   config: {
-    fontFallbackBaseUrl: "gstatic/s/",
+    fontFallbackBaseUrl: "/gstatic/s/",
   },
 });
