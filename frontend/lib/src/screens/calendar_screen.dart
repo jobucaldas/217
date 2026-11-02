@@ -141,6 +141,15 @@ class _CalendarScreenState extends State<CalendarScreen>
   /// Extra body height the inline note needs per unit of text scale above 1
   /// (three note lines plus the tags and button growing with the text).
   static const _inlineNoteGrowthPerTextScale = 160.0;
+
+  /// The "today" header is dropped when keeping it would squash a six-week
+  /// grid (the worst case, note already a tag) below cells 0.8x as tall as
+  /// they are wide; regular cells are 1.15x. Fixed chrome around the grid:
+  /// month navigator, weekday row and grid insets; the text-bearing header
+  /// and summary bar grow with the text scale.
+  static const _gridMinCellAspect = 0.8;
+  static const _fixedChromeHeight = 56.0 + 28 + 16;
+  static const _headerAndSummaryHeight = 76.0 + 110;
   Animation<double>? _monthSnapAnim;
 
   /// Web touchpad scroll has no end event: an idle gap ends the gesture,
@@ -793,6 +802,13 @@ class _CalendarScreenState extends State<CalendarScreen>
     final noteAsTag = bodyHeight <
         _inlineNoteMinBodyHeight +
             (textScale - 1).clamp(0.0, 2.0) * _inlineNoteGrowthPerTextScale;
+    // Staged after the note: only on even shorter screens does the header
+    // go too (the bottom bar's day tag still shows the status).
+    final cellWidth = (MediaQuery.sizeOf(context).width - 24) / 7;
+    final hideHeader = bodyHeight <
+        _fixedChromeHeight +
+            _headerAndSummaryHeight * math.max(1.0, textScale) +
+            6 * _gridMinCellAspect * cellWidth;
     // The open note card follows this, so it closes if the data is cleared.
     if (_liveNote.value != selectedNotes) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -898,35 +914,37 @@ class _CalendarScreenState extends State<CalendarScreen>
                   strings: widget.strings,
                   onUpdate: _acceptStage,
                 ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Text(
-                      widget.strings.today,
-                      style: text.labelLarge?.copyWith(
-                        color: scheme.onSurfaceVariant,
-                        letterSpacing: 0.6,
+              if (!hideHeader)
+                Padding(
+                  key: const ValueKey('today-header'),
+                  padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        widget.strings.today,
+                        style: text.labelLarge?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                          letterSpacing: 0.6,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 2),
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.baseline,
-                      textBaseline: TextBaseline.alphabetic,
-                      children: [
-                        Expanded(
-                          child: Text(humanDate, style: text.headlineMedium),
-                        ),
-                        Text(
-                          todayStatus,
-                          style: text.titleLarge?.copyWith(color: todayColor),
-                        ),
-                      ],
-                    ),
-                  ],
+                      const SizedBox(height: 2),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.baseline,
+                        textBaseline: TextBaseline.alphabetic,
+                        children: [
+                          Expanded(
+                            child: Text(humanDate, style: text.headlineMedium),
+                          ),
+                          Text(
+                            todayStatus,
+                            style: text.titleLarge?.copyWith(color: todayColor),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
-              ),
               if (cycleLines.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),

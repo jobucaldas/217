@@ -80,6 +80,10 @@ Future<void> _pumpCalendar(
   int Function()? sessionGeneration,
   bool Function(int, String)? isSessionCurrent,
 }) async {
+  // Tall enough for the "today" header these tests read the status from.
+  tester.view.devicePixelRatio = 1;
+  tester.view.physicalSize = const Size(800, 900);
+  addTearDown(tester.view.reset);
   await tester.pumpWidget(MaterialApp(
     theme: buildApp217Theme(
       brightness: Brightness.dark,
