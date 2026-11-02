@@ -16,7 +16,7 @@ Your calendar lives on a server you run. You only need Docker; no clone of this 
 - `com.caldasstudios.app217://auth/callback` (Android)
 - `http://localhost:21717/auth/callback` (Windows, Linux)
 
-Optional: upload `frontend/branding/logo-217-light.svg` / `logo-217-dark.svg` under **Branding** for the hosted sign-in page.
+Optional: upload `assets/branding/logo-217-light.svg` / `logo-217-dark.svg` under **Branding** for the hosted sign-in page.
 
 **2. Save this as `compose.yaml`:**
 
