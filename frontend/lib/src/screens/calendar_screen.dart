@@ -134,9 +134,15 @@ class _CalendarScreenState extends State<CalendarScreen>
   /// ends; 0 when it only springs back.
   int _snapCommit = 0;
 
-  /// Month the running snap lands on when it is not simply the next or
-  /// previous one (jump to today).
-  DateTime? _snapCommitMonth;
+  /// Running jump to today: months crossed so far (0 → [_jumpSteps].abs(),
+  /// eased) from [_jumpFrom]. The carousel scrolls through every month in
+  /// between instead of cutting to the target.
+  Animation<double>? _jumpAnim;
+  DateTime _jumpFrom = DateTime(0);
+  int _jumpSteps = 0;
+
+  /// Longest a jump to today may take, however many months it crosses.
+  static const _jumpMaxMs = 1000;
 
   /// Moves on every shown month and on clearing the data, so a read of the
   /// device's copy that comes back late does not repopulate stale months.
@@ -225,7 +231,10 @@ class _CalendarScreenState extends State<CalendarScreen>
       vsync: this,
       duration: const Duration(milliseconds: 280),
     )..addListener(() {
-        if (_monthSnapAnim != null && mounted) {
+        if (!mounted) return;
+        if (_jumpAnim != null) {
+          _jumpTick();
+        } else if (_monthSnapAnim != null) {
           setState(() => _dragPx = _monthSnapAnim!.value);
         }
       });
@@ -588,14 +597,19 @@ class _CalendarScreenState extends State<CalendarScreen>
   /// stay where they are on screen. Returns whether the month changed; the
   /// caller redraws and calls [_monthShown].
   bool _settleSnap() {
+    if (_jumpAnim != null) {
+      // A jump already moved [_month] along with the offset, frame by frame.
+      _monthSnap.stop();
+      _jumpAnim = null;
+      _jumpSteps = 0;
+      return false;
+    }
     final commit = _snapCommit;
-    final landing = _snapCommitMonth;
     _monthSnap.stop();
     _monthSnapAnim = null;
     _snapCommit = 0;
-    _snapCommitMonth = null;
     if (commit == 0) return false;
-    _month = landing ?? DateTime(_month.year, _month.month + commit);
+    _month = DateTime(_month.year, _month.month + commit);
     final width = _carouselWidth > 0
         ? _carouselWidth
         : MediaQuery.sizeOf(context).width;
@@ -677,8 +691,7 @@ class _CalendarScreenState extends State<CalendarScreen>
     _animateMonthTo(0, commitDelta: 0);
   }
 
-  void _animateMonthTo(double target,
-      {required int commitDelta, DateTime? commitMonth}) {
+  void _animateMonthTo(double target, {required int commitDelta}) {
     // A snap still running (fast chevron taps) lands its month first.
     final settled = _settleSnap();
     if (settled) {
@@ -687,7 +700,6 @@ class _CalendarScreenState extends State<CalendarScreen>
     }
     final begin = _dragPx;
     _snapCommit = commitDelta;
-    _snapCommitMonth = commitMonth;
     // Slight overshoot on settle (recoil), not overblown.
     const recoil = Cubic(0.34, 1.22, 0.64, 1);
     final curve = commitDelta == 0 ? Curves.easeOutCubic : recoil;
@@ -705,11 +717,9 @@ class _CalendarScreenState extends State<CalendarScreen>
       // Settled early by a new gesture: that one owns the state now.
       if (!mounted || !identical(anim, _monthSnapAnim)) return;
       _snapCommit = 0;
-      _snapCommitMonth = null;
       if (commitDelta != 0) {
         setState(() {
-          _month = commitMonth ??
-              DateTime(_month.year, _month.month + commitDelta);
+          _month = DateTime(_month.year, _month.month + commitDelta);
           _dragPx = 0;
           _monthSnapAnim = null;
           _showCachedMonths();
@@ -902,14 +912,26 @@ class _CalendarScreenState extends State<CalendarScreen>
       _month.year != _today.year ||
       _month.month != _today.month;
 
-  /// Selects today and slides the carousel back to the current month.
+  /// Selects today and scrolls the carousel back to the current month,
+  /// through every month in between, in at most [_jumpMaxMs].
   void _jumpToToday() {
     setState(() => _selected = null);
+    if (_jumpAnim != null) return;
+    if (_settleSnap()) {
+      _showCachedMonths();
+      _monthShown();
+    }
     final now = _today;
     final target = DateTime(now.year, now.month);
     final delta = (target.year - _month.year) * 12 + target.month - _month.month;
-    if (delta == 0 || _monthSnap.isAnimating) return;
-    final width = MediaQuery.sizeOf(context).width;
+    final width = _carouselWidth > 0
+        ? _carouselWidth
+        : MediaQuery.sizeOf(context).width;
+    if (delta == 0) {
+      // Already here (a settled snap may have left it off-centre).
+      if (_dragPx != 0) _animateMonthTo(0, commitDelta: 0);
+      return;
+    }
     if (width <= 0) {
       setState(() {
         _month = target;
@@ -919,8 +941,49 @@ class _CalendarScreenState extends State<CalendarScreen>
       _monthShown();
       return;
     }
-    _animateMonthTo(delta > 0 ? -width : width,
-        commitDelta: delta.sign, commitMonth: target);
+    final steps = delta.abs();
+    // Whatever the grid is already showing of the way there counts.
+    final start = (-delta.sign * _dragPx / width).clamp(-1.0, 1.0);
+    setState(() {
+      _monthDragging = false;
+      _jumpFrom = _month;
+      _jumpSteps = delta;
+      _jumpAnim = Tween<double>(begin: start, end: steps.toDouble()).animate(
+        CurvedAnimation(parent: _monthSnap, curve: Curves.easeInOutCubic),
+      );
+    });
+    _monthSnap.duration = Duration(
+      milliseconds: (300 + 100 * (steps - 1)).clamp(300, _jumpMaxMs),
+    );
+    final anim = _jumpAnim;
+    _monthSnap.forward(from: 0).whenComplete(() {
+      if (!mounted || !identical(anim, _jumpAnim)) return;
+      setState(() {
+        _jumpAnim = null;
+        _jumpSteps = 0;
+        _dragPx = 0;
+      });
+    });
+  }
+
+  /// One frame of the jump to today: the month under the carousel follows
+  /// the eased position, the offset shows the way to the next one.
+  void _jumpTick() {
+    final steps = _jumpSteps.abs();
+    final pos = _jumpAnim!.value;
+    final crossed = pos.floor().clamp(0, steps);
+    final month =
+        DateTime(_jumpFrom.year, _jumpFrom.month + _jumpSteps.sign * crossed);
+    final width = _carouselWidth > 0
+        ? _carouselWidth
+        : MediaQuery.sizeOf(context).width;
+    final changed = month != _month;
+    setState(() {
+      _month = month;
+      _dragPx = crossed >= steps ? 0 : -_jumpSteps.sign * (pos - crossed) * width;
+      if (changed) _showCachedMonths();
+    });
+    if (changed) _monthShown();
   }
 
   /// Selects [day] for the summary; on an editable calendar, also opens
