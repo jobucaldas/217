@@ -47,7 +47,7 @@ class PersonalSection extends StatefulWidget {
 
 class _PersonalSectionState extends State<PersonalSection> {
   late final TextEditingController _name =
-      TextEditingController(text: widget.user.displayName);
+      TextEditingController(text: widget.user.shownName);
   bool _savingName = false;
   bool _savingBirth = false;
   bool _savingStage = false;
@@ -65,9 +65,9 @@ class _PersonalSectionState extends State<PersonalSection> {
   void didUpdateWidget(covariant PersonalSection oldWidget) {
     super.didUpdateWidget(oldWidget);
     // Keep what is being typed; follow the server otherwise.
-    if (oldWidget.user.displayName != widget.user.displayName &&
-        _name.text.trim() == oldWidget.user.displayName) {
-      _name.text = widget.user.displayName;
+    if (oldWidget.user.shownName != widget.user.shownName &&
+        _name.text.trim() == oldWidget.user.shownName) {
+      _name.text = widget.user.shownName;
     }
   }
 
@@ -92,16 +92,18 @@ class _PersonalSectionState extends State<PersonalSection> {
       ..showSnackBar(SnackBar(content: Text(message)));
   }
 
-  bool get _nameChanged => _name.text.trim() != widget.user.displayName;
+  bool get _nameChanged => _name.text.trim() != widget.user.shownName;
 
   Future<void> _saveName() async {
     if (!_nameChanged || _savingName) return;
     setState(() => _savingName = true);
     try {
-      final session =
-          await widget.api.updateProfile(displayName: _name.text.trim());
+      // Clearing the field (or typing the sign-in name) drops the override.
+      final typed = _name.text.trim();
+      final session = await widget.api
+          .updateProfile(displayName: typed == widget.user.name ? '' : typed);
       if (!mounted) return;
-      _name.text = session.user?.displayName ?? _name.text.trim();
+      _name.text = session.user?.shownName ?? typed;
       setState(() => _savingName = false);
       widget.onProfileChanged?.call(session);
       _showSnack(widget.strings.displayNameSaved);
@@ -184,10 +186,6 @@ class _PersonalSectionState extends State<PersonalSection> {
             style: text.bodyLarge?.copyWith(color: scheme.onSurface),
             decoration: InputDecoration(
               labelText: strings.displayName,
-              hintText: user.name,
-              helperText: strings.displayNameHelp(user.name),
-              helperMaxLines: 3,
-              helperStyle: hint,
               counterText: '',
               suffixIcon: _nameChanged
                   ? IconButton(

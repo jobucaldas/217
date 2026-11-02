@@ -21,6 +21,9 @@ class User {
   /// Owner's birth month, `YYYY-MM` (empty: not given).
   final String birthDate;
 
+  /// The name the other side sees: the chosen one, else the sign-in name.
+  String get shownName => displayName.trim().isNotEmpty ? displayName : name;
+
   /// Takes the pill and fills the calendar.
   bool get isOwner => role == 'owner';
 
