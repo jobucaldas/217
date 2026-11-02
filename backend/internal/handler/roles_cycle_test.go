@@ -111,6 +111,16 @@ func TestOwnerStageControlsCyclePMSAndPartnersCannotSetIt(t *testing.T) {
 	if info.Note != "pms_counted_perimenopause" || len(info.Predictions) == 0 || info.Predictions[0].PMSStart == "" {
 		t.Fatalf("perimenopause with periods: %d %+v", w.Code, info)
 	}
+	if w := call(t, h, h.SetStage, http.MethodPut, "/api/account/stage", ownerCookie, `{"stage":"no_cycles"}`); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"stage":"no_cycles"`) {
+		t.Fatalf("set no_cycles: %d %s", w.Code, w.Body.String())
+	}
+	w = call(t, h, h.GetCycle, http.MethodGet, "/api/cycle?today="+today, ownerCookie, "")
+	if err := json.Unmarshal(w.Body.Bytes(), &info); err != nil {
+		t.Fatal(err)
+	}
+	if info.Stage != "no_cycles" || info.Note != "no_cycles" || len(info.Predictions) != 0 {
+		t.Fatalf("no_cycles cycle: %d %+v", w.Code, info)
+	}
 	noHistory := newUser(t, s, "stage-empty@example.com", "owner")
 	if _, err := s.SetStage(noHistory.ID, "perimenopause"); err != nil {
 		t.Fatal(err)

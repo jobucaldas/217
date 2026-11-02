@@ -881,6 +881,7 @@ class _CalendarScreenState extends State<CalendarScreen>
     final cycleLines = <({bool pms, bool now, String text})>[];
     if (next == null) {
       if (_cycle.note != 'pms_suppressed_menopause' &&
+          _cycle.note != 'no_cycles' &&
           widget.share.canEditCalendar) {
         cycleLines
             .add((pms: false, now: false, text: widget.strings.cycleHintOwner));

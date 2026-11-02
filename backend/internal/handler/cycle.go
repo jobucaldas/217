@@ -89,12 +89,15 @@ func (h *Handler) GetCycle(w http.ResponseWriter, r *http.Request) {
 	info := cycle.Predict(days, today)
 	note := ""
 	switch owner.Stage {
-	case "menopause":
+	case model.StageMenopause:
 		note = "pms_suppressed_menopause"
 		for i := range info.Predictions {
 			info.Predictions[i].PMSStart = ""
 			info.Predictions[i].PMSEnd = ""
 		}
+	case model.StageNoCycles:
+		note = "no_cycles"
+		info.Predictions = []model.CycleWindow{}
 	case "perimenopause":
 		note = "pms_counted_perimenopause"
 	}

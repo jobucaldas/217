@@ -31,6 +31,8 @@ const (
 	StageCycling       = "cycling"
 	StagePerimenopause = "perimenopause"
 	StageMenopause     = "menopause"
+	// StageNoCycles is for someone who has no cycles at all: no predictions.
+	StageNoCycles = "no_cycles"
 
 	// MaxDisplayNameRunes bounds a user-chosen display name.
 	MaxDisplayNameRunes = 60
@@ -38,7 +40,7 @@ const (
 
 // ValidStage reports whether stage is one of the reproductive stages.
 func ValidStage(stage string) bool {
-	return stage == StageCycling || stage == StagePerimenopause || stage == StageMenopause
+	return stage == StageCycling || stage == StagePerimenopause || stage == StageMenopause || stage == StageNoCycles
 }
 
 // PublicName is the name shown to the other side of a share: the chosen

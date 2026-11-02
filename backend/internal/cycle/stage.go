@@ -22,6 +22,7 @@ var stageRank = map[string]int{
 	model.StageCycling:       0,
 	model.StagePerimenopause: 1,
 	model.StageMenopause:     2,
+	model.StageNoCycles:      3,
 }
 
 // AgeAt is the age in whole years on today for someone born in birthMonth

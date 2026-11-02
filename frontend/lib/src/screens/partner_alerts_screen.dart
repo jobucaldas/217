@@ -108,7 +108,8 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
       final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
       final cycle = await widget.api.getCycle(today);
       if (!mounted) return;
-      setState(() => _pmsSuppressed = cycle.note == 'pms_suppressed_menopause');
+      setState(() => _pmsSuppressed = cycle.note == 'pms_suppressed_menopause' ||
+          cycle.note == 'no_cycles');
     } catch (err) {
       // Never leave or create reminders based on calendar data that could not
       // be read. The saved preferences remain available for later recovery.

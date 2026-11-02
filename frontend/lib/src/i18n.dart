@@ -567,6 +567,10 @@ class Strings {
             'You told 217 you are in perimenopause. Cycles can still happen, so PMS is still counted.',
             'Você informou ao 217 que está na perimenopausa. Ciclos ainda podem ocorrer, então a TPM continua sendo contada.',
             'Le dijiste a 217 que estás en la perimenopausia. Aún puede haber ciclos, así que se sigue contando el SPM.'),
+        'no_cycles' => _t(
+            '217 predicts no periods or PMS because you told 217 you have no cycles.',
+            'O 217 não prevê menstruação nem TPM porque você informou ao 217 que não tem ciclos.',
+            '217 no prevé reglas ni SPM porque le dijiste a 217 que no tienes ciclos.'),
         _ => '',
       };
   String get reproductiveStage =>
@@ -575,6 +579,8 @@ class Strings {
   String get stagePerimenopause =>
       _t('Perimenopause', 'Perimenopausa', 'Perimenopausia');
   String get stageMenopause => _t('Menopause', 'Menopausa', 'Menopausia');
+  String get stageNoCycles =>
+      _t("I don't have cycles", 'Não tenho ciclos', 'No tengo ciclos');
   String get stageSelfReport => _t(
       'This is what you told 217; it is not a diagnosis.',
       'Isto é o que você informou ao 217; não é um diagnóstico.',
@@ -582,6 +588,7 @@ class Strings {
   String stageLabel(String stage) => switch (stage) {
         'perimenopause' => stagePerimenopause,
         'menopause' => stageMenopause,
+        'no_cycles' => stageNoCycles,
         _ => stageCycling,
       };
 
@@ -612,20 +619,20 @@ class Strings {
   String get clear => _t('Clear', 'Limpar', 'Borrar');
   String stageSuggestionBody(String stage) => stage == 'menopause'
       ? _t(
-          'No period logged for 12 months: your stage looks like ${stageLabel(stage)}.',
-          'Nenhuma menstruação registrada há 12 meses: sua fase parece ser ${stageLabel(stage)}.',
-          'Ninguna regla registrada en 12 meses: tu etapa parece ser ${stageLabel(stage)}.')
+          'You might be at menopause',
+          'Você pode estar na menopausa',
+          'Puede que estés en la menopausia')
       : _t(
-          'Based on your age, your stage looks like ${stageLabel(stage)}.',
-          'Pela sua idade, sua fase parece ser ${stageLabel(stage)}.',
-          'Por tu edad, tu etapa parece ser ${stageLabel(stage)}.');
+          'You might be in perimenopause',
+          'Você pode estar na perimenopausa',
+          'Puede que estés en la perimenopausia');
   String get stageSuggestionUpdate => _t('Update', 'Atualizar', 'Actualizar');
   String get stageUpdated => _t('Updated successfully', 'Atualizado com sucesso',
       'Actualizado correctamente');
   String get pmsNotCounted => _t(
-      'PMS is not counted while menopause is selected.',
-      'A TPM não é contada enquanto menopausa estiver selecionada.',
-      'El SPM no se cuenta mientras esté seleccionada la menopausia.');
+      'PMS is not counted for the stage you selected.',
+      'A TPM não é contada na fase que você selecionou.',
+      'El SPM no se cuenta en la etapa que seleccionaste.');
 
   // Partner alerts
   String get partnerAlerts =>

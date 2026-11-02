@@ -44,6 +44,8 @@ func TestSuggestStage(t *testing.T) {
 		{"future days ignored", "perimenopause", "1975-05", []string{"2025-10-01", "2026-12-01"}, "menopause"},
 		{"never back from menopause", "menopause", "1990-01", span("2026-10-20", 4), ""},
 		{"never back from perimenopause", "perimenopause", "1990-01", nil, ""},
+		{"nothing from no_cycles (age)", "no_cycles", "1975-05", nil, ""},
+		{"nothing from no_cycles (gap)", "no_cycles", "1975-05", []string{"2025-11-01"}, ""},
 		{"unknown current treated as cycling", "", "1980-01", nil, "perimenopause"},
 	}
 	for _, c := range cases {
