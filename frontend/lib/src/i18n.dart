@@ -599,15 +599,6 @@ class Strings {
   String get personal => _t('Personal', 'Pessoal', 'Personal');
   String get displayName =>
       _t('Display name', 'Nome de exibição', 'Nombre visible');
-  String displayNameHelp(String fallback) => fallback.trim().isEmpty
-      ? _t(
-          'Shown to the other person in Messages and on the shared calendar.',
-          'Mostrado à outra pessoa nas Mensagens e no calendário compartilhado.',
-          'Lo ve la otra persona en Mensajes y en el calendario compartido.')
-      : _t(
-          'Shown to the other person in Messages and on the shared calendar. Empty uses "$fallback".',
-          'Mostrado à outra pessoa nas Mensagens e no calendário compartilhado. Vazio usa "$fallback".',
-          'Lo ve la otra persona en Mensajes y en el calendario compartido. Vacío usa "$fallback".');
   String get displayNameSaved =>
       _t('Display name saved.', 'Nome de exibição salvo.', 'Nombre visible guardado.');
   String get birthDate =>

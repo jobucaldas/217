@@ -279,6 +279,10 @@ void main() {
       expect(find.byKey(const ValueKey('stage-dropdown')),
           role == 'owner' ? findsOneWidget : findsNothing);
 
+      // Pre-filled with the effective name, no hint or helper text.
+      expect(find.widgetWithText(TextField, 'Sign-in'), findsOneWidget);
+      expect(find.textContaining('Shown to the other person'), findsNothing);
+
       await tester.enterText(
           find.byKey(const ValueKey('display-name')), '  Ana ');
       await tester.pump();
@@ -287,6 +291,7 @@ void main() {
       expect(sent, ['{"display_name":"Ana"}']);
       expect(saved?.user?.displayName, 'Ana');
       expect(find.text('Display name saved.'), findsOneWidget);
+      expect(find.widgetWithText(TextField, 'Ana'), findsOneWidget);
     });
   }
 }
