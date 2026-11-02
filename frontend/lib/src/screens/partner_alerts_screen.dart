@@ -263,7 +263,6 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
   Widget _alertCard({
     required Key key,
     required String title,
-    required String subtitle,
     required bool enabled,
     required String time,
     required ValueChanged<bool> onToggle,
@@ -284,7 +283,6 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
         children: [
           SwitchListTile(
             title: Text(title),
-            subtitle: Text(subtitle),
             value: enabled,
             onChanged: _saving ? null : onToggle,
           ),
@@ -383,7 +381,6 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
                 _alertCard(
                   key: const ValueKey('alert-pms'),
                   title: strings.pmsAlertTitle,
-                  subtitle: strings.pmsAlertBody,
                   enabled: _pref.pmsEnabled,
                   time: _pref.pmsTime,
                   onToggle: (v) => _save(_pref.copyWith(pmsEnabled: v)),
@@ -396,7 +393,6 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
                 _alertCard(
                   key: const ValueKey('alert-pill'),
                   title: strings.pillAlertTitle,
-                  subtitle: strings.pillAlertBody,
                   enabled: _pref.pillEnabled,
                   time: _pref.pillTime,
                   onToggle: (v) => _save(_pref.copyWith(pillEnabled: v)),
