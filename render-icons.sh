@@ -28,10 +28,7 @@ if ! command -v magick >/dev/null 2>&1; then
 fi
 
 out=.
-if [ "${1:-}" = "--check" ]; then
-  out="$(mktemp -d)"
-  trap 'rm -rf "$out"' EXIT
-fi
+[ "${1:-}" = "--check" ] && out="$(mktemp -d)"
 
 src=assets/branding
 fe=$out/frontend
@@ -54,9 +51,10 @@ done
 mkdir -p "$fe/web"
 cp "$src/favicon.svg" "$fe/web/favicon.svg"
 # The PNG favicon is the wordmark in the brand red (the SVG one follows the color scheme).
-sed 's/#1A1A1A/#F43F5E/' "$src/favicon.svg" > /tmp/favicon-red.svg
-png /tmp/favicon-red.svg 64 "$fe/web/favicon.png" PNG32
-rm -f /tmp/favicon-red.svg
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"; [ "$out" = . ] || rm -rf "$out"' EXIT
+sed 's/#1A1A1A/#F43F5E/' "$src/favicon.svg" > "$tmp/favicon-red.svg"
+png "$tmp/favicon-red.svg" 64 "$fe/web/favicon.png" PNG32
 
 png "$src/app-icon.svg" 512 "$fe/linux/runner/icon.png"
 mkdir -p "$fe/windows/runner/resources"
@@ -81,9 +79,9 @@ for f in $(cd "$out" && find . -type f | sort); do
   case "$f" in
     *.svg) cmp -s "$out/$f" "$f" && continue ;;
     *) # -append stacks the frames of an .ico; same-size PNGs are one frame
-      magick "$out/$f" -background none -append /tmp/a.miff
-      magick "$f" -background none -append /tmp/b.miff
-      diff_px="$(magick compare -fuzz 5% -metric AE /tmp/a.miff /tmp/b.miff null: 2>&1 || true)"
+      magick "$out/$f" -background none -append "$tmp/a.miff"
+      magick "$f" -background none -append "$tmp/b.miff"
+      diff_px="$(magick compare -fuzz 1% -metric AE "$tmp/a.miff" "$tmp/b.miff" null: 2>&1 || true)"
       [ "${diff_px%% *}" = 0 ] && continue ;;
   esac
   echo "out of date: $f (run ./render-icons.sh and commit)"; status=1
