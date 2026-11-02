@@ -992,45 +992,23 @@ class _CalendarScreenState extends State<CalendarScreen>
   /// expected, and nothing can be logged yet.
   Future<void> _openDay(DateTime day) async {
     setState(() => _selected = _isSameDay(day, _today) ? null : day);
-    if (!widget.share.canEditCalendar) {
-      return _viewDay(day);
-    }
+    if (!widget.share.canEditCalendar) return _viewDay(day);
     if (day.isAfter(_today)) return;
-    final key = DateFormat('yyyy-MM-dd').format(day);
-    final existing = _visibleEntry(key);
-    // Persist via onCommit — not the sheet's pop value. Nested note-dialog
-    // → sheet pop races on web and can drop the result (note/heart "save"
-    // that only sticks after Taken/Missed re-tap).
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (context) => DayEditorSheet(
-        strings: widget.strings,
-        date: key,
-        initialTaken: existing?.taken,
-        initialNotes: existing?.notes ?? '',
-        initialHeart: existing?.heart ?? false,
-        initialPeriod: existing?.period ?? false,
-        hadEntry: existing != null,
-        onCommit: (result) {
-          _persistDay(key, result).catchError((Object err) {
-            if (mounted && !_handleConsentFailure(err, closeDayEditor: true)) {
-              setState(() => _error = friendlyError(widget.strings, err));
-            }
-          });
-        },
-      ),
-    );
+    return _showDaySheet(day, readOnly: false);
   }
 
-  /// The owner's day sheet, read-only: a partner sees the same marks and note
-  /// but cannot change them. Pull it up for what else is known about the day
-  /// (predictions, the whole note). Closes when calendar access is cleared.
-  Future<void> _viewDay(DateTime day) {
+  /// A partner's view of [day]: the owner's sheet with nothing to change.
+  Future<void> _viewDay(DateTime day) => _showDaySheet(day, readOnly: true);
+
+  /// The one day sheet, for both sides: the owner edits in it, a partner
+  /// only reads it (and it closes when calendar access is cleared). Either
+  /// can pull it up for what else is known about the day (predictions, the
+  /// whole note).
+  Future<void> _showDaySheet(DateTime day, {required bool readOnly}) {
     final key = DateFormat('yyyy-MM-dd').format(day);
     final existing = _visibleEntry(key);
-    final cycleKind = _cycle.kindOf(day);
+    // The pulled-up part follows the note as the owner edits it.
+    final notes = ValueNotifier<String>(existing?.notes.trim() ?? '');
     return showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -1040,8 +1018,8 @@ class _CalendarScreenState extends State<CalendarScreen>
         strings: widget.strings,
         palette: widget.palette,
         day: day,
-        notes: existing?.notes.trim() ?? '',
-        cycleKind: cycleKind,
+        notes: notes,
+        cycleKind: _cycle.kindOf(day),
         sheet: DayEditorSheet(
           strings: widget.strings,
           date: key,
@@ -1050,11 +1028,26 @@ class _CalendarScreenState extends State<CalendarScreen>
           initialHeart: existing?.heart ?? false,
           initialPeriod: existing?.period ?? false,
           hadEntry: existing != null,
-          readOnly: true,
-          closeSignal: _accessCleared,
+          readOnly: readOnly,
+          closeSignal: readOnly ? _accessCleared : null,
+          // Persist via onCommit — not the sheet's pop value. Nested note
+          // dialog → sheet pop races on web and can drop the result (note/
+          // heart "save" that only sticks after Taken/Missed re-tap).
+          onCommit: readOnly
+              ? null
+              : (result) {
+                  notes.value = result.clear ? '' : result.notes;
+                  _persistDay(key, result).catchError((Object err) {
+                    if (mounted &&
+                        !_handleConsentFailure(err, closeDayEditor: true)) {
+                      setState(
+                          () => _error = friendlyError(widget.strings, err));
+                    }
+                  });
+                },
         ),
       ),
-    );
+    ).whenComplete(notes.dispose);
   }
 
   @override

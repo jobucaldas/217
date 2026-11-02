@@ -596,9 +596,10 @@ Future<void> showDayNoteCard(
   );
 }
 
-/// The read-only day sheet that can be pulled up: closed it is the owner's
-/// sheet ([sheet]); open it also lists the day's predictions and the whole
-/// note. Swiping it down past its resting height dismisses it.
+/// A day sheet (editable for the owner, read-only for a partner) that can be
+/// pulled up: at rest it is just [sheet]; open it also lists the day's
+/// predictions and the whole note. Swiping it down past its resting height
+/// dismisses it.
 class ExpandableDaySheet extends StatelessWidget {
   const ExpandableDaySheet({
     super.key,
@@ -613,7 +614,9 @@ class ExpandableDaySheet extends StatelessWidget {
   final Strings strings;
   final AppPalette palette;
   final DateTime day;
-  final String notes;
+
+  /// The day's note, followed live (the owner can change it from [sheet]).
+  final ValueListenable<String> notes;
   final CycleDayKind cycleKind;
 
   /// The sheet shown at rest.
@@ -643,7 +646,7 @@ class ExpandableDaySheet extends StatelessWidget {
           ]),
         );
 
-    final extra = <Widget>[
+    List<Widget> extraFor(String notes) => <Widget>[
       if (cycleKind == CycleDayKind.predictedPeriod)
         row(
           const ValueKey('day-more-predicted-period'),
@@ -680,6 +683,14 @@ class ExpandableDaySheet extends StatelessWidget {
         ),
     ];
 
+    return ValueListenableBuilder<String>(
+      valueListenable: notes,
+      builder: (context, note, _) => _build(context, extraFor(note)),
+    );
+  }
+
+  Widget _build(BuildContext context, List<Widget> extra) {
+    final scheme = Theme.of(context).colorScheme;
     return LayoutBuilder(
       builder: (context, constraints) {
         final scale = MediaQuery.textScalerOf(context).scale(1);

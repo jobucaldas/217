@@ -259,6 +259,29 @@ void main() {
     expect(tester.getTopLeft(sheet).dy, top);
   });
 
+  testWidgets('the owner pulls the same sheet up, and it follows the note',
+      (tester) async {
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(_app(_calendar(
+      entries: [Entry(date: _key(today), taken: true, notes: 'First note')],
+      user: const User(id: 'o', email: 'o@b.c', name: 'O'),
+      share: const ShareState(status: 'none'),
+    )));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('update-day-button')));
+    await tester.pumpAndSettle();
+
+    final sheet = find.byKey(const ValueKey('expandable-day-sheet'));
+    final restingTop = tester.getTopLeft(sheet).dy;
+    await tester.drag(sheet, const Offset(0, -300));
+    await tester.pumpAndSettle();
+    expect(tester.getTopLeft(sheet).dy, lessThan(restingTop));
+    expect(find.text('First note'), findsOneWidget);
+    // Still the editor: its controls work.
+    expect(_disabled(tester, const ValueKey('day-heart-toggle')), isFalse);
+  });
+
   testWidgets('owner still gets the editor, not the read-only sheet',
       (tester) async {
     await tester.binding.setSurfaceSize(const Size(390, 844));
