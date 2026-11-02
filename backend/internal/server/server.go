@@ -190,10 +190,10 @@ func Run(cfg Config) error {
 	mux.HandleFunc("GET /api/stats", h.ConsentMiddleware(h.GetStats))
 
 	// Rights that stay reachable before (or instead of) consenting.
-	mux.HandleFunc("DELETE /api/account", h.AuthMiddleware(h.DeleteAccount))
+	mux.HandleFunc("DELETE /api/account", h.AuthMiddleware(h.RecentBrowserSignIn(h.DeleteAccount)))
 	mux.HandleFunc("PUT /api/account/consent", h.AuthMiddleware(h.RecordConsent))
-	mux.HandleFunc("DELETE /api/account/consent", h.AuthMiddleware(h.WithdrawConsent))
-	mux.HandleFunc("GET /api/account/export", h.AuthMiddleware(h.ExportAccount))
+	mux.HandleFunc("DELETE /api/account/consent", h.AuthMiddleware(h.RecentBrowserSignIn(h.WithdrawConsent)))
+	mux.HandleFunc("GET /api/account/export", h.AuthMiddleware(h.RecentBrowserSignIn(h.ExportAccount)))
 	// The privacy notice is part of the web app now (/app/privacy); older
 	// apps still link here.
 	mux.HandleFunc("GET /api/privacy", h.LegacyPrivacyPage)

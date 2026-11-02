@@ -324,9 +324,9 @@ func (h *Handler) CurrentSession(w http.ResponseWriter, r *http.Request) {
 		user, err := h.store.GetUserBySession(token)
 		if err == nil {
 			payload := h.sessionPayload(user)
-			// The privacy pages ask for a fresh sign-in before an export,
-			// withdrawal or deletion.
-			payload["recent_sign_in"] = h.sessionIsFresh(token)
+			// Browsers need a fresh sign-in before an export, withdrawal or
+			// deletion (RecentBrowserSignIn); the privacy pages ask first.
+			payload["recent_sign_in"] = h.browserSessionIsFresh(r)
 			writeJSON(w, http.StatusOK, payload)
 			return
 		}

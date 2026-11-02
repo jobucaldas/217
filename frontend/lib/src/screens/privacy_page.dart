@@ -35,7 +35,6 @@ class PrivacyWebSession {
   const PrivacyWebSession({
     required this.user,
     required this.consentRequired,
-    required this.recentSignIn,
     required this.onSignIn,
     required this.onSessionChanged,
     required this.onDeleted,
@@ -44,9 +43,6 @@ class PrivacyWebSession {
 
   final User? user;
   final bool consentRequired;
-
-  /// Signed in within the last few minutes (the server says so).
-  final bool recentSignIn;
 
   /// Signs in through AuthKit and comes back to [returnTo].
   final Future<void> Function(String returnTo) onSignIn;
@@ -115,6 +111,8 @@ class _PrivacyPageState extends State<PrivacyPage> {
     final action = widget.web?.initialAction;
     if (action != null && widget.web?.user != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
+        // Handled once: a reload must not reopen the warning.
+        replaceWebPath(_pagePath());
         if (mounted) _start(action);
       });
     }
@@ -171,7 +169,8 @@ class _PrivacyPageState extends State<PrivacyPage> {
       final session = await widget.api.currentSession();
       return session.user != null && session.recentSignIn;
     } catch (_) {
-      return widget.web?.recentSignIn ?? false;
+      // Unknown: ask to sign in again rather than trust an old answer.
+      return false;
     }
   }
 
@@ -293,8 +292,16 @@ class _PrivacyPageState extends State<PrivacyPage> {
             });
           }
       }
-    } catch (_) {
+    } catch (err) {
       if (!mounted) return;
+      // The server wants a fresher sign-in than the page knew of.
+      if (err is ApiException &&
+          err.statusCode == 403 &&
+          err.message == 'reauth required') {
+        setState(() => _busy = false);
+        await _signIn(action);
+        return;
+      }
       setState(() => _error = switch (action) {
             PrivacyAction.download => _t.downloadFailed,
             PrivacyAction.withdraw => _t.withdrawFailed,

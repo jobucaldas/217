@@ -251,7 +251,13 @@ class ApiClient {
     _userId = userId;
     _role = snapshot.user!.role;
     await _countPending(userId);
-    return snapshot;
+    // A kept session is never a recent sign-in.
+    return SessionSnapshot(
+      user: snapshot.user,
+      share: snapshot.share,
+      consentRequired: snapshot.consentRequired,
+      consentVersion: snapshot.consentVersion,
+    );
   }
 
   Future<void> _countPending(String userId) async {

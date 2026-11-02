@@ -23,7 +23,7 @@ func TestLegacyPrivacyPageRedirectsToApp(t *testing.T) {
 	} {
 		w := httptest.NewRecorder()
 		h.LegacyPrivacyPage(w, httptest.NewRequest(http.MethodGet, target, nil))
-		if w.Code != http.StatusMovedPermanently || w.Header().Get("Location") != want {
+		if w.Code != http.StatusFound || w.Header().Get("Location") != want {
 			t.Errorf("%s: %d -> %q, want %q", target, w.Code, w.Header().Get("Location"), want)
 		}
 	}
@@ -102,6 +102,39 @@ func TestSessionReportsRecentSignIn(t *testing.T) {
 	time.Sleep(time.Millisecond)
 	if got := recent(); got != false {
 		t.Fatalf("old session: recent_sign_in = %v", got)
+	}
+}
+
+func TestBrowserActionsNeedRecentSignIn(t *testing.T) {
+	h, s := newTestHandler(t)
+	user, _ := s.LinkWorkOSIdentity("stale-subject", "stale@example.com", "S", true)
+	cookie := sessionCookie(t, s, user.ID)
+	reached := 0
+	guarded := h.AuthMiddleware(h.RecentBrowserSignIn(func(w http.ResponseWriter, r *http.Request) {
+		reached++
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	call := func(req *http.Request) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		guarded(w, req)
+		return w
+	}
+	if w := call(authedRequest(http.MethodDelete, "/api/account", cookie, nil)); w.Code != http.StatusNoContent {
+		t.Fatalf("fresh cookie: %d %s", w.Code, w.Body.String())
+	}
+	h.SetReauthWindow(time.Nanosecond)
+	time.Sleep(time.Millisecond)
+	if w := call(authedRequest(http.MethodDelete, "/api/account", cookie, nil)); w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "reauth required") {
+		t.Fatalf("stale cookie: %d %s", w.Code, w.Body.String())
+	}
+	// Apps (Bearer) are not asked: they renew sessions with the device key.
+	bearer := httptest.NewRequest(http.MethodDelete, "/api/account", nil)
+	bearer.Header.Set("Authorization", "Bearer "+cookie.Value)
+	if w := call(bearer); w.Code != http.StatusNoContent {
+		t.Fatalf("bearer: %d %s", w.Code, w.Body.String())
+	}
+	if reached != 2 {
+		t.Fatalf("handler reached %d times, want 2", reached)
 	}
 }
 

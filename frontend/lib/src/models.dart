@@ -71,7 +71,7 @@ class ShareState {
   final String status;
   final String inviteCode;
 
-  /// Web link that opens the app with this invite (`/?invite=CODE`).
+  /// Web link that opens the app with this invite (`/app/?invite=CODE`).
   final String inviteUrl;
   final String partnerEmail;
   final String partnerName;

@@ -71,7 +71,7 @@ Offline-first client: `ApiClient` keeps the last session, months, cycle and aler
 - `POST /api/auth/workos/exchange` — native PKCE exchange; optional `device_public_key` (base64 PKIX P-256) → `device_key_id`
 - `POST /api/auth/device/challenge` — `{key_id}` → single-use `{challenge}` (2 min)
 - `POST /api/auth/device/session` — `{key_id, challenge, signature}` (SHA256withECDSA over `217 device session v1\n<key_id>\n<challenge>`) → Bearer; logout revokes the key
-- `GET /api/auth/session` — cookie or Bearer; `recent_sign_in` is true for a session younger than 5 minutes
+- `GET /api/auth/session` — cookie or Bearer; `recent_sign_in` is true for a browser (cookie) session younger than 5 minutes
 - `POST /api/auth/logout`
 
 ### Entries (auth required)
@@ -90,7 +90,7 @@ Offline-first client: `ApiClient` keeps the last session, months, cycle and aler
 - `DELETE /api/account` — erasure (WorkOS identity too when `WORKOS_API_KEY` is set)
 
 ### Privacy pages (part of the Flutter app)
-- `/app/privacy?lang=en|pt|es` — the notice (`frontend/lib/src/screens/privacy_page.dart`, text in `privacy_text.dart`); `/app/account/delete` — the account deletion page linked from the Play listing (steps, what is deleted or kept). On web they stand alone (signed out too, before consent) and the signed-in browser downloads, withdraws or deletes there: each action warns first and needs `recent_sign_in` (session younger than 5 minutes), else it signs in again via `GET /api/auth/workos?return=<page>?confirm=download|withdraw|delete` and reopens that warning (`217_oauth_return` cookie, these two pages only). The apps open the notice in-app and link to the web page for those actions
+- `/app/privacy?lang=en|pt|es` — the notice (`frontend/lib/src/screens/privacy_page.dart`, text in `privacy_text.dart`); `/app/account/delete` — the account deletion page linked from the Play listing (steps, what is deleted or kept). On web they stand alone (signed out too, before consent) and the signed-in browser downloads, withdraws or deletes there: each action warns first and needs a sign-in younger than 5 minutes (`recent_sign_in` in the session; the API enforces it for browser/cookie sessions on export, consent withdrawal and deletion with 403 `reauth required`, Bearer apps are not asked), else it signs in again via `GET /api/auth/workos?return=<page>?confirm=download|withdraw|delete` and reopens that warning (`217_oauth_return` cookie, these two pages only). The apps open the notice in-app and link to the web page for those actions; web Settings' Delete account goes to `/app/account/delete?confirm=delete`
 - `GET /api/privacy` — kept as a redirect to `/app/privacy` for older apps
 - Browser sign-in lands on `/app/`; invite links are `/app/?invite=CODE`
 

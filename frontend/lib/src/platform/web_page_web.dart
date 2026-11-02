@@ -5,6 +5,9 @@ import 'dart:typed_data';
 
 void goToWebPath(String path) => html.window.location.assign(path);
 
+void replaceWebPath(String path) =>
+    html.window.history.replaceState(null, '', path);
+
 bool saveDownload(String fileName, List<int> bytes, String mimeType) {
   final blob = html.Blob([Uint8List.fromList(bytes)], mimeType);
   final url = html.Url.createObjectUrlFromBlob(blob);

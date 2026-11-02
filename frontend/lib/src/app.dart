@@ -107,9 +107,6 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
   /// `/app/account/delete`): shown instead of the app, signed in or not.
   final WebPage? _webPage = kIsWeb ? webPageFor(Uri.base) : null;
 
-  /// The browser's session signed in within the last few minutes.
-  bool _recentSignIn = false;
-
   /// Changes only when the signed-in account does (logout, deletion, server
   /// switch, sign-in), so a late session refresh cannot restore the old one.
   int _accountEpoch = 0;
@@ -271,7 +268,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
   Future<void> _bootstrap() async {
     // Local prefs first, so theme and language hold even when offline.
     try {
-      // Web invite link (`/?invite=CODE`): keep the code across sign-in.
+      // Web invite link (`/app/?invite=CODE`): keep the code across sign-in.
       final linkInvite = Uri.base.queryParameters['invite']?.trim() ?? '';
       if (linkInvite.isNotEmpty) await _prefs.savePendingInvite(linkInvite);
       final appearance = await _prefs.load();
@@ -321,7 +318,6 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
       _user = user;
       _share = share;
       _setConsent(session);
-      _recentSignIn = session?.recentSignIn ?? false;
       _loading = false;
     });
     // The privacy pages stand alone: no invite offer, reminders or updates.
@@ -1036,7 +1032,6 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
       web: PrivacyWebSession(
         user: user,
         consentRequired: _consentRequired,
-        recentSignIn: _recentSignIn,
         initialAction: privacyActionFrom(Uri.base.queryParameters['confirm']),
         onSignIn: (returnTo) async {
           await _api.loadAuthConfig();

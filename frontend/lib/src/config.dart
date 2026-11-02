@@ -85,6 +85,16 @@ String normalizeApiBase(String value) =>
 const privacyPagePath = '/app/privacy';
 const accountDeletePagePath = '/app/account/delete';
 
+/// The account deletion page in [language], opening its warning when
+/// [confirm] (web Settings sends people there to delete).
+String accountDeletePageUri(String language, {bool confirm = false}) => Uri(
+      path: accountDeletePagePath,
+      queryParameters: {
+        'lang': language,
+        if (confirm) 'confirm': 'delete',
+      },
+    ).toString();
+
 /// Standalone web pages of the app, opened by their own URL.
 enum WebPage { privacy, deleteAccount }
 

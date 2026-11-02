@@ -18,9 +18,12 @@ const _user =
 
 /// The browser's session on the server: [recent] is `recent_sign_in`.
 class _Server {
-  _Server({this.recent = true});
+  _Server({this.recent = true, this.reauthOnDelete = false});
 
   bool recent;
+
+  /// The server wants a fresher sign-in than the session reported.
+  bool reauthOnDelete;
   final calls = <String>[];
 
   ApiClient client() => ApiClient(
@@ -46,6 +49,9 @@ class _Server {
                 200,
               );
             case '/api/account':
+              if (reauthOnDelete) {
+                return http.Response('{"error":"reauth required"}', 403);
+              }
               return http.Response('', 204);
             case '/api/account/export':
               return http.Response('{"user":{}}', 200, headers: {
@@ -94,7 +100,6 @@ void main() {
         web: PrivacyWebSession(
           user: null,
           consentRequired: false,
-          recentSignIn: false,
           onSignIn: (returnTo) async => returns.add(returnTo),
           onSessionChanged: (_) {},
           onDeleted: () {},
@@ -123,7 +128,6 @@ void main() {
         web: PrivacyWebSession(
           user: _user,
           consentRequired: false,
-          recentSignIn: false,
           onSignIn: (returnTo) async => returns.add(returnTo),
           onSessionChanged: (_) {},
           onDeleted: () {},
@@ -160,7 +164,6 @@ void main() {
         web: PrivacyWebSession(
           user: _user,
           consentRequired: false,
-          recentSignIn: true,
           onSignIn: (_) async => fail('no sign-in needed'),
           onSessionChanged: (_) {},
           onDeleted: () => deleted++,
@@ -188,5 +191,33 @@ void main() {
     expect(deleted, 1);
     expect(find.text('Your account and data were deleted.'), findsOneWidget);
     expect(find.byKey(const ValueKey('privacy-delete')), findsNothing);
+  });
+
+  testWidgets('a server asking for a fresh sign-in sends the browser to it',
+      (tester) async {
+    final server = _Server(reauthOnDelete: true);
+    final returns = <String>[];
+    var deleted = 0;
+    await _pump(
+      tester,
+      PrivacyPage(
+        api: server.client(),
+        strings: const Strings(AppLanguage.es),
+        page: WebPage.deleteAccount,
+        web: PrivacyWebSession(
+          user: _user,
+          consentRequired: false,
+          onSignIn: (returnTo) async => returns.add(returnTo),
+          onSessionChanged: (_) {},
+          onDeleted: () => deleted++,
+        ),
+      ),
+    );
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Eliminar cuenta'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('privacy-confirm')));
+    await tester.pumpAndSettle();
+    expect(returns, ['/app/account/delete?lang=es&confirm=delete']);
+    expect(deleted, 0);
   });
 }

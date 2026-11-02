@@ -17,7 +17,7 @@ const (
 )
 
 // defaultReauthWindow is how recent a sign-in must be before the privacy
-// pages offer to download, withdraw or delete (reported as recent_sign_in).
+// pages (and the API, for browsers) download, withdraw or delete.
 const defaultReauthWindow = 5 * time.Minute
 
 // SetReauthWindow sets how recent a sign-in counts as recent_sign_in.
@@ -26,6 +26,30 @@ func (h *Handler) SetReauthWindow(d time.Duration) { h.reauthWindow = d }
 func (h *Handler) sessionIsFresh(token string) bool {
 	created, err := h.store.SessionCreatedAt(token)
 	return err == nil && time.Since(created) < h.reauthWindow
+}
+
+// browserSessionIsFresh reports a browser (cookie) session that signed in
+// within the reauth window. Bearer sessions never count: the apps renew
+// theirs silently with the device key, so their age says nothing about a
+// recent sign-in.
+func (h *Handler) browserSessionIsFresh(r *http.Request) bool {
+	cookie, err := r.Cookie(h.sessionCookie)
+	return err == nil && cookie.Value != "" && h.sessionIsFresh(cookie.Value)
+}
+
+// RecentBrowserSignIn guards export, consent withdrawal and deletion for
+// browsers: a cookie session must have signed in within the reauth window
+// (AuthKit always asks for credentials again), else 403 "reauth required".
+// The web privacy pages sign in again and return to the same warning. The
+// apps (Bearer, behind the device's own lock) are not asked.
+func (h *Handler) RecentBrowserSignIn(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if cookie, err := r.Cookie(h.sessionCookie); err == nil && cookie.Value != "" && !h.sessionIsFresh(cookie.Value) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "reauth required"})
+			return
+		}
+		next(w, r)
+	}
 }
 
 // pageLanguage keeps only the languages the app speaks.
@@ -60,7 +84,7 @@ func (h *Handler) LegacyPrivacyPage(w http.ResponseWriter, r *http.Request) {
 	if len(q) > 0 {
 		target += "?" + q.Encode()
 	}
-	http.Redirect(w, r, target, http.StatusMovedPermanently)
+	http.Redirect(w, r, target, http.StatusFound)
 }
 
 // safeReturnPath keeps only the web app's privacy pages (never another

@@ -245,14 +245,14 @@ class PrivacyText {
       _t('What is kept', 'O que é mantido', 'Qué se conserva');
   String keptDataBody(bool deletesLogin) => deletesLogin
       ? _t(
-          'Nothing. Your WorkOS sign-in identity is deleted too, and 217 keeps no copy afterwards: there is no extra retention period.',
-          'Nada. Sua identidade de login da WorkOS também é apagada, e o 217 não guarda cópia depois: não há prazo extra de retenção.',
-          'Nada. Tu identidad de inicio de sesión de WorkOS también se elimina, y 217 no guarda ninguna copia después: no hay plazo extra de conservación.',
+          'Nothing on this server: it deletes your data at once, keeps no copy and has no extra retention period. Your WorkOS sign-in identity is deleted too. A partner\'s phone may show its last copy of your calendar until 217 there syncs again.',
+          'Nada neste servidor: ele apaga seus dados na hora, não guarda cópia e não tem prazo extra de retenção. Sua identidade de login da WorkOS também é apagada. O celular de um parceiro pode mostrar a última cópia do seu calendário até o 217 dele sincronizar de novo.',
+          'Nada en este servidor: borra tus datos al momento, no guarda copia y no tiene plazo extra de conservación. Tu identidad de inicio de sesión de WorkOS también se elimina. El teléfono de una pareja puede mostrar la última copia de tu calendario hasta que 217 allí se sincronice de nuevo.',
         )
       : _t(
-          'Only your WorkOS sign-in identity (the email and name you sign in with), which this server cannot remove; ask its operator to. 217 keeps no copy of your data afterwards: there is no extra retention period.',
-          'Só sua identidade de login da WorkOS (o email e o nome com que você entra), que este servidor não consegue remover; peça a quem o opera. O 217 não guarda cópia dos seus dados depois: não há prazo extra de retenção.',
-          'Solo tu identidad de inicio de sesión de WorkOS (el email y el nombre con que inicias sesión), que este servidor no puede eliminar; pídeselo a quien lo opera. 217 no guarda copia de tus datos después: no hay plazo extra de conservación.',
+          'This server deletes your data at once, keeps no copy and has no extra retention period. Only your WorkOS sign-in identity (the email and name you sign in with) stays, since this server cannot remove it; ask its operator to. A partner\'s phone may show its last copy of your calendar until 217 there syncs again.',
+          'Este servidor apaga seus dados na hora, não guarda cópia e não tem prazo extra de retenção. Só sua identidade de login da WorkOS (o email e o nome com que você entra) fica, porque este servidor não consegue removê-la; peça a quem o opera. O celular de um parceiro pode mostrar a última cópia do seu calendário até o 217 dele sincronizar de novo.',
+          'Este servidor borra tus datos al momento, no guarda copia y no tiene plazo extra de conservación. Solo tu identidad de inicio de sesión de WorkOS (el email y el nombre con que inicias sesión) se conserva, porque este servidor no puede eliminarla; pídeselo a quien lo opera. El teléfono de una pareja puede mostrar la última copia de tu calendario hasta que 217 allí se sincronice de nuevo.',
         );
   String get privacyNoticeLink => _t(
         'Read the full privacy notice',
