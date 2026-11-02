@@ -115,7 +115,9 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('day-note-card')), findsNothing);
 
-    await tester.tap(find.byKey(const ValueKey('day-sheet-close')));
+    // Same as the owner's sheet: no close button, a tap outside dismisses.
+    expect(find.text('Close'), findsNothing);
+    await tester.tapAt(const Offset(195, 40));
     await tester.pumpAndSettle();
     expect(find.byType(DayEditorSheet), findsNothing);
   });
@@ -195,7 +197,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('update-day-button')));
     await tester.pumpAndSettle();
     expect(find.byType(DayEditorSheet), findsOneWidget);
-    expect(find.byKey(const ValueKey('day-sheet-close')), findsNothing);
+    expect(find.text('Close'), findsNothing);
     expect(_disabled(tester, const ValueKey('day-heart-toggle')), isFalse);
   });
 }

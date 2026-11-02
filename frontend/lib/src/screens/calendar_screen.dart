@@ -1946,34 +1946,18 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
         ThemeData.estimateBrightnessForColor(periodColor) == Brightness.dark
             ? Colors.white
             : const Color(0xFF0B1220);
-    final gap = widget.readOnly ? 8.0 : 14.0;
     // Outside tap dismisses; no Cancel / Save — Done or Taken/Missed commit.
     final sheet = Padding(
       padding: EdgeInsets.only(
         left: 20,
         right: 20,
-        top: widget.readOnly ? 0 : 8,
-        bottom: MediaQuery.viewInsetsOf(context).bottom +
-            (widget.readOnly ? 12 : 20),
+        top: 8,
+        bottom: MediaQuery.viewInsetsOf(context).bottom + 20,
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (widget.readOnly)
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton(
-                key: const ValueKey('day-sheet-close'),
-                style: TextButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  minimumSize: const Size(0, 36),
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-                onPressed: () => Navigator.of(context).pop(),
-                child: Text(widget.strings.close),
-              ),
-            ),
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
@@ -2015,7 +1999,7 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
               ),
             ],
           ),
-          SizedBox(height: gap),
+          const SizedBox(height: 14),
           SegmentedButton<bool>(
             emptySelectionAllowed: true,
             segments: [
