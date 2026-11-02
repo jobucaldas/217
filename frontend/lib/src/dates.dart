@@ -18,6 +18,15 @@ class AppDates {
   /// "Nov 19", "19 de Nov.".
   String shortDayMonth(DateTime date) => _format(DateFormat.MMMd(locale), date);
 
+  /// "11/02" in English, "02/11" elsewhere.
+  String numericDayMonth(DateTime date) => DateFormat(
+        locale.startsWith('en') ? 'MM/dd' : 'dd/MM',
+        locale,
+      ).format(date);
+
+  /// "09:20".
+  String time(DateTime date) => DateFormat.Hm(locale).format(date);
+
   /// "October 31, 2026", "31 de Outubro de 2026".
   String fullDate(DateTime date) => _format(DateFormat.yMMMMd(locale), date);
 

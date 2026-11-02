@@ -673,26 +673,24 @@ class Strings {
       );
   String partnerName(String name) =>
       name.trim().isEmpty ? _t('She', 'Ela', 'Ella') : name.trim();
-  String get pmsNotifTitle => _t(
-        'Expected PMS may start today',
-        'A TPM prevista pode começar hoje',
-        'El SPM previsto puede empezar hoy',
-      );
-  String pmsNotifBody(String name, String period) => _t(
-        '${partnerName(name)}: expected PMS from today (an estimate), period ~$period.',
-        '${partnerName(name)}: TPM prevista a partir de hoje (uma estimativa), menstruação ~$period.',
-        '${partnerName(name)}: SPM previsto desde hoy (una estimación), regla ~$period.',
+  String get pmsNotifTitle => _t('PMS expected', 'TPM prevista', 'SPM previsto');
+  String pmsNotifBody(String name, String start, String end) => _t(
+        '${partnerFirstName(name)}: expected between ~$start - $end',
+        '${partnerFirstName(name)}: prevista entre ~$start - $end',
+        '${partnerFirstName(name)}: previsto entre ~$start - $end',
       );
   String get pillNotifTitle => _t(
-        'Pill not logged yet',
-        'Pílula ainda não registrada',
-        'Píldora aún no registrada',
+        'Medicine not taken',
+        'Remédio não tomado',
+        'Medicamento no tomado',
       );
-  String pillNotifBody(String name) => _t(
-        "${partnerName(name)} hadn't logged today's pill when 217 last synced.",
-        '${partnerName(name)} não tinha registrado a pílula de hoje na última sincronização do 217.',
-        '${partnerName(name)} no había registrado la píldora de hoy en la última sincronización de 217.',
+  String pillNotifBody(String name, String time) => _t(
+        '${partnerFirstName(name)}: updated at $time',
+        '${partnerFirstName(name)}: atualizado às $time',
+        '${partnerFirstName(name)}: actualizado a las $time',
       );
+  String partnerFirstName(String name) =>
+      partnerName(name).split(RegExp(r'\s+')).first;
 
   // Privacy (LGPD)
   String get privacyTitle => _t('Your data and privacy',
