@@ -62,16 +62,17 @@ jobs:
       - name: Compute version
         # Tag and versionName are `0.<yy>.<MMDD>-<run>` (UTC date at build time, not commit
         # time; run = 1 + the highest run already tagged for that day). Computed once here
-        # and reused by publish. versionCode is the same instant in epoch seconds, so each
-        # newer build updates older installs.
+        # and reused by publish. versionCode is 1 + the number of `0.*` release tags so far
+        # (1, 2, 3, ...): it rises with every published build and stays far below Android's
+        # 2.1 billion limit (Play warns about large jumps).
         id: version
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          NOW="$(date -u +%s)"
-          PREFIX="0.$(date -u -d "@$NOW" +%y).$(date -u -d "@$NOW" +%m%d)"
+          PREFIX="0.$(date -u +%y).$(date -u +%m%d)"
           LAST="$(git ls-remote --tags origin "refs/tags/${PREFIX}-*" | sed -E 's|.*-([0-9]+)$|\1|' | sort -n | tail -1)"
-          echo "tag=${PREFIX}-$(( ${LAST:-0} + 1 ))" >> "$GITHUB_OUTPUT"
-          echo "build=$NOW" >> "$GITHUB_OUTPUT"
+          RUN=$(( ${LAST:-0} + 1 ))
+          echo "tag=${PREFIX}-${RUN}" >> "$GITHUB_OUTPUT"
+          echo "build=$(( $(git ls-remote --tags origin 'refs/tags/0.*' | wc -l) + 1 ))" >> "$GITHUB_OUTPUT"
       - run: flutter analyze
       - run: flutter test
       - name: Build web bundle
