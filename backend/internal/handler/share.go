@@ -130,7 +130,7 @@ func (h *Handler) ExportAccount(w http.ResponseWriter, r *http.Request) {
 }
 
 // withInviteURL adds the shareable web link for an open invite, e.g.
-// https://217.example.com/?invite=ABCD1234. The web app reads ?invite= and
+// https://217.example.com/app/?invite=ABCD1234. The web app reads ?invite= and
 // offers to join after sign-in.
 func (h *Handler) withInviteURL(state *model.ShareState) *model.ShareState {
 	if state == nil || state.Status != model.ShareOpen || state.InviteCode == "" {
@@ -140,7 +140,7 @@ func (h *Handler) withInviteURL(state *model.ShareState) *model.ShareState {
 	if base == "" {
 		return state
 	}
-	state.InviteURL = base + "/?invite=" + url.QueryEscape(state.InviteCode)
+	state.InviteURL = base + appPath + "?invite=" + url.QueryEscape(state.InviteCode)
 	return state
 }
 

@@ -229,18 +229,6 @@ func (h *Handler) clearOAuthReturnCookie() *http.Cookie {
 		Secure: h.sessionCookieSecure(), SameSite: http.SameSiteLaxMode, Expires: time.Unix(0, 0), MaxAge: -1}
 }
 
-// safeReturnPath keeps only paths of the privacy page (never another host),
-// so the callback cannot be turned into an open redirect.
-func safeReturnPath(path string) string {
-	if path != privacyPagePath && !strings.HasPrefix(path, privacyPagePath+"?") {
-		return ""
-	}
-	if strings.ContainsAny(path, "\\\r\n") || strings.Contains(path, "//") {
-		return ""
-	}
-	return path
-}
-
 func (h *Handler) appOrigin() string {
 	u, err := url.Parse(h.appBaseURL)
 	if err != nil || u.Scheme == "" || u.Host == "" {
@@ -335,7 +323,11 @@ func (h *Handler) CurrentSession(w http.ResponseWriter, r *http.Request) {
 	if token, ok := h.sessionTokenFromRequest(r); ok {
 		user, err := h.store.GetUserBySession(token)
 		if err == nil {
-			writeJSON(w, http.StatusOK, h.sessionPayload(user))
+			payload := h.sessionPayload(user)
+			// Browsers need a fresh sign-in before an export, withdrawal or
+			// deletion (RecentBrowserSignIn); the privacy pages ask first.
+			payload["recent_sign_in"] = h.browserSessionIsFresh(r)
+			writeJSON(w, http.StatusOK, payload)
 			return
 		}
 		http.SetCookie(w, h.clearSessionCookie())
@@ -367,7 +359,9 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) StartWorkOSOAuth(w http.ResponseWriter, r *http.Request) {
-	authURL, status, msg := h.beginBrowserOAuth(w, r, "")
+	// ?return= lands on one of the web app's privacy pages after sign-in
+	// (validated by safeReturnPath); otherwise on the app.
+	authURL, status, msg := h.beginBrowserOAuth(w, r, r.URL.Query().Get("return"))
 	if authURL == "" {
 		http.Error(w, `{"error":"`+msg+`"}`, status)
 		return
@@ -524,11 +518,11 @@ func (h *Handler) WorkOSOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	if redirectTo == "" || redirectTo == attempt.RedirectURI && attempt.RedirectURI != "" {
 		redirectTo = strings.TrimRight(h.appBaseURL, "/")
 	}
+	// The web app lives under /app/; a privacy page sign-in returns there.
 	if returnTo := oauthReturnPath(r); returnTo != "" {
 		redirectTo += returnTo
-	}
-	if redirectTo == "" {
-		redirectTo = "/"
+	} else {
+		redirectTo += appPath
 	}
 	http.Redirect(w, r, redirectTo, http.StatusFound)
 }

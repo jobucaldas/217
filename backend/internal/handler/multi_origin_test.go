@@ -77,8 +77,8 @@ func TestBrowserLoginUsesRequestOriginForRedirectAndExchange(t *testing.T) {
 			if p.authRedirect != want || p.exchangeRedirect != want {
 				t.Fatalf("redirect auth=%q exchange=%q, want %q", p.authRedirect, p.exchangeRedirect, want)
 			}
-			if cbW.Code != http.StatusFound || cbW.Header().Get("Location") != tc.origin {
-				t.Fatalf("callback: %d -> %q, want %q", cbW.Code, cbW.Header().Get("Location"), tc.origin)
+			if cbW.Code != http.StatusFound || cbW.Header().Get("Location") != tc.origin+"/app/" {
+				t.Fatalf("callback: %d -> %q, want %q", cbW.Code, cbW.Header().Get("Location"), tc.origin+"/app/")
 			}
 		})
 	}
@@ -102,7 +102,7 @@ func TestBrowserLoginRejectsUnlistedHost(t *testing.T) {
 			if p.authRedirect != want || p.exchangeRedirect != want {
 				t.Fatalf("unlisted host must fall back to canonical, auth=%q exchange=%q", p.authRedirect, p.exchangeRedirect)
 			}
-			if cbW.Header().Get("Location") != "https://new.example" {
+			if cbW.Header().Get("Location") != "https://new.example/app/" {
 				t.Fatalf("redirected to %q", cbW.Header().Get("Location"))
 			}
 		})

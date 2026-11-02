@@ -54,7 +54,7 @@ class AppearancePrefs {
   Future<void> saveLanguage(AppLanguage language) =>
       _storage.write(key: languageKey, value: language.id);
 
-  /// Invite code from an opened `/?invite=` link, kept across the AuthKit
+  /// Invite code from an opened `/app/?invite=` link, kept across the AuthKit
   /// round trip until the signed-in user answers the join prompt.
   Future<String?> pendingInvite() => _storage.read(key: pendingInviteKey);
 

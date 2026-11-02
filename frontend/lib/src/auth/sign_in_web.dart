@@ -11,10 +11,15 @@ import '../models.dart';
 /// Browser cookie flow:
 /// 1) Same-origin GET /api/auth/workos (JSON) sets 217_oauth_binding.
 /// 2) Navigate to AuthKit from the Entrar click — no HTML "continue" interstitial.
-/// WorkOS returns to /api/auth/workos/callback which sets the session cookie.
-Future<User?> beginWorkOSSignIn(ApiClient api) async {
+/// WorkOS returns to /api/auth/workos/callback which sets the session cookie,
+/// then lands on the app, or on [returnTo] (one of the privacy pages, e.g.
+/// `/app/privacy?confirm=delete`; the server ignores any other path).
+Future<User?> beginWorkOSSignIn(ApiClient api, {String? returnTo}) async {
   final base = api.config.apiBaseUrl.replaceAll(RegExp(r'/+$'), '');
-  final target = base.isEmpty ? '/api/auth/workos' : '$base/api/auth/workos';
+  var target = base.isEmpty ? '/api/auth/workos' : '$base/api/auth/workos';
+  if (returnTo != null && returnTo.isNotEmpty) {
+    target += '?${Uri(queryParameters: {'return': returnTo}).query}';
+  }
   final req = await html.HttpRequest.request(
     target,
     method: 'GET',

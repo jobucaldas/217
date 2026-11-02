@@ -5,12 +5,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../api/client.dart';
+import '../config.dart';
 import '../errors.dart';
 import '../i18n.dart';
 import '../theme/app_theme.dart';
 import 'dialog_actions.dart';
 import '../models.dart';
 import '../platform/share_sheet.dart';
+import '../platform/web_page.dart';
 
 /// Owner settings: send/copy the invite link or code, or revoke. Owners
 /// never join other calendars; that is the partner role.
@@ -58,7 +60,7 @@ class _ShareSettingsSectionState extends State<ShareSettingsSection> {
     if (share.inviteUrl.isNotEmpty) return share.inviteUrl;
     if (kIsWeb && share.inviteCode.isNotEmpty) {
       final code = Uri.encodeQueryComponent(share.inviteCode);
-      return '${Uri.base.origin}/?invite=$code';
+      return '${Uri.base.origin}/app/?invite=$code';
     }
     return '';
   }
@@ -231,6 +233,15 @@ String joinErrorText(Strings strings, Object err) =>
 /// Bright danger red for irreversible account deletion.
 const kDeleteAccountColor = Color(0xFFDC2626);
 
+/// Web: deleting needs a recent sign-in (the server asks browsers for one),
+/// so it happens on the account deletion page, which warns, signs in again
+/// when needed and deletes. Returns false elsewhere.
+bool _deleteOnWebPage(Strings strings) {
+  if (!kIsWeb) return false;
+  goToWebPath(accountDeletePageUri(strings.language.id, confirm: true));
+  return true;
+}
+
 /// Delete-account row, shown among the advanced options in Settings.
 class DeleteAccountSection extends StatefulWidget {
   const DeleteAccountSection({
@@ -254,6 +265,7 @@ class _DeleteAccountSectionState extends State<DeleteAccountSection> {
   bool _busy = false;
 
   Future<void> _confirmDelete() async {
+    if (_deleteOnWebPage(widget.strings)) return;
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -367,6 +379,7 @@ class _PartnerJoinScreenState extends State<PartnerJoinScreen> {
   }
 
   Future<void> _delete() async {
+    if (_deleteOnWebPage(widget.strings)) return;
     final scheme = Theme.of(context).colorScheme;
     final ok = await showDialog<bool>(
       context: context,

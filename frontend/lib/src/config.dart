@@ -79,3 +79,30 @@ class AppConfig {
 /// Trims whitespace and trailing slashes from a server URL.
 String normalizeApiBase(String value) =>
     value.trim().replaceAll(RegExp(r'/+$'), '');
+
+/// The web app's privacy notice (also where people download, withdraw and
+/// delete), and its account deletion page (linked from the Play listing).
+const privacyPagePath = '/app/privacy';
+const accountDeletePagePath = '/app/account/delete';
+
+/// The account deletion page in [language], opening its warning when
+/// [confirm] (web Settings sends people there to delete).
+String accountDeletePageUri(String language, {bool confirm = false}) => Uri(
+      path: accountDeletePagePath,
+      queryParameters: {
+        'lang': language,
+        if (confirm) 'confirm': 'delete',
+      },
+    ).toString();
+
+/// Standalone web pages of the app, opened by their own URL.
+enum WebPage { privacy, deleteAccount }
+
+/// The standalone page [uri] points at, if any (`/app/privacy`,
+/// `/app/account/delete`, with or without a trailing slash).
+WebPage? webPageFor(Uri uri) {
+  final path = uri.path.replaceAll(RegExp(r'/+$'), '');
+  if (path == privacyPagePath) return WebPage.privacy;
+  if (path == accountDeletePagePath) return WebPage.deleteAccount;
+  return null;
+}

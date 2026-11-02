@@ -82,7 +82,7 @@ class SettingsPage extends StatefulWidget {
   /// the data behind reminders, alerts, sharing, role and stage until then.
   final bool consentPending;
 
-  /// Called when the privacy page (in the browser) is opened.
+  /// Called when the privacy page's web version opens in the browser.
   final VoidCallback? onPrivacyPageOpened;
 
   /// Android only: whether the app looks for a newer APK when it opens.
@@ -462,8 +462,8 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
             ],
           ],
-          // Privacy (LGPD): the server's notice page, which is also where
-          // people download or delete their data and withdraw consent.
+          // Privacy (LGPD): the notice, whose web page is also where people
+          // download or delete their data and withdraw consent.
           Padding(
             padding: const EdgeInsets.only(top: 20),
             child: Align(
@@ -474,10 +474,12 @@ class _SettingsPageState extends State<SettingsPage> {
                   padding: const EdgeInsets.symmetric(horizontal: 4),
                   foregroundColor: scheme.primary,
                 ),
-                onPressed: () {
-                  widget.onPrivacyPageOpened?.call();
-                  openPrivacyNotice(context, widget.api, widget.strings);
-                },
+                onPressed: () => openPrivacyNotice(
+                  context,
+                  widget.api,
+                  widget.strings,
+                  onBrowserOpened: widget.onPrivacyPageOpened,
+                ),
                 child: Text(
                   widget.strings.privacyNotice,
                   style: text.bodyLarge?.copyWith(

@@ -137,7 +137,7 @@ docker compose up -d
 
 If any command fails, stop and resolve the error before continuing. Keep `217.dump` until you have verified the restored data in the app, then delete it and any older plaintext backups. Do not rerun the dump command over your existing backup after removing the old volume.
 
-Optional server variables for the `backend` service: `PRIVACY_CONTACT` (email or URL for privacy requests, shown on the privacy notice page), `SESSION_TTL` (e.g. `720h`), `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` (web push).
+Optional server variables for the `backend` service: `PRIVACY_CONTACT` (email or URL for privacy requests, shown on the privacy notice and account deletion pages), `SESSION_TTL` (e.g. `720h`), `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` (web push).
 
 Owners can record cycling, perimenopause, menopause, or no cycles; menopause suppresses PMS predictions while perimenopause keeps PMS when periods are logged.
 
@@ -154,7 +154,7 @@ Download from [GitHub Releases](https://github.com/jobucaldas/217/releases/tag/n
 | Linux | `217-nightly-x86_64.AppImage` (`chmod +x`; needs a keyring such as GNOME Keyring or KWallet) |
 | Web | served by your server at `APP_BASE_URL` |
 
-The native apps ship **no built-in server**. On first launch they ask for yours: type its address (`217.example.com`) or paste an invite link (`https://217.example.com/?invite=CODE`), then **Connect**. They sign in with the WorkOS client ID your server reports, so one download works with any server. Release builds need `https://`. To switch servers, sign out and tap **Server: …** on the sign-in screen (switching signs you out).
+The native apps ship **no built-in server**. On first launch they ask for yours: type its address (`217.example.com`) or paste an invite link (`https://217.example.com/app/?invite=CODE`), then **Connect**. They sign in with the WorkOS client ID your server reports, so one download works with any server. Release builds need `https://`. To switch servers, sign out and tap **Server: …** on the sign-in screen (switching signs you out).
 
 **Staying signed in, offline.** On Android, sign-in creates a P-256 key in the Android Keystore (StrongBox when the phone has one); the server keeps only its public half. When the session runs out the app signs a one-time challenge with it and gets a new one, so you sign in again only after signing out, deleting the account, or 180 days without opening the app. The app also keeps the calendar on the phone and opens offline: day edits are saved at once and sent, in order, once the server is reachable again (a dot on the settings button means something is waiting; Settings says what and offers **Sync now**). Signing out sends what it can and erases the rest from the phone.
 
@@ -187,11 +187,11 @@ The `certs` service writes a private CA and the `postgres` / `backend` certifica
 
 | | How |
 |---|---|
-| Specific consent | After sign-in, the app links to the privacy notice page (`/api/privacy`, served by the API in English, Português or Español) that says what is stored, why, where and who sees it, and asks to **I have read and accept** or cancel (sign out). Nothing is processed until the user agrees; the agreed version and time are stored. Changing the notice (`model.ConsentVersion`) asks everyone again |
+| Specific consent | After sign-in, the app links to the privacy notice (part of the app, in English, Português or Español; on the web at `/app/privacy`) that says what is stored, why, where and who sees it, and asks to **I have read and accept** or cancel (sign out). Nothing is processed until the user agrees; the agreed version and time are stored. Changing the notice (`model.ConsentVersion`) asks everyone again |
 | Contact | `PRIVACY_CONTACT` (the controller or its DPO) appears in the notice |
-| Access and portability | Settings → **Privacy notice** opens the page; **Download my data** there downloads everything held about the account as JSON (`GET /api/account/export` for API clients). Every action on the page (download, withdraw, delete) shows its warning first and needs a fresh sign-in (within 5 minutes), enforced by the server |
+| Access and portability | Settings → **Privacy notice** opens the notice; the apps link from it to its web page, where **Download my data** downloads everything held about the account as JSON (`GET /api/account/export`). Every action on the web page (download, withdraw, delete) shows its warning first and needs a fresh sign-in (within 5 minutes), which the server enforces for browsers |
 | Correction | Any day can be edited or cleared |
-| Erasure, withdrawing consent | On the privacy page, **Delete account** (after a warning that everything is lost) removes the account and all its data (also without `WORKOS_API_KEY`, which only decides whether the WorkOS sign-in identity goes too); a departing partner leaves the owner's share revoked. **Withdraw consent** (after a warning that the app stops working) keeps the data but blocks its processing until the user agrees again (`DELETE /api/account/consent`) |
+| Erasure, withdrawing consent | `/app/account/delete` (for store listings) lists the steps and what is deleted or kept, and deletes after signing in; Settings → Advanced options → **Delete account** does the same in the app. On the privacy page, **Delete account** (after a warning that everything is lost) removes the account and all its data (also without `WORKOS_API_KEY`, which only decides whether the WorkOS sign-in identity goes too); a departing partner leaves the owner's share revoked. **Withdraw consent** (after a warning that the app stops working) keeps the data but blocks its processing until the user agrees again (`DELETE /api/account/consent`) |
 | Minimization and retention | No IP addresses or user agents are stored. Expired sessions and sign-in attempts, device keys unused for 180 days, reminder deliveries older than 30 days and shares revoked over 30 days ago are purged hourly |
 | No third parties | Fonts ship with the app; the web engine's fallback fonts are fetched by the server (`/gstatic/`), so browsers never contact Google. Sign-in goes through WorkOS, named in the notice |
 | Security | See [Security](#security) |

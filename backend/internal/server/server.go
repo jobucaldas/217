@@ -190,17 +190,14 @@ func Run(cfg Config) error {
 	mux.HandleFunc("GET /api/stats", h.ConsentMiddleware(h.GetStats))
 
 	// Rights that stay reachable before (or instead of) consenting.
-	mux.HandleFunc("DELETE /api/account", h.AuthMiddleware(h.DeleteAccount))
+	mux.HandleFunc("DELETE /api/account", h.AuthMiddleware(h.RecentBrowserSignIn(h.DeleteAccount)))
 	mux.HandleFunc("PUT /api/account/consent", h.AuthMiddleware(h.RecordConsent))
-	mux.HandleFunc("DELETE /api/account/consent", h.AuthMiddleware(h.WithdrawConsent))
-	mux.HandleFunc("GET /api/account/export", h.AuthMiddleware(h.ExportAccount))
-	// The privacy notice as a web page, with download (after a fresh
-	// sign-in), withdraw-consent and delete-account forms.
-	mux.HandleFunc("GET /api/privacy", h.PrivacyPage)
-	mux.HandleFunc("GET /api/privacy/signin", h.PrivacySignIn)
-	mux.HandleFunc("POST /api/privacy/export", h.PrivacyExport)
-	mux.HandleFunc("POST /api/privacy/withdraw", h.PrivacyWithdraw)
-	mux.HandleFunc("POST /api/privacy/delete", h.PrivacyDelete)
+	mux.HandleFunc("DELETE /api/account/consent", h.AuthMiddleware(h.RecentBrowserSignIn(h.WithdrawConsent)))
+	mux.HandleFunc("GET /api/account/export", h.AuthMiddleware(h.RecentBrowserSignIn(h.ExportAccount)))
+	// The privacy notice is part of the web app now (/app/privacy); older
+	// apps still link here.
+	mux.HandleFunc("GET /api/privacy", h.LegacyPrivacyPage)
+	mux.HandleFunc("GET /api/privacy/signin", h.LegacyPrivacyPage)
 	mux.HandleFunc("PUT /api/account/role", h.ConsentMiddleware(h.SetRole))
 	mux.HandleFunc("PUT /api/account/stage", h.ConsentMiddleware(h.SetStage))
 	mux.HandleFunc("PUT /api/account/profile", h.ConsentMiddleware(h.UpdateProfile))
