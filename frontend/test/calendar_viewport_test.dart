@@ -70,6 +70,17 @@ class _GatedCalendarApi extends _FakeCalendarApi {
   }
 }
 
+/// Counts month reads.
+class _CountingCalendarApi extends _FakeCalendarApi {
+  int calls = 0;
+
+  @override
+  Future<List<Entry>> listEntries(int year, int month) async {
+    calls++;
+    return entries;
+  }
+}
+
 class _CalendarOwnerConsentApi extends _FakeCalendarApi {
   _CalendarOwnerConsentApi(super.entries);
 
@@ -634,6 +645,62 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Felt fine'), findsOneWidget);
     expect(tester.getTopLeft(note), noteTop);
+  });
+
+  testWidgets('fast swipes each count, and the server is asked once',
+      (tester) async {
+    const size = Size(390, 844);
+    await tester.binding.setSurfaceSize(size);
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final api = _CountingCalendarApi();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildApp217Theme(
+          brightness: Brightness.light,
+          palette: AppPalette.blue,
+        ),
+        home: MediaQuery(
+          data: const MediaQueryData(size: size),
+          child: CalendarScreen(
+            api: api,
+            user: const User(
+              id: 'u1',
+              email: 'shot@example.invalid',
+              name: 'Shot',
+            ),
+            strings: const Strings(AppLanguage.en),
+            onOpenSettings: () {},
+            palette: AppPalette.blue,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final carousel = find.byKey(const ValueKey('month-carousel'));
+    final before = api.calls;
+
+    // Four swipes, each grabbing the grid while the last is still sliding.
+    for (var i = 0; i < 4; i++) {
+      final g = await tester.startGesture(tester.getCenter(carousel));
+      await g.moveBy(const Offset(60, 0));
+      await tester.pump(const Duration(milliseconds: 16));
+      await g.moveBy(const Offset(120, 0));
+      await tester.pump(const Duration(milliseconds: 16));
+      await g.up();
+      await tester.pump(const Duration(milliseconds: 60));
+    }
+    await tester.pumpAndSettle();
+
+    final now = DateTime.now();
+    final target = DateTime(now.year, now.month - 4);
+    expect(
+      find.text(DateFormat.yMMMM('en_US').format(target)),
+      findsOneWidget,
+    );
+    // The first swipe loads at once; the burst after it waits to calm down
+    // and then reads one set of three months.
+    expect(api.calls - before, lessThanOrEqualTo(9));
   });
 
   testWidgets('short screens show the note as a tag that opens a card',

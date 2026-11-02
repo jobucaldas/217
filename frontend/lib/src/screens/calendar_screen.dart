@@ -112,8 +112,27 @@ class _CalendarScreenState extends State<CalendarScreen>
 
   /// Pixel drag offset: negative = finger left (peek next month).
   double _dragPx = 0;
+
+  /// Offset when the current drag began; non-zero when the grid was grabbed
+  /// mid-snap. A swipe is judged by how far this drag moved, not by the
+  /// offset left over from the snap.
+  double _dragStartPx = 0;
   bool _monthDragging = false;
   late final AnimationController _monthSnap;
+
+  /// Month shift (+1/-1) the running snap animation will commit when it
+  /// ends; 0 when it only springs back.
+  int _snapCommit = 0;
+
+  /// Moves on every shown month and on clearing the data, so a read of the
+  /// device's copy that comes back late does not repopulate stale months.
+  int _dataEpoch = 0;
+
+  /// Month changes reload from the server once the swiping calms down; the
+  /// months themselves are drawn at once from memory or the device's copy.
+  Timer? _loadDebounce;
+  DateTime? _lastShift;
+  static const _loadDebounceGap = Duration(milliseconds: 200);
 
   /// Carousel width from the last layout; the month header, built above
   /// the carousel, reads it to follow the drag.
@@ -221,6 +240,7 @@ class _CalendarScreenState extends State<CalendarScreen>
     WidgetsBinding.instance.removeObserver(this);
     widget.cycleRefreshSignal?.removeListener(_onCycleRefresh);
     _wheelIdle?.cancel();
+    _loadDebounce?.cancel();
     _monthSnap.dispose();
     _liveNote.dispose();
     super.dispose();
@@ -339,6 +359,7 @@ class _CalendarScreenState extends State<CalendarScreen>
         unawaited(_cancelPartnerAlerts());
       }
     }
+    _dataEpoch++;
     _monthCache.clear();
     _confirmed.clear();
     setState(() {
@@ -476,7 +497,7 @@ class _CalendarScreenState extends State<CalendarScreen>
         _dragPx = 0;
         _showCachedMonths();
       });
-      _load();
+      _monthShown();
       return;
     }
     // Chevron: animate slide with a light recoil, then commit.
@@ -486,12 +507,33 @@ class _CalendarScreenState extends State<CalendarScreen>
 
   void _onMonthDragStart(DragStartDetails _) {
     _wheelDragging = false;
-    _monthSnap.stop();
-    _monthSnapAnim = null;
+    // Grabbing the grid mid-snap keeps the offset it had, and a swipe that
+    // was on its way to the next month still counts.
+    final settled = _settleSnap();
     setState(() {
       _monthDragging = true;
-      _dragPx = 0;
+      _dragStartPx = _dragPx;
+      if (settled) _showCachedMonths();
     });
+    if (settled) _monthShown();
+  }
+
+  /// Stops a running snap. If it was heading for another month, switches to
+  /// that month now and re-expresses the offset relative to it, so the grids
+  /// stay where they are on screen. Returns whether the month changed; the
+  /// caller redraws and calls [_monthShown].
+  bool _settleSnap() {
+    final commit = _snapCommit;
+    _monthSnap.stop();
+    _monthSnapAnim = null;
+    _snapCommit = 0;
+    if (commit == 0) return false;
+    _month = DateTime(_month.year, _month.month + commit);
+    final width = _carouselWidth > 0
+        ? _carouselWidth
+        : MediaQuery.sizeOf(context).width;
+    _dragPx += commit * width;
+    return true;
   }
 
   void _onMonthDragUpdate(DragUpdateDetails details) {
@@ -501,10 +543,11 @@ class _CalendarScreenState extends State<CalendarScreen>
   void _onMonthDragEnd(DragEndDetails details, double width) {
     final v = details.primaryVelocity ?? 0;
     final threshold = width * 0.22;
+    final moved = _dragPx - _dragStartPx;
     int commit = 0;
-    if (_dragPx <= -threshold || v < -480) {
+    if (moved <= -threshold || v < -480) {
       commit = 1; // next
-    } else if (_dragPx >= threshold || v > 480) {
+    } else if (moved >= threshold || v > 480) {
       commit = -1; // previous
     }
     final target = commit == 0 ? 0.0 : (commit > 0 ? -width : width);
@@ -563,7 +606,14 @@ class _CalendarScreenState extends State<CalendarScreen>
   }
 
   void _animateMonthTo(double target, {required int commitDelta}) {
+    // A snap still running (fast chevron taps) lands its month first.
+    final settled = _settleSnap();
+    if (settled) {
+      _showCachedMonths();
+      _monthShown();
+    }
     final begin = _dragPx;
+    _snapCommit = commitDelta;
     // Slight overshoot on settle (recoil), not overblown.
     const recoil = Cubic(0.34, 1.22, 0.64, 1);
     final curve = commitDelta == 0 ? Curves.easeOutCubic : recoil;
@@ -576,8 +626,11 @@ class _CalendarScreenState extends State<CalendarScreen>
     _monthSnap.duration = Duration(
       milliseconds: commitDelta == 0 ? 220 : 300,
     );
+    final anim = _monthSnapAnim;
     _monthSnap.forward(from: 0).whenComplete(() {
-      if (!mounted) return;
+      // Settled early by a new gesture: that one owns the state now.
+      if (!mounted || !identical(anim, _monthSnapAnim)) return;
+      _snapCommit = 0;
       if (commitDelta != 0) {
         setState(() {
           _month = DateTime(_month.year, _month.month + commitDelta);
@@ -585,7 +638,7 @@ class _CalendarScreenState extends State<CalendarScreen>
           _monthSnapAnim = null;
           _showCachedMonths();
         });
-        _load();
+        _monthShown();
       } else {
         setState(() {
           _dragPx = 0;
@@ -593,6 +646,50 @@ class _CalendarScreenState extends State<CalendarScreen>
         });
       }
     });
+  }
+
+  /// The visible month changed: fill what is missing from the device's copy
+  /// now, and refresh from the server (at once for a lone change, after the
+  /// swiping calms down when months go by quickly).
+  void _monthShown() {
+    unawaited(_hydrateFromLocal());
+    final now = DateTime.now();
+    final last = _lastShift;
+    _lastShift = now;
+    final waiting = _loadDebounce != null;
+    _loadDebounce?.cancel();
+    _loadDebounce = null;
+    if (!waiting && (last == null || now.difference(last) > _loadDebounceGap)) {
+      _load();
+      return;
+    }
+    _loadDebounce = Timer(_loadDebounceGap, () {
+      _loadDebounce = null;
+      if (mounted) _load();
+    });
+  }
+
+  /// Months in view that were never fetched this session come from the
+  /// device's copy, so a fast swipe lands on days instead of an empty grid.
+  Future<void> _hydrateFromLocal() async {
+    final epoch = _dataEpoch;
+    for (final month in [_month, _prevMonth, _nextMonth]) {
+      final key = _monthKey(month);
+      if (_monthCache.containsKey(key)) continue;
+      List<Entry>? list;
+      try {
+        list = await widget.api.cachedMonth(month.year, month.month);
+      } catch (_) {
+        continue;
+      }
+      if (!mounted || epoch != _dataEpoch) return;
+      // A fetch or an edit may have filled it while this was reading.
+      if (list == null || _monthCache.containsKey(key)) continue;
+      setState(() {
+        _monthCache[key] = {for (final e in list!) e.date: e};
+        _showCachedMonths();
+      });
+    }
   }
 
   static bool _isSameDay(DateTime a, DateTime b) =>
