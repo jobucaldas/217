@@ -246,6 +246,9 @@ class Strings {
       _t('Update today', 'Atualizar hoje', 'Actualizar hoy');
   String updateDay(String day) =>
       _t('Update $day', 'Atualizar $day', 'Actualizar $day');
+  String get viewToday => _t('See today', 'Ver hoje', 'Ver hoy');
+  String viewDay(String day) => _t('View $day', 'Ver $day', 'Ver $day');
+  String get close => _t('Close', 'Fechar', 'Cerrar');
 
   // Reminders
   String get remindersOff =>
