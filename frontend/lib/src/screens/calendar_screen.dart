@@ -1570,7 +1570,7 @@ class _DayCell extends StatelessWidget {
       borderRadius: BorderRadius.circular(12),
       // Expected PMS days: a light, sparsely dashed ring in the gap around
       // the cell (an estimate, like the outlined predicted-period drop), so
-      // it reads on top of Taken/Missed fills and next to today's border.
+      // it reads on top of Taken/Missed fills and next to the selection ring.
       child: CustomPaint(
         key: isPms ? ValueKey('pms-${day.month}-${day.day}') : null,
         foregroundPainter: isPms
@@ -1588,12 +1588,10 @@ class _DayCell extends StatelessWidget {
             color: bg ?? emptyBg,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: isToday
-                  ? scheme.primary
-                  : selected
-                      ? scheme.onSurface
-                      : scheme.outline.withValues(alpha: 0.55),
-              width: isToday || selected ? 2.2 : 1,
+              color: selected
+                  ? scheme.onSurface
+                  : scheme.outline.withValues(alpha: 0.55),
+              width: selected ? 2.2 : 1,
             ),
           ),
           child: FittedBox(
@@ -1614,7 +1612,7 @@ class _DayCell extends StatelessWidget {
                   ),
                   // Fixed-height line under every number, so numbers sit at
                   // the same height whether or not a day has marks. Today's
-                  // label gives way to its marks; the border still shows it.
+                  // label gives way to its marks; the bold number still shows it.
                   SizedBox(
                     height: 12,
                     child: hasNote ||
