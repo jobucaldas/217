@@ -70,6 +70,41 @@ class _GatedCalendarApi extends _FakeCalendarApi {
   }
 }
 
+/// Counts month reads.
+class _CountingCalendarApi extends _FakeCalendarApi {
+  int calls = 0;
+
+  @override
+  Future<List<Entry>> listEntries(int year, int month) async {
+    calls++;
+    return entries;
+  }
+}
+
+/// Every month holds one day with a heart, on the device and on the server;
+/// reads wait on [gate] while it is set.
+class _HeldMonthsApi extends _FakeCalendarApi {
+  Completer<void>? gate;
+
+  static Entry _entry(int year, int month) => Entry(
+        date: DateFormat('yyyy-MM-dd').format(DateTime(year, month, 1)),
+        taken: null,
+        notes: '',
+        heart: true,
+      );
+
+  @override
+  Future<List<Entry>?> cachedMonth(int year, int month) async =>
+      [_entry(year, month)];
+
+  @override
+  Future<List<Entry>> listEntries(int year, int month) async {
+    final g = gate;
+    if (g != null) await g.future;
+    return [_entry(year, month)];
+  }
+}
+
 class _CalendarOwnerConsentApi extends _FakeCalendarApi {
   _CalendarOwnerConsentApi(super.entries);
 
@@ -637,6 +672,122 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Felt fine'), findsOneWidget);
     expect(tester.getTopLeft(note), noteTop);
+  });
+
+  testWidgets('fast swipes each count, and the server is asked once',
+      (tester) async {
+    const size = Size(390, 844);
+    await tester.binding.setSurfaceSize(size);
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final api = _CountingCalendarApi();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildApp217Theme(
+          brightness: Brightness.light,
+          palette: AppPalette.blue,
+        ),
+        home: MediaQuery(
+          data: const MediaQueryData(size: size),
+          child: CalendarScreen(
+            api: api,
+            user: const User(
+              id: 'u1',
+              email: 'shot@example.invalid',
+              name: 'Shot',
+            ),
+            strings: const Strings(AppLanguage.en),
+            onOpenSettings: () {},
+            palette: AppPalette.blue,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final carousel = find.byKey(const ValueKey('month-carousel'));
+    final before = api.calls;
+
+    // Four swipes, each grabbing the grid while the last is still sliding.
+    for (var i = 0; i < 4; i++) {
+      final g = await tester.startGesture(tester.getCenter(carousel));
+      await g.moveBy(const Offset(60, 0));
+      await tester.pump(const Duration(milliseconds: 16));
+      await g.moveBy(const Offset(120, 0));
+      await tester.pump(const Duration(milliseconds: 16));
+      await g.up();
+      await tester.pump(const Duration(milliseconds: 60));
+    }
+    await tester.pumpAndSettle();
+
+    final now = DateTime.now();
+    final target = DateTime(now.year, now.month - 4);
+    expect(
+      find.text(DateFormat.yMMMM('en_US').format(target)),
+      findsOneWidget,
+    );
+    // The burst waits to calm down, then reads one set of months (the three
+    // in view, plus today's for the summary).
+    expect(api.calls - before, inInclusiveRange(3, 4));
+  });
+
+  testWidgets('a read for a month left behind never lands on the new one',
+      (tester) async {
+    const size = Size(390, 844);
+    await tester.binding.setSurfaceSize(size);
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final api = _HeldMonthsApi();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildApp217Theme(
+          brightness: Brightness.light,
+          palette: AppPalette.blue,
+        ),
+        home: MediaQuery(
+          data: const MediaQueryData(size: size),
+          child: CalendarScreen(
+            api: api,
+            user: const User(
+              id: 'u1',
+              email: 'shot@example.invalid',
+              name: 'Shot',
+            ),
+            strings: const Strings(AppLanguage.en),
+            onOpenSettings: () {},
+            palette: AppPalette.blue,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    api.gate = Completer<void>();
+    // One month back; its refresh starts and hangs.
+    await tester.tap(find.byIcon(Icons.chevron_left));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 320));
+    await tester.pump(const Duration(milliseconds: 200));
+    // Another month back before it answers.
+    await tester.tap(find.byIcon(Icons.chevron_left));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 320));
+    api.gate!.complete();
+    api.gate = null;
+    await tester.pump(const Duration(milliseconds: 20));
+
+    // The late answer is for the month before, not this one.
+    final now = DateTime.now();
+    final shown = DateTime(now.year, now.month - 2);
+    final grid = find.byKey(ValueKey('${shown.year}-${shown.month}'));
+    expect(
+      find.descendant(of: grid, matching: find.byIcon(Icons.favorite)),
+      findsOneWidget,
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(of: grid, matching: find.byIcon(Icons.favorite)),
+      findsOneWidget,
+    );
   });
 
   testWidgets('short screens show the note as a tag that opens a card',

@@ -821,6 +821,14 @@ class ApiClient {
         (userId) => _local.monthEntries(userId, year, month),
       );
 
+  /// The device's copy of a month, without asking the server; null when it
+  /// was never read here. Lets a month swiped into view draw at once.
+  Future<List<Entry>?> cachedMonth(int year, int month) async {
+    final userId = _userId;
+    if (userId == null) return null;
+    return _local.monthEntries(userId, year, month);
+  }
+
   /// Saved on the device at once and queued for the server; throws only
   /// when the server refuses the edit.
   Future<Entry> upsertEntry(
