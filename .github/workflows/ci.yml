@@ -275,6 +275,8 @@ jobs:
     env:
       HEAD_REF: ${{ github.head_ref }}
       BASE_REF: ${{ github.base_ref }}
+      EVENT_ACTION: ${{ github.event.action }}
+      BEFORE_SHA: ${{ github.event.before }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -284,13 +286,19 @@ jobs:
         id: changed
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          # What this push changed (a new push re-renders only if it touched the screens),
+          # or the whole PR when it was just opened or the old head is gone.
+          range="origin/${BASE_REF}...HEAD"
+          if [ "$EVENT_ACTION" = synchronize ] && git cat-file -e "${BEFORE_SHA}^{commit}" 2>/dev/null; then
+            range="${BEFORE_SHA}..HEAD"
+          fi
           if [ "$(git log -1 --format=%an)" = "github-actions[bot]" ]; then
             echo "value=false" >> "$GITHUB_OUTPUT"
-          elif git diff --name-only "origin/${BASE_REF}...HEAD" \
+          elif git diff --name-only "$range" \
               | grep -Eq '^(frontend/(lib/|tool/|assets/fonts/|pubspec\.)|render-screenshots\.sh)'; then
             echo "value=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::notice::No screen or tooling changes; keeping the committed screenshots."
+            echo "::notice::No screen or tooling changes in this push; keeping the committed screenshots."
             echo "value=false" >> "$GITHUB_OUTPUT"
           fi
       - if: steps.changed.outputs.value == 'true'
