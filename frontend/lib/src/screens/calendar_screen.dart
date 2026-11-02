@@ -1497,7 +1497,12 @@ class _MonthGrid extends StatelessWidget {
                             children: [
                               for (var col = 0; col < 7; col++)
                                 Expanded(
-                                  child: slot(row * 7 + col),
+                                  // 1px per side: 2px between neighbouring
+                                  // cells so the dashed PMS rings don't touch.
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(1),
+                                    child: slot(row * 7 + col),
+                                  ),
                                 ),
                             ],
                           ),
