@@ -247,6 +247,71 @@ jobs:
           path: frontend/build/217-setup.exe
           retention-days: 3
 
+  # Every icon is rendered from assets/branding by render-icons.sh; fails when a committed
+  # copy (Android, web, Linux, Windows, Play) no longer matches its source.
+  icons:
+    name: Icons match their sources
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./render-icons.sh --check
+
+  # Pull requests only: when the app's screens (or this tooling) changed, re-renders the
+  # store-listing screenshots (assets/*-screenshots) and commits them to the PR branch.
+  # No loop: a push made with GITHUB_TOKEN starts no workflows, the job skips heads
+  # authored by the bot, and it commits nothing unless the files changed. Fork PRs are
+  # skipped (no write access).
+  screenshots:
+    name: Store screenshots
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    container:
+      image: ghcr.io/cirruslabs/flutter:stable
+    env:
+      HEAD_REF: ${{ github.head_ref }}
+      BASE_REF: ${{ github.base_ref }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+      - name: Check what changed
+        id: changed
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          # Re-render when the screens changed since the bot last rendered (or since the PR
+          # branched, if it never did). Anchoring on the bot's commit, not on this push, means
+          # a cancelled run or a rejected push is picked up by the next run.
+          last="$(git log -1 --author=github-actions --format=%H -- assets/phone-screenshots)"
+          range="origin/${BASE_REF}...HEAD"
+          [ -n "$last" ] && range="${last}..HEAD"
+          if [ "$(git log -1 --format=%an)" = "github-actions[bot]" ]; then
+            echo "value=false" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only "$range" \
+              | grep -Eq '^(frontend/(lib/|tool/|assets/fonts/|pubspec\.)|render-screenshots\.sh)'; then
+            echo "value=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::No screen or tooling changes since the last render; keeping the committed screenshots."
+            echo "value=false" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.changed.outputs.value == 'true'
+        run: ./render-screenshots.sh
+      - name: Commit the new screenshots
+        if: steps.changed.outputs.value == 'true'
+        run: |
+          git add assets
+          if git diff --cached --quiet; then exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore(assets): re-render store screenshots"
+          git push origin "HEAD:${HEAD_REF}" \
+            || echo "::warning::The branch moved while rendering; the next push re-renders."
+
   # main only: GHCR images + app releases (APK, Windows installer, AppImage), as the
   # rolling `nightly` pre-release and an immutable `0.YY.MMDD-RUN` release marked latest.
   # The tag is computed in `frontend`, because the APK's versionName must equal it.

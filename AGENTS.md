@@ -22,6 +22,7 @@ Linked owner and partner can message each other (Messages screen, unread badge o
 
 ## Layout
 - `backend/` — Go API (`Dockerfile`: `dev` stage + production image)
+- `assets/` — branding sources (`assets/branding/`, the only place icons are edited), Play listing graphics and screenshots; `./render-icons.sh` renders every icon from the sources
 - `frontend/` — Flutter app (web, Android, Windows, Linux), `Dockerfile` (web image: `local` stage builds from source, `prebuilt` is what CI publishes), `Caddyfile` (serves the bundle under `/app/`, proxies `/api/*`)
 - `docker-compose.yml` — dev stack + tooling (built from local code); end users run the compose file embedded in `README.md` against GHCR images
 - Deployment manifests live in a separate infra repo; this repo only publishes images and APKs.
@@ -111,6 +112,7 @@ Offline-first client: `ApiClient` keeps the last session, months, cycle and aler
 - Frontend: `docker compose run --rm test-frontend`
 - Web tryout: `docker compose up --build` then open http://localhost:8787/
 - APK: `docker compose run --rm apk`
+- Store screenshots (`assets/*-screenshots`, rendered from the real screens): `./render-screenshots.sh`; add or change scenes in `frontend/tool/store_screenshots_test.dart`
 
 ## Remaining gaps
 - Offline: cycle predictions are the last ones the server sent (no on-device recomputation); share, role, consent and alert settings need the server; desktop/web keep the offline copy in memory only and sign in again when the session ends
