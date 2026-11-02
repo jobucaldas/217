@@ -257,8 +257,12 @@ class _CalendarScreenState extends State<CalendarScreen>
     // reflows/shrinks the month carousel during swipe/chevron month changes.
     setState(() => _error = null);
     try {
-      final year = _month.year;
-      final month = _month.month;
+      // Months as requested now: the view may move while the reads fly.
+      final requested = _month;
+      final requestedPrev = _prevMonth;
+      final requestedNext = _nextMonth;
+      final year = requested.year;
+      final month = requested.month;
       final results = await Future.wait([
         widget.api.listEntries(year, month),
         widget.api.listEntries(
@@ -274,9 +278,9 @@ class _CalendarScreenState extends State<CalendarScreen>
       // Every month read here is fresh; today's month is one of the three
       // unless the view is two or more months away, then it is read too.
       final fresh = <String, Map<String, Entry>>{
-        _monthKey(_month): {for (final e in results[0]) e.date: e},
-        _monthKey(_prevMonth): {for (final e in results[1]) e.date: e},
-        _monthKey(_nextMonth): {for (final e in results[2]) e.date: e},
+        _monthKey(requested): {for (final e in results[0]) e.date: e},
+        _monthKey(requestedPrev): {for (final e in results[1]) e.date: e},
+        _monthKey(requestedNext): {for (final e in results[2]) e.date: e},
       };
       final today = _today;
       final todayMonth = _monthKey(today);
@@ -663,6 +667,9 @@ class _CalendarScreenState extends State<CalendarScreen>
   /// months already draw from memory or the device's copy meanwhile).
   void _monthShown() {
     unawaited(_hydrateFromLocal());
+    // A read for the month left behind must not land while the next one
+    // waits its turn.
+    _loadGeneration++;
     _loadDebounce?.cancel();
     _loadDebounce = Timer(_loadDebounceGap, () {
       _loadDebounce = null;
