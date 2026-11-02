@@ -80,7 +80,7 @@ class DaySummaryBar extends StatelessWidget {
   /// Null on read-only calendars: they get [onView] instead.
   final VoidCallback? onEdit;
 
-  /// Read-only calendars: opens the day card (see [showDayInfoCard]).
+  /// Read-only calendars: opens the day sheet read-only.
   final VoidCallback? onView;
 
   /// Set when the selected day or visible month is not today's.
@@ -596,151 +596,18 @@ Future<void> showDayNoteCard(
   );
 }
 
-/// Read-only card with everything known about [day], for calendars that
-/// cannot edit. Closes itself when [closeSignal] changes, so it never
-/// outlives the data it shows (calendar access cleared or revoked).
-Future<void> showDayInfoCard(
-  BuildContext context, {
-  required Strings strings,
-  required DateTime day,
-  required Entry? entry,
-  required CycleDayKind cycleKind,
-  required AppPalette palette,
-  required ValueListenable<int> closeSignal,
-}) {
-  return showDialog<void>(
-    context: context,
-    useRootNavigator: true,
-    builder: (dialogContext) {
-      final scheme = Theme.of(dialogContext).colorScheme;
-      final textTheme = Theme.of(dialogContext).textTheme;
-      final brightness = Theme.of(dialogContext).brightness;
-      final taken = entry?.taken;
-      final period = App217Colors.period(brightness, palette);
-      final note = entry?.notes.trim() ?? '';
-      final isFuture = day.isAfter(DateTime.now());
-
-      Widget row(Key key, String label, Color color, Widget mark) => Padding(
-            key: key,
-            padding: const EdgeInsets.symmetric(vertical: 6),
-            child: Row(children: [
-              SizedBox(width: 20, child: Center(child: mark)),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(label,
-                    style: textTheme.bodyLarge?.copyWith(color: scheme.onSurface)),
-              ),
-            ]),
-          );
-
-      final rows = <Widget>[
-        if (taken == null && !isFuture)
-          row(
-            const ValueKey('day-card-status'),
-            strings.unrecorded,
-            scheme.onSurfaceVariant,
-            DayMark(color: scheme.onSurfaceVariant, outlined: true),
-          )
-        else if (taken != null)
-          () {
-            final c = taken
-                ? App217Colors.statusTaken(brightness, palette)
-                : App217Colors.statusMissed(brightness, palette);
-            return row(const ValueKey('day-card-status'),
-                taken ? strings.taken : strings.missed, c, DayMark(color: c));
-          }(),
-        if (entry?.heart ?? false)
-          row(
-            const ValueKey('day-card-heart'),
-            strings.heartLabel,
-            App217Colors.intimacy(brightness, palette),
-            DayMark(
-              color: App217Colors.intimacy(brightness, palette),
-              icon: Icons.favorite,
-            ),
-          ),
-        if (entry?.period ?? false)
-          row(const ValueKey('day-card-period'), strings.periodLabel, period,
-              DayMark(color: period, icon: Icons.water_drop))
-        else if (cycleKind == CycleDayKind.predictedPeriod)
-          row(const ValueKey('day-card-predicted-period'),
-              strings.predictedPeriod, period,
-              DayMark(color: period, icon: Icons.water_drop_outlined)),
-        if (cycleKind == CycleDayKind.pms)
-          row(
-            const ValueKey('day-card-pms'),
-            strings.expectedPms,
-            App217Colors.pms(brightness, palette),
-            DayMark(color: App217Colors.pms(brightness, palette), dashed: true),
-          ),
-      ];
-
-      return _CloseOnSignal(
-          signal: closeSignal,
-          child: AlertDialog(
-            key: const ValueKey('day-info-card'),
-            backgroundColor: scheme.surface,
-            title: Text(
-              strings.dates.fullDate(day),
-              style: textTheme.titleLarge?.copyWith(color: scheme.onSurface),
-            ),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  ...rows,
-                  if (note.isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    Container(
-                      key: const ValueKey('day-card-note'),
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Color.alphaBlend(
-                          scheme.onSurface.withValues(alpha: 0.06),
-                          scheme.surface,
-                        ),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: scheme.outline),
-                      ),
-                      child: Text(
-                        note,
-                        style: textTheme.bodyLarge?.copyWith(
-                          color: scheme.onSurface,
-                          fontSize: 17,
-                          height: 1.35,
-                        ),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                key: const ValueKey('day-card-close'),
-                onPressed: () => Navigator.of(dialogContext).pop(),
-                child: Text(strings.close),
-              ),
-            ],
-          ),
-      );
-    },
-  );
-}
-
 /// Pops the dialog it sits in when [signal] changes.
-class _CloseOnSignal extends StatefulWidget {
-  const _CloseOnSignal({required this.signal, required this.child});
+class CloseOnSignal extends StatefulWidget {
+  const CloseOnSignal({super.key, required this.signal, required this.child});
 
   final ValueListenable<int> signal;
   final Widget child;
 
   @override
-  State<_CloseOnSignal> createState() => _CloseOnSignalState();
+  State<CloseOnSignal> createState() => CloseOnSignalState();
 }
 
-class _CloseOnSignalState extends State<_CloseOnSignal> {
+class CloseOnSignalState extends State<CloseOnSignal> {
   late final int _opened;
 
   @override

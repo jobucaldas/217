@@ -48,6 +48,16 @@ CalendarScreen _calendar({
       onOpenSettings: () {},
     );
 
+/// The sheet's button of [key], which is disabled when it has no handler.
+bool _disabled(WidgetTester tester, Key key) =>
+    tester
+        .widget<IconButton>(find.descendant(
+          of: find.byKey(key),
+          matching: find.byType(IconButton),
+        ))
+        .onPressed ==
+    null;
+
 void main() {
   setUpAll(() => GoogleFonts.config.allowRuntimeFetching = false);
 
@@ -63,7 +73,8 @@ void main() {
       )
       .first;
 
-  testWidgets('partner views a day in a read-only card', (tester) async {
+  testWidgets('partner views a day in the owner sheet, read-only',
+      (tester) async {
     await tester.binding.setSurfaceSize(const Size(390, 844));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(_app(_calendar(entries: [
@@ -81,25 +92,37 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('view-day-button')));
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const ValueKey('day-info-card')), findsOneWidget);
-    expect(find.byKey(const ValueKey('day-card-status')), findsOneWidget);
+    expect(find.byType(DayEditorSheet), findsOneWidget);
     expect(find.text('Taken'), findsWidgets);
-    expect(find.byKey(const ValueKey('day-card-heart')), findsOneWidget);
-    expect(find.byKey(const ValueKey('day-card-period')), findsOneWidget);
-    expect(find.byKey(const ValueKey('day-card-note')), findsOneWidget);
-    expect(find.text('Felt fine today'), findsWidgets);
-    // Read-only: nothing to edit, only a close action.
-    expect(find.byType(DayEditorSheet), findsNothing);
+    // Every control is shown but disabled.
+    expect(_disabled(tester, const ValueKey('day-heart-toggle')), isTrue);
+    expect(_disabled(tester, const ValueKey('day-period-toggle')), isTrue);
+    expect(
+      tester
+          .widget<SegmentedButton<bool>>(find.byType(SegmentedButton<bool>))
+          .onSelectionChanged,
+      isNull,
+    );
     expect(find.byType(TextField), findsNothing);
-    expect(find.byType(Switch), findsNothing);
-    expect(find.byKey(const ValueKey('day-card-close')), findsOneWidget);
 
-    await tester.tap(find.byKey(const ValueKey('day-card-close')));
+    // The note opens read-only, in its card.
+    await tester.tap(find.byIcon(Icons.sticky_note_2));
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('day-info-card')), findsNothing);
+    expect(find.byKey(const ValueKey('day-note-card')), findsOneWidget);
+    expect(find.text('Felt fine today'), findsWidgets);
+    expect(find.byType(TextField), findsNothing);
+    await tester.tapAt(const Offset(4, 4));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('day-note-card')), findsNothing);
+
+    // Same as the owner's sheet: no close button, a tap outside dismisses.
+    expect(find.text('Close'), findsNothing);
+    await tester.tapAt(const Offset(195, 40));
+    await tester.pumpAndSettle();
+    expect(find.byType(DayEditorSheet), findsNothing);
   });
 
-  testWidgets('double tap on a day opens the card for a partner',
+  testWidgets('double tap on a day opens the read-only sheet for a partner',
       (tester) async {
     await tester.binding.setSurfaceSize(const Size(390, 844));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -110,13 +133,18 @@ void main() {
 
     await tester.tap(cellOf(other));
     await tester.pump(const Duration(milliseconds: 50));
-    expect(find.byKey(const ValueKey('day-info-card')), findsNothing);
+    expect(find.byType(DayEditorSheet), findsNothing);
     await tester.tap(cellOf(other));
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const ValueKey('day-info-card')), findsOneWidget);
+    expect(find.byType(DayEditorSheet), findsOneWidget);
     expect(find.text('Missed'), findsWidgets);
-    expect(find.byType(DayEditorSheet), findsNothing);
+    expect(
+      tester
+          .widget<SegmentedButton<bool>>(find.byType(SegmentedButton<bool>))
+          .onSelectionChanged,
+      isNull,
+    );
   });
 
   testWidgets('partner can jump back to today', (tester) async {
@@ -137,24 +165,50 @@ void main() {
     expect(find.text('See today'), findsOneWidget);
   });
 
-  testWidgets('the card closes when the share is revoked', (tester) async {
+  testWidgets('the sheet closes when the share is revoked', (tester) async {
     await tester.binding.setSurfaceSize(const Size(390, 844));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(_app(_calendar(entries: const [])));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('view-day-button')));
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('day-info-card')), findsOneWidget);
+    expect(find.byType(DayEditorSheet), findsOneWidget);
 
     await tester.pumpWidget(_app(_calendar(
       entries: const [],
       share: const ShareState(status: 'revoked', canEditCalendar: false),
     )));
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('day-info-card')), findsNothing);
+    expect(find.byType(DayEditorSheet), findsNothing);
   });
 
-  testWidgets('owner still gets the editor, not the card', (tester) async {
+  testWidgets('an open note card closes too when the share is revoked',
+      (tester) async {
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final entries = [
+      Entry(date: _key(today), taken: true, notes: 'Private note'),
+    ];
+    await tester.pumpWidget(_app(_calendar(entries: entries)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('view-day-button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.sticky_note_2));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('day-note-card')), findsOneWidget);
+
+    await tester.pumpWidget(_app(_calendar(
+      entries: entries,
+      share: const ShareState(status: 'revoked', canEditCalendar: false),
+    )));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('day-note-card')), findsNothing);
+    expect(find.text('Private note'), findsNothing);
+    expect(find.byType(DayEditorSheet), findsNothing);
+  });
+
+  testWidgets('owner still gets the editor, not the read-only sheet',
+      (tester) async {
     await tester.binding.setSurfaceSize(const Size(390, 844));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(_app(_calendar(
@@ -168,6 +222,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('update-day-button')));
     await tester.pumpAndSettle();
     expect(find.byType(DayEditorSheet), findsOneWidget);
-    expect(find.byKey(const ValueKey('day-info-card')), findsNothing);
+    expect(find.text('Close'), findsNothing);
+    expect(_disabled(tester, const ValueKey('day-heart-toggle')), isFalse);
   });
 }
