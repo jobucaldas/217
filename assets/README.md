@@ -13,7 +13,7 @@ Locales: `en-US` (default), `pt-BR`, `es-419`. Screenshots are numbered in the o
 
 ## Branding sources
 
-`branding/` holds the only editable copies: `app-icon.svg`, `app-icon-maskable.svg`, `feature-graphic.svg`, the wordmark logos and favicon, and the Fraunces font they were drawn with. Change them there, then run `./render-icons.sh` (needs ImageMagick, or podman or docker) to re-render everything derived from them: the Android launcher, web, Linux and Windows icons under `frontend/` (each platform's build reads them from there, so they stay committed), and the Play icon and feature graphic here.
+`branding/` holds the only editable copies: `app-icon.svg`, `app-icon-maskable.svg`, `feature-graphic.svg`, the wordmark logos and favicon, and the Fraunces font they were drawn with. Change them there, then run `./render-icons.sh` (needs ImageMagick, or podman or docker) to re-render everything derived from them: the Android launcher, web, Linux and Windows icons under `frontend/` (each platform's build reads them from there, so they stay committed), and the Play icon and feature graphic here. CI runs `./render-icons.sh --check` on every pull request and fails when a committed copy no longer matches its source.
 
 Screenshots are real app screens rendered with sample data (no personal data). Regenerate them with `./render-screenshots.sh` (needs podman or docker, or Flutter on `PATH`); the scenes live in `frontend/tool/store_screenshots_test.dart`.
 

@@ -247,6 +247,15 @@ jobs:
           path: frontend/build/217-setup.exe
           retention-days: 3
 
+  # Every icon is rendered from assets/branding by render-icons.sh; fails when a committed
+  # copy (Android, web, Linux, Windows, Play) no longer matches its source.
+  icons:
+    name: Icons match their sources
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./render-icons.sh --check
+
   # Pull requests only: when the app's screens (or this tooling) changed, re-renders the
   # store-listing screenshots (assets/*-screenshots) and commits them to the PR branch.
   # No loop: a push made with GITHUB_TOKEN starts no workflows, the job skips heads
