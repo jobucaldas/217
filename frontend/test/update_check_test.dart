@@ -6,8 +6,8 @@ import 'package:http/testing.dart';
 
 import 'package:a217/src/updates/update_check.dart';
 
-const _installed = '20260101000000_aaaaaaa';
-const _newer = '20260201000000_bbbbbbb';
+const _installed = '0.26.0101-1';
+const _newer = '0.26.0201-1';
 
 Map<String, dynamic> _release(
   String tag, {
@@ -70,12 +70,12 @@ void main() {
   });
 
   test('nightly, drafts and malformed tags are ignored', () async {
-    const draftTag = '20260301000000_ccccccc';
+    const draftTag = '0.26.0301-1';
     final update = await checkForUpdate(
       client: _clientFor([
         _release('nightly'),
         _release(draftTag, draft: true),
-        _release('20260401000000_ddddddg'),
+        _release('0.26.0401'),
         _release('v1.2.3'),
         _release(_newer),
       ]),
@@ -126,5 +126,28 @@ void main() {
     final client = _clientFor([_release(_newer)]);
     expect(await checkForUpdate(client: client, installed: ''), isNull);
     expect(await checkForUpdate(client: client), isNull);
+  });
+
+  test('orders by date, then by run number (10 is after 9)', () async {
+    final update = await checkForUpdate(
+      client: _clientFor([_release('0.26.1101-9'), _release('0.26.1101-10')]),
+      installed: '0.26.1101-2',
+    );
+    expect(update!.tag, '0.26.1101-10');
+    expect(
+      await checkForUpdate(
+        client: _clientFor([_release('0.26.1101-10')]),
+        installed: '0.26.1102-1',
+      ),
+      isNull,
+    );
+  });
+
+  test('a legacy-tagged build is offered the new scheme', () async {
+    final update = await checkForUpdate(
+      client: _clientFor([_release('20261101172537_0c7b925'), _release('0.26.1101-1')]),
+      installed: '20261101172537_0c7b925',
+    );
+    expect(update!.tag, '0.26.1101-1');
   });
 }

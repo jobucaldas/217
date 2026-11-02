@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
+import 'package:intl/date_symbol_data_local.dart';
 
 import 'package:a217/src/api/client.dart';
 import 'package:a217/src/config.dart';
@@ -1348,4 +1349,41 @@ void main() {
           find.byKey(const ValueKey('settings-switch-partner')), findsNothing);
     });
   }
+
+  testWidgets('partner mode label sits beside the logo without overflowing',
+      (tester) async {
+    await tester.binding.setSurfaceSize(const Size(320, 640));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await initializeDateFormatting('pt_BR');
+    await initializeDateFormatting('es');
+    for (final language in AppLanguage.values) {
+      final strings = Strings(language);
+      await tester.pumpWidget(_app(
+        Brightness.light,
+        CalendarScreen(
+          key: ValueKey(language),
+          api: _CycleApi(),
+          user: const User(
+              id: 'u2', email: 'bf@b.c', name: 'Bf', role: 'partner'),
+          share: const ShareState(
+            status: 'active',
+            ownerName: 'Her',
+            canEditCalendar: false,
+          ),
+          strings: strings,
+          onOpenSettings: () {},
+        ),
+      ));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      final hint = find.byKey(const ValueKey('partner-mode-label'));
+      expect(find.descendant(of: find.byType(AppBar), matching: hint),
+          findsOneWidget);
+      expect(find.text(strings.partnerMode), findsOneWidget);
+      expect(tester.getTopLeft(hint).dx,
+          greaterThan(tester.getTopRight(find.text(strings.brand)).dx));
+      expect(tester.getTopRight(hint).dx,
+          lessThan(tester.getTopLeft(find.byTooltip(strings.settings)).dx));
+    }
+  });
 }

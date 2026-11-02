@@ -122,7 +122,7 @@ curl http://localhost:8787/api/auth/config   # {"authkit":true,...}
 
 To serve the web app on more than one host, list every origin in `APP_ALLOWED_ORIGINS` (comma-separated, same rules as `APP_BASE_URL`; the base URL is always included) and register each `https://<host>/api/auth/workos/callback` in WorkOS. Sign-in uses the host the request arrived on (`X-Forwarded-Host` from your proxy, else `Host`) only if it is listed, otherwise `APP_BASE_URL`. Each host keeps its own session; invite links use `APP_BASE_URL`.
 
-Open `APP_BASE_URL`. Update with `docker compose pull && docker compose up -d`; pin `:nightly` to a `YYYYMMDDHHMMSS_<shortsha>` tag to stay on a fixed version. Data is in the `pgdata` volume.
+Open `APP_BASE_URL`. Update with `docker compose pull && docker compose up -d`; pin `:nightly` to a `0.YY.MMDD-RUN` tag to stay on a fixed version. Data is in the `pgdata` volume.
 
 Coming from a version without encryption at rest (no `certs` service in your `compose.yaml`)? Back up the `pgdata` volume, replace `compose.yaml` with the one above, add `DATA_ENCRYPTION_KEY` to `.env`, then pull and start: the first start encrypts the existing data, drops the plaintext and rewrites the tables. Older backups, and PostgreSQL's write-ahead log until it is recycled, can still hold plaintext; for a clean volume, move the (now encrypted) data to a fresh one and delete the old backups:
 
@@ -158,7 +158,7 @@ The native apps ship **no built-in server**. On first launch they ask for yours:
 
 **Staying signed in, offline.** On Android, sign-in creates a P-256 key in the Android Keystore (StrongBox when the phone has one); the server keeps only its public half. When the session runs out the app signs a one-time challenge with it and gets a new one, so you sign in again only after signing out, deleting the account, or 180 days without opening the app. The app also keeps the calendar on the phone and opens offline: day edits are saved at once and sent, in order, once the server is reachable again (a dot on the settings button means something is waiting; Settings says what and offers **Sync now**). Signing out sends what it can and erases the rest from the phone.
 
-Every push to `main` publishes the apps and images as `nightly` (rolling) and as an immutable `YYYYMMDDHHMMSS_<shortsha>` release.
+Every push to `main` publishes the apps and images as `nightly` (rolling) and as an immutable `0.YY.MMDD-RUN` release (UTC date, then that day's build number from 1, e.g. `0.26.1101-1`).
 
 ## Security
 
@@ -173,7 +173,7 @@ Every push to `main` publishes the apps and images as `nightly` (rolling) and as
 
 The `certs` service writes a private CA and the `postgres` / `backend` certificates to the `certs` volume on every start, reissuing them before they expire (restart the stack afterwards); the CA key is discarded. Running your own way? `server -init-tls DIR` (`-postgres-hosts`, `-backend-hosts`, `-postgres-uid`, `-backend-uid`) writes the same files, `TLS_CERT_FILE` / `TLS_KEY_FILE` make the API serve HTTPS, and an `https://` `BACKEND_UPSTREAM` with `SSL_CERT_DIR` pointing at the CA makes Caddy verify it.
 
-**At rest.** The API seals personal data with AES-256-GCM before it reaches PostgreSQL: emails, names, every day entry (taken, notes, intimacy, period), messages between owner and partner, invite codes, push subscriptions and sign-in secrets. Each value is bound to its row, so it cannot be moved to another user. Lookups use keyed HMAC digests, never the plaintext. What stays readable in the database: ids, dates of logged days, roles, share status, who sent a message and when, reminder times and timestamps. Session tokens are stored as SHA-256 digests and device keys as public keys only; client IP addresses and user agents are not stored. On Android the app's copy of the calendar lives in an SQLCipher-encrypted SQLite file whose random key is kept in Keystore-backed storage; app backups are off.
+**At rest.** The API seals personal data with AES-256-GCM before it reaches PostgreSQL: emails, names, every day entry (taken, notes, sex, period), messages between owner and partner, invite codes, push subscriptions and sign-in secrets. Each value is bound to its row, so it cannot be moved to another user. Lookups use keyed HMAC digests, never the plaintext. What stays readable in the database: ids, dates of logged days, roles, share status, who sent a message and when, reminder times and timestamps. Session tokens are stored as SHA-256 digests and device keys as public keys only; client IP addresses and user agents are not stored. On Android the app's copy of the calendar lives in an SQLCipher-encrypted SQLite file whose random key is kept in Keystore-backed storage; app backups are off.
 
 **Rotating the key.** Put the current key in `DATA_ENCRYPTION_KEY_PREVIOUS` (comma-separate several), a new one in `DATA_ENCRYPTION_KEY`, restart: the API reseals everything on start. Running several API instances? Do it as a coordinated restart, never a rolling one: stop all of them, start one with the new settings (it reseals before it serves), then start the rest. Drop the old key the same way. The API checks every stored value's key at start and refuses to run with a key that cannot open them.
 

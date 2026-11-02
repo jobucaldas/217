@@ -26,7 +26,8 @@ android {
     defaultConfig {
         applicationId = "com.caldasstudios.app217"
         minSdk = maxOf(flutter.minSdkVersion, 24)
-        targetSdk = flutter.targetSdkVersion
+        // Google Play requires API 36 (Android 16) for new apps and updates.
+        targetSdk = maxOf(flutter.targetSdkVersion, 36)
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         multiDexEnabled = true

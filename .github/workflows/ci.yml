@@ -60,15 +60,17 @@ jobs:
           git config --global --add safe.directory /sdks/flutter || true
           flutter pub get
       - name: Compute version
-        # The release tag is computed once here (build time, not commit time, so a rebased
-        # older commit still sorts after the previous release) and reused by publish. The
-        # APK's versionName is the tag and its versionCode is the same instant in epoch
-        # seconds, so each newer build updates older installs.
+        # Tag and versionName are `0.<yy>.<MMDD>-<run>` (UTC date at build time, not commit
+        # time; run = 1 + the highest run already tagged for that day). Computed once here
+        # and reused by publish. versionCode is the same instant in epoch seconds, so each
+        # newer build updates older installs.
         id: version
         run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           NOW="$(date -u +%s)"
-          SHORT_SHA="$(printf '%s' "$GITHUB_SHA" | cut -c1-7)"
-          echo "tag=$(date -u -d "@$NOW" +%Y%m%d%H%M%S)_${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          PREFIX="0.$(date -u -d "@$NOW" +%y).$(date -u -d "@$NOW" +%m%d)"
+          LAST="$(git ls-remote --tags origin "refs/tags/${PREFIX}-*" | sed -E 's|.*-([0-9]+)$|\1|' | sort -n | tail -1)"
+          echo "tag=${PREFIX}-$(( ${LAST:-0} + 1 ))" >> "$GITHUB_OUTPUT"
           echo "build=$NOW" >> "$GITHUB_OUTPUT"
       - run: flutter analyze
       - run: flutter test
@@ -113,6 +115,24 @@ jobs:
             --build-number="$BUILD_NUMBER" \
             --dart-define=APP_VERSION="$APP_VERSION" \
             --dart-define=API_BASE_URL="$DEFAULT_SERVER_URL"
+      - name: Build release app bundle
+        # Google Play takes an .aab signed with the upload key (the same release
+        # key above); Play App Signing re-signs what it delivers to devices.
+        env:
+          APP_VERSION: ${{ steps.version.outputs.tag }}
+          BUILD_NUMBER: ${{ steps.version.outputs.build }}
+          DEFAULT_SERVER_URL: ${{ vars.DEFAULT_SERVER_URL }}
+        run: |
+          flutter build appbundle --release \
+            --build-name="$APP_VERSION" \
+            --build-number="$BUILD_NUMBER" \
+            --dart-define=APP_VERSION="$APP_VERSION" \
+            --dart-define=API_BASE_URL="$DEFAULT_SERVER_URL"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-app-bundle
+          path: frontend/build/app/outputs/bundle/release/app-release.aab
+          retention-days: 30
       - uses: actions/upload-artifact@v4
         with:
           name: frontend-build
@@ -225,7 +245,7 @@ jobs:
           retention-days: 3
 
   # main only: GHCR images + app releases (APK, Windows installer, AppImage), as the
-  # rolling `nightly` pre-release and an immutable `datetime_sha` release marked latest.
+  # rolling `nightly` pre-release and an immutable `0.YY.MMDD-RUN` release marked latest.
   # The tag is computed in `frontend`, because the APK's versionName must equal it.
   publish:
     name: Publish (GHCR + GitHub Releases)

@@ -13,8 +13,8 @@ import 'package:a217/src/app.dart';
 import 'package:a217/src/config.dart';
 import 'package:a217/src/i18n.dart';
 
-const _installed = '20200101000000_abcdef0';
-const _newer = '20990101000000_abcdef1';
+const _installed = '0.20.0101-1';
+const _newer = '0.99.0101-1';
 const _apkUrl =
     'https://github.com/jobucaldas/217/releases/download/$_newer/app-release.apk';
 

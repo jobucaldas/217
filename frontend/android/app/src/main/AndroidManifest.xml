@@ -4,7 +4,10 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
-    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <!-- Google Play allows USE_EXACT_ALARM only for alarm-clock and calendar
+         apps. Reminders use SCHEDULE_EXACT_ALARM (user-granted) and fall back
+         to inexact alarms; the remove guards against a plugin merging it in. -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" tools:node="remove" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <!-- No cloud backup or device-to-device copy: the session token and
          settings stay on this device (the server holds the data). -->

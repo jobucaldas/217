@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 
 import '../i18n.dart';
@@ -62,6 +63,9 @@ class DaySummaryBar extends StatelessWidget {
     required this.palette,
     this.onEdit,
     this.isFuture = false,
+    this.note = '',
+    this.noteAsTag = false,
+    this.onOpenNote,
   });
 
   final Strings strings;
@@ -77,6 +81,16 @@ class DaySummaryBar extends StatelessWidget {
   /// Future days show only what is expected. The button stays (so the grid
   /// keeps its height) but is disabled: nothing can be logged ahead of time.
   final bool isFuture;
+
+  /// The day's note, drawn above the tags so it keeps one fixed place at the
+  /// bottom of the screen whatever the month shows.
+  final String note;
+
+  /// Short screens: the note is not drawn; its tag opens it in a card.
+  final bool noteAsTag;
+
+  /// Opens the note card (see [showDayNoteCard]) from the note tag.
+  final VoidCallback? onOpenNote;
 
   @override
   Widget build(BuildContext context) {
@@ -143,10 +157,12 @@ class DaySummaryBar extends StatelessWidget {
             icon: Icons.favorite,
           ),
         ),
-      if (entry != null && entry!.notes.trim().isNotEmpty)
+      // The inline note panel already shows it; the tag only stands in for it.
+      if (noteAsTag && entry != null && entry!.notes.trim().isNotEmpty)
         _DayTag(
           key: const ValueKey('day-tag-note'),
           label: strings.notes,
+          onPressed: onOpenNote,
           color: scheme.primary,
           mark: DayMark(
             color: scheme.primary,
@@ -200,31 +216,46 @@ class DaySummaryBar extends StatelessWidget {
       top: false,
       child: Padding(
         padding: EdgeInsets.fromLTRB(16, 4, 16, compact ? 8 : 12),
-        child: compact
-            ? Row(
-                key: const ValueKey('day-summary'),
-                children: [
-                  Expanded(child: tagWrap),
-                  if (button != null) ...[
-                    const SizedBox(width: 12),
-                    button,
-                  ],
-                ],
-              )
-            : Column(
-                key: const ValueKey('day-summary'),
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  tagWrap,
-                  if (button != null) ...[
-                    const SizedBox(height: 10),
-                    button,
-                  ],
-                ],
-              ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (note.isNotEmpty && !noteAsTag) ...[
+              // Capped to three lines; tapping opens the whole note.
+              DayNotePanel(notes: note, maxLines: 3, onTap: onOpenNote),
+              const SizedBox(height: 8),
+            ],
+            _summary(compact, tagWrap, button),
+          ],
+        ),
       ),
     );
+  }
+
+  Widget _summary(bool compact, Widget tagWrap, Widget? button) {
+    return compact
+        ? Row(
+            key: const ValueKey('day-summary'),
+            children: [
+              Expanded(child: tagWrap),
+              if (button != null) ...[
+                const SizedBox(width: 12),
+                button,
+              ],
+            ],
+          )
+        : Column(
+            key: const ValueKey('day-summary'),
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              tagWrap,
+              if (button != null) ...[
+                const SizedBox(height: 10),
+                button,
+              ],
+            ],
+          );
   }
 }
 
@@ -236,11 +267,15 @@ class _DayTag extends StatefulWidget {
     required this.label,
     required this.color,
     required this.mark,
+    this.onPressed,
   });
 
   final String label;
   final Color color;
   final Widget mark;
+
+  /// Replaces the open/close toggle, e.g. to show something larger.
+  final VoidCallback? onPressed;
 
   @override
   State<_DayTag> createState() => _DayTagState();
@@ -253,11 +288,19 @@ class _DayTagState extends State<_DayTag> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final color = widget.color;
-    void toggle() => setState(() => _open = !_open);
+    void toggle() {
+      final onPressed = widget.onPressed;
+      if (onPressed != null) {
+        onPressed();
+      } else {
+        setState(() => _open = !_open);
+      }
+    }
+
     return Semantics(
       button: true,
       label: widget.label,
-      expanded: _open,
+      expanded: widget.onPressed == null ? _open : null,
       excludeSemantics: true,
       onTap: toggle,
       child: Material(
@@ -311,16 +354,23 @@ class _DayTagState extends State<_DayTag> {
   }
 }
 
-/// The selected day's note, drawn in the room the month grid leaves below
-/// itself. Display only: swipes pass through to the month carousel.
+/// The selected day's note, shown above the day tags. Display only: swipes pass through to the month carousel.
 class DayNotePanel extends StatelessWidget {
   const DayNotePanel({
     super.key,
     required this.notes,
     this.alignment = Alignment.topCenter,
+    this.maxLines,
+    this.onTap,
   });
 
   final String notes;
+
+  /// Opens the full note; without it the panel ignores taps.
+  final VoidCallback? onTap;
+
+  /// Fixed line cap; when null the panel fits the room it is given.
+  final int? maxLines;
 
   /// Where the panel sits in the room it is given.
   final AlignmentGeometry alignment;
@@ -331,6 +381,7 @@ class DayNotePanel extends StatelessWidget {
     final text = Theme.of(context).textTheme;
     final style = text.bodyLarge?.copyWith(color: scheme.onSurface);
     return IgnorePointer(
+      ignoring: onTap == null,
       child: LayoutBuilder(
         builder: (context, constraints) {
           // Same text scaling the Text below gets from the device setting.
@@ -338,44 +389,61 @@ class DayNotePanel extends StatelessWidget {
               MediaQuery.textScalerOf(context).scale(style?.fontSize ?? 17) *
                   (style?.height ?? 1.4);
           // 24px of vertical padding inside the panel.
-          final maxLines =
+          final lines = maxLines ??
               ((constraints.maxHeight - 24) / lineHeight).floor().clamp(1, 12);
-          return Align(
-            alignment: alignment,
-            child: Container(
-              key: const ValueKey('day-note'),
-              width: double.infinity,
-              padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-              decoration: BoxDecoration(
-                color: scheme.surface,
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(
-                  color: scheme.outline.withValues(alpha: 0.55),
-                ),
+          final panel = Container(
+            key: const ValueKey('day-note'),
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+            // Tinted with the accent, like the note tag it stands for.
+            decoration: BoxDecoration(
+              color: Color.alphaBlend(
+                scheme.primary.withValues(alpha: 0.14),
+                scheme.surface,
               ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.only(top: 3),
-                    child: Icon(
-                      Icons.sticky_note_2_outlined,
-                      size: 18,
-                      color: scheme.onSurfaceVariant,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      notes,
-                      maxLines: maxLines,
-                      overflow: TextOverflow.ellipsis,
-                      style: style,
-                    ),
-                  ),
-                ],
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(
+                color: scheme.primary.withValues(alpha: 0.5),
               ),
             ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 3),
+                  child: Icon(
+                    Icons.sticky_note_2_outlined,
+                    size: 18,
+                    color: scheme.primary,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    notes,
+                    maxLines: lines,
+                    overflow: TextOverflow.ellipsis,
+                    style: style,
+                  ),
+                ),
+              ],
+            ),
+          );
+          return Align(
+            alignment: alignment,
+            child: onTap == null
+                ? panel
+                : Semantics(
+                    button: true,
+                    child: Material(
+                      type: MaterialType.transparency,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(18),
+                        onTap: onTap,
+                        child: panel,
+                      ),
+                    ),
+                  ),
           );
         },
       ),
@@ -425,4 +493,64 @@ class DashedRingPainter extends CustomPainter {
       old.strokeWidth != strokeWidth ||
       old.dash != dash ||
       old.gap != gap;
+}
+
+/// Read-only note card, styled like the note dialog of the day editor.
+/// Follows [notes] live and closes itself once it is empty, so a card never
+/// outlives the data it shows (e.g. calendar access cleared).
+Future<void> showDayNoteCard(
+  BuildContext context, {
+  required String title,
+  required ValueListenable<String> notes,
+}) {
+  return showDialog<void>(
+    context: context,
+    useRootNavigator: true,
+    builder: (dialogContext) {
+      final scheme = Theme.of(dialogContext).colorScheme;
+      final textTheme = Theme.of(dialogContext).textTheme;
+      final fieldFill = Color.alphaBlend(
+        scheme.onSurface.withValues(alpha: 0.06),
+        scheme.surface,
+      );
+      return ValueListenableBuilder<String>(
+        valueListenable: notes,
+        builder: (_, value, __) {
+          if (value.isEmpty) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (dialogContext.mounted) Navigator.of(dialogContext).maybePop();
+            });
+            return const SizedBox.shrink();
+          }
+          return AlertDialog(
+            key: const ValueKey('day-note-card'),
+            backgroundColor: scheme.surface,
+            title: Text(
+              title,
+              style: textTheme.titleLarge?.copyWith(color: scheme.onSurface),
+            ),
+            content: SingleChildScrollView(
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: fieldFill,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: scheme.outline),
+                ),
+                child: Text(
+                  value,
+                  style: textTheme.bodyLarge?.copyWith(
+                    color: scheme.onSurface,
+                    fontSize: 17,
+                    height: 1.35,
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      );
+    },
+  );
 }

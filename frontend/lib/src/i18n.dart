@@ -78,7 +78,7 @@ class Strings {
   String get unrecorded => _t('Open', 'Em aberto', 'Pendiente');
   String get notes => _t('Note', 'Nota', 'Nota');
   String get addNote => _t('Add note', 'Adicionar nota', 'Añadir nota');
-  String get heartLabel => _t('Intimacy', 'Intimidade', 'Intimidad');
+  String get heartLabel => _t('Sex', 'Sexo', 'Sexo');
   String get save => _t('Save', 'Salvar', 'Guardar');
   String get cancel => _t('Cancel', 'Cancelar', 'Cancelar');
   String get loading => _t('Loading…', 'Carregando…', 'Cargando…');
@@ -486,10 +486,10 @@ class Strings {
         'Ese código no funcionó. Revísalo e inténtalo de nuevo.',
       );
   String get joinCalendar => _t('Join', 'Entrar', 'Unirse');
-  String get readOnlyCalendar => _t(
-        'Read-only calendar',
-        'Calendário em modo leitura',
-        'Calendario de solo lectura',
+  String get partnerMode => _t(
+        'Partner Mode',
+        'Modo Parceiro',
+        'Modo Pareja',
       );
 
   // Roles: owner (takes the pill) vs partner (follows her calendar)
