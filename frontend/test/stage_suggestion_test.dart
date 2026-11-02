@@ -49,9 +49,15 @@ class _StageApi extends ApiClient {
 
 /// The calendar plus the app's Settings wiring, as in `app.dart`.
 class _Harness extends StatefulWidget {
-  const _Harness({required this.api, required this.suggestion, this.user});
+  const _Harness({
+    required this.api,
+    required this.suggestion,
+    this.user,
+    this.reminderHint = false,
+  });
 
   final _StageApi api;
+  final bool reminderHint;
   final StageSuggestion suggestion;
   final User? user;
 
@@ -107,6 +113,8 @@ class _HarnessState extends State<_Harness> {
           onOpenSettings: _openSettings,
           cycleRefreshSignal: _stageChanges,
           stageSuggestion: widget.suggestion,
+          showReminderHint: widget.reminderHint,
+          onDismissReminderHint: widget.reminderHint ? () {} : null,
           onStageSuggestionAccepted: (session) {
             setState(() => _user = session.user!);
             _stageChanges.value++;
@@ -169,6 +177,26 @@ void main() {
     await tester.pumpAndSettle();
     expect(_calendarBanner, findsNothing);
     expect(_cogDot(tester), isFalse);
+  });
+
+  testWidgets('the reminder hint waits until the stage banner is gone',
+      (tester) async {
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final suggestion = StageSuggestion();
+    await tester.pumpWidget(_Harness(
+        api: _StageApi('perimenopause'),
+        suggestion: suggestion,
+        reminderHint: true));
+    await tester.pumpAndSettle();
+    final hint = find.byKey(const ValueKey('reminder-hint'));
+    expect(_calendarBanner, findsOneWidget);
+    expect(hint, findsNothing);
+
+    await tester.pump(const Duration(seconds: 30));
+    await tester.pumpAndSettle();
+    expect(_calendarBanner, findsNothing);
+    expect(hint, findsOneWidget);
   });
 
   testWidgets(
