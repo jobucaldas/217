@@ -1,35 +1,47 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../api/client.dart';
+import '../config.dart';
 import '../errors.dart';
 import '../i18n.dart';
 import '../theme/app_theme.dart';
 import '../models.dart';
 import '../platform/open_url.dart';
+import '../platform/web_page.dart';
+import 'privacy_page.dart';
 
-/// Opens the server's privacy notice page, where people also download or
-/// delete their data and withdraw consent. Copies the link when nothing can
-/// open it.
+/// Opens the privacy notice. On web that is the app's own page
+/// (`/app/privacy`, where the signed-in browser also downloads, withdraws and
+/// deletes); in the apps it opens in-app, linking to that web page for those
+/// actions ([onBrowserOpened] runs when it does).
 Future<void> openPrivacyNotice(
   BuildContext context,
   ApiClient api,
   Strings strings, {
   Future<bool> Function(String url) open = openExternalUrl,
+  VoidCallback? onBrowserOpened,
 }) async {
-  final url = api.privacyPageUrl(strings.language.id);
-  if (await open(url)) return;
-  await Clipboard.setData(ClipboardData(text: url));
-  if (context.mounted) {
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(strings.linkCopied)));
+  if (kIsWeb) {
+    goToWebPath(Uri(
+      path: privacyPagePath,
+      queryParameters: {'lang': strings.language.id},
+    ).toString());
+    return;
   }
+  await Navigator.of(context).push(MaterialPageRoute(
+    builder: (_) => PrivacyPage(
+      api: api,
+      strings: strings,
+      openUrl: open,
+      onBrowserOpened: onBrowserOpened,
+    ),
+  ));
 }
 
 /// After sign-in, until the user agrees to the current privacy notice: the
 /// server refuses to process their data before that. The notice itself is
-/// the server's page; here there is only its link, accept and cancel.
+/// its own page; here there is only its link, accept and cancel.
 class ConsentScreen extends StatefulWidget {
   const ConsentScreen({
     super.key,
@@ -52,8 +64,8 @@ class ConsentScreen extends StatefulWidget {
   /// Cancel: back to before this screen (signs out to the sign-in screen).
   final VoidCallback onDecline;
 
-  /// Called when the notice page is opened (the app re-reads the session on
-  /// return, since the account may be deleted there).
+  /// Called when the notice's web page is opened in the browser (the app
+  /// re-reads the session on return, since the account may be deleted there).
   final VoidCallback? onNoticeOpened;
 
   /// Opens the notice link; injectable for tests.
@@ -123,16 +135,14 @@ class _ConsentScreenState extends State<ConsentScreen> {
                     Icon(Icons.privacy_tip_outlined, color: scheme.primary),
                 title: Text(strings.privacyNotice),
                 trailing:
-                    Icon(Icons.open_in_new, color: scheme.onSurfaceVariant),
-                onTap: () {
-                  widget.onNoticeOpened?.call();
-                  openPrivacyNotice(
-                    context,
-                    widget.api,
-                    strings,
-                    open: widget.openUrl,
-                  );
-                },
+                    Icon(Icons.chevron_right, color: scheme.onSurfaceVariant),
+                onTap: () => openPrivacyNotice(
+                  context,
+                  widget.api,
+                  strings,
+                  open: widget.openUrl,
+                  onBrowserOpened: widget.onNoticeOpened,
+                ),
               ),
             ),
             const SizedBox(height: 24),

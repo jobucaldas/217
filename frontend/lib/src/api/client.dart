@@ -32,6 +32,13 @@ class ApiClient {
   final DeviceKey _deviceKey;
   bool workosUserDeletion = false;
 
+  /// Who answers privacy requests on this server (`PRIVACY_CONTACT`: an
+  /// email or URL), shown on the privacy notice; empty when unset.
+  String privacyContact = '';
+
+  /// Whether the server signs people in (AuthKit configured).
+  bool authkit = false;
+
   /// Account whose data is kept on the device; set once a session is known.
   String? _userId;
 
@@ -50,6 +57,8 @@ class ApiClient {
     // A failed or unavailable config response must never retain another
     // server's WorkOS deletion capability.
     workosUserDeletion = false;
+    privacyContact = '';
+    authkit = false;
     try {
       final response =
           await _send('GET', _uri('/api/auth/config'), auth: false);
@@ -57,6 +66,9 @@ class ApiClient {
         final decoded = jsonDecode(response.body);
         if (decoded is Map) {
           workosUserDeletion = decoded['workos_user_deletion'] == true;
+          authkit = decoded['authkit'] == true;
+          final contact = decoded['privacy_contact'];
+          privacyContact = contact is String ? contact.trim() : '';
         }
       }
     } catch (_) {
@@ -91,7 +103,8 @@ class ApiClient {
 
   /// Validates a self-hosted server URL; empty means "use the default server".
   /// A bare host gets `https://`, and a pasted invite link
-  /// (`https://host/?invite=CODE`) keeps only its server part.
+  /// (`https://host/app/?invite=CODE`) or web app address keeps only its
+  /// server part: the web app lives under `/app/`, the API beside it.
   /// Throws [FormatException] unless the URL is http(s) with a host.
   static String parseApiBase(String value) {
     final trimmed = value.trim();
@@ -109,7 +122,7 @@ class ApiClient {
       scheme: uri.scheme,
       host: uri.host,
       port: uri.hasPort ? uri.port : null,
-      path: uri.path,
+      path: uri.path.replaceFirst(RegExp(r'/app(/.*)?$'), ''),
     );
     return normalizeApiBase(server.toString());
   }
@@ -569,11 +582,40 @@ class ApiClient {
     return _sessionFrom(response);
   }
 
-  /// The server's privacy notice page in [language] (`en`, `pt`, `es`),
-  /// where people download or delete their data and withdraw consent.
-  String privacyPageUrl(String language) {
-    final uri = _uri('/api/privacy', {'lang': language});
+  /// The web app's privacy notice in [language] (`en`, `pt`, `es`) on this
+  /// server, where people download or delete their data and withdraw
+  /// consent; with [deleteAccount], the account deletion page instead.
+  String privacyPageUrl(String language, {bool deleteAccount = false}) {
+    final uri = _uri(
+      deleteAccount ? accountDeletePagePath : privacyPagePath,
+      {'lang': language},
+    );
     return uri.hasScheme ? uri.toString() : Uri.base.resolveUri(uri).toString();
+  }
+
+  /// Withdraws consent: the data stays, but the server stops processing it
+  /// until the notice is agreed to again.
+  Future<SessionSnapshot> withdrawConsent() async {
+    final response = await _send('DELETE', _uri('/api/account/consent'));
+    if (response.statusCode != 200) {
+      throw ApiException('withdraw consent', response);
+    }
+    return _sessionFrom(response);
+  }
+
+  /// Everything the server holds about the caller: the file name the server
+  /// suggests and the JSON bytes.
+  Future<({String fileName, List<int> bytes})> exportAccount() async {
+    final response = await _send('GET', _uri('/api/account/export'));
+    if (response.statusCode != 200) {
+      throw ApiException('export account', response);
+    }
+    final disposition = response.headers['content-disposition'] ?? '';
+    final match = RegExp(r'filename="([^"/\\]+)"').firstMatch(disposition);
+    return (
+      fileName: match?.group(1) ?? '217-data.json',
+      bytes: response.bodyBytes,
+    );
   }
 
   Future<void> deleteAccount() async {

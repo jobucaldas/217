@@ -35,7 +35,7 @@ func TestEnableShareReturnsInviteURL(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &state); err != nil {
 		t.Fatal(err)
 	}
-	want := "https://217.example.com/?invite=" + state.InviteCode
+	want := "https://217.example.com/app/?invite=" + state.InviteCode
 	if state.InviteCode == "" || state.InviteURL != want {
 		t.Fatalf("invite_url = %q, want %q", state.InviteURL, want)
 	}

@@ -17,9 +17,11 @@ import 'notifications/daily_reminder_sync_queue.dart';
 import 'notifications/owner_reminder_repeat_sync.dart';
 import 'notifications/partner_alert_sync_queue.dart';
 import 'platform/open_url.dart';
+import 'platform/web_page.dart';
 import 'prefs.dart';
 import 'screens/auth_screen.dart';
 import 'screens/calendar_screen.dart';
+import 'screens/privacy_page.dart';
 import 'screens/privacy_screens.dart';
 import 'screens/role_screen.dart';
 import 'screens/server_setup_screen.dart';
@@ -100,6 +102,13 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
 
   /// Settings opened the privacy page; the next resume re-reads the session.
   bool _privacyPageOpened = false;
+
+  /// Web opened on one of the standalone privacy pages (`/app/privacy`,
+  /// `/app/account/delete`): shown instead of the app, signed in or not.
+  final WebPage? _webPage = kIsWeb ? webPageFor(Uri.base) : null;
+
+  /// The browser's session signed in within the last few minutes.
+  bool _recentSignIn = false;
 
   /// Changes only when the signed-in account does (logout, deletion, server
   /// switch, sign-in), so a late session refresh cannot restore the old one.
@@ -271,10 +280,15 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
       final autoUpdate = await _prefs.autoUpdateEnabled();
       final messageNotifs = await _prefs.messageNotificationsEnabled();
       if (!mounted) return;
+      // A privacy page link names its language (`?lang=`), e.g. from the
+      // app or a store listing; it wins without being saved.
+      final pageLanguage = _webPage == null
+          ? null
+          : AppLanguageX.tryFromId(Uri.base.queryParameters['lang']);
       setState(() {
         _themeMode = appearance.mode;
         _palette = appearance.palette;
-        _language = language ?? _deviceLanguage();
+        _language = pageLanguage ?? language ?? _deviceLanguage();
         _reminderHintDismissed = hintGone;
         _autoUpdate = autoUpdate;
         _messageNotifs = messageNotifs;
@@ -307,8 +321,11 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
       _user = user;
       _share = share;
       _setConsent(session);
+      _recentSignIn = session?.recentSignIn ?? false;
       _loading = false;
     });
+    // The privacy pages stand alone: no invite offer, reminders or updates.
+    if (_webPage != null) return;
     if (user != null && !_consentRequired) {
       unawaited(_loadRemindersState());
       unawaited(_maybeCheckForUpdate());
@@ -810,7 +827,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     });
   }
 
-  void _onAccountDeleted() {
+  void _onAccountDeleted({bool announce = true}) {
     _accountEpoch++;
     _sessionGeneration++;
     unawaited(_cancelAllNotifications());
@@ -819,6 +836,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
       _share = const ShareState(status: 'none');
       _remindersOn = null;
     });
+    if (!announce) return;
     _messengerKey.currentState?.showSnackBar(
       SnackBar(content: Text(_strings.accountDeleted)),
     );
@@ -904,6 +922,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
         ),
       );
     }
+    if (_webPage != null) return _standalonePrivacyPage(_webPage);
     if (_api.config.needsServerSetup) {
       return ServerSetupScreen(
         api: _api,
@@ -1001,6 +1020,38 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
       onDismissReminderHint: _dismissReminderHint,
       stageSuggestion: _stageSuggestion,
       onStageSuggestionAccepted: _onStageSuggestionAccepted,
+    );
+  }
+
+  /// Web: the privacy notice or account deletion page, by its own URL. It
+  /// works signed out too, and before consent (its actions need no consent).
+  Widget _standalonePrivacyPage(WebPage page) {
+    final user = _user;
+    return PrivacyPage(
+      api: _api,
+      strings: _strings,
+      page: page,
+      onLanguageChanged: _setLanguage,
+      onOpenApp: () => goToWebPath('/app/'),
+      web: PrivacyWebSession(
+        user: user,
+        consentRequired: _consentRequired,
+        recentSignIn: _recentSignIn,
+        initialAction: privacyActionFrom(Uri.base.queryParameters['confirm']),
+        onSignIn: (returnTo) async {
+          await _api.loadAuthConfig();
+          await beginWorkOSSignIn(_api, returnTo: returnTo);
+        },
+        onSessionChanged: (session) {
+          _sessionGeneration++;
+          setState(() {
+            _user = session.user;
+            _share = session.share ?? const ShareState(status: 'none');
+            _setConsent(session);
+          });
+        },
+        onDeleted: () => _onAccountDeleted(announce: false),
+      ),
     );
   }
 

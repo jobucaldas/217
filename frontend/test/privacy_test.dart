@@ -12,6 +12,7 @@ import 'package:a217/src/app.dart';
 import 'package:a217/src/config.dart';
 import 'package:a217/src/i18n.dart';
 import 'package:a217/src/notifications/local_reminders.dart';
+import 'package:a217/src/screens/privacy_page.dart';
 import 'package:a217/src/screens/privacy_screens.dart';
 import 'package:a217/src/screens/settings_screen.dart';
 import 'package:a217/src/models.dart';
@@ -166,8 +167,7 @@ void main() {
     expect(find.byType(ConsentScreen), findsNothing);
   });
 
-  testWidgets('the notice link opens the server privacy page',
-      (tester) async {
+  testWidgets('the notice link opens the notice in the app', (tester) async {
     final opened = <String>[];
     final api = _ConsentServer().client();
     await tester.pumpWidget(MaterialApp(
@@ -184,9 +184,22 @@ void main() {
         },
       ),
     ));
+    await api.loadAuthConfig();
     await tester.tap(find.byKey(const ValueKey('consent-notice-link')));
     await tester.pumpAndSettle();
-    expect(opened.single, endsWith('/api/privacy?lang=pt'));
+    // The notice opens in the app, in its language, with the contact.
+    expect(find.byType(PrivacyPage), findsOneWidget);
+    expect(find.text('Aviso de privacidade'), findsOneWidget);
+    final browser = find.byKey(const ValueKey('privacy-open-browser'));
+    await tester.scrollUntilVisible(browser, 200,
+        scrollable: find.byType(Scrollable).last);
+    expect(find.text('dpo@example.com'), findsOneWidget);
+    // Download, withdraw and delete happen on its web page.
+    await tester.tap(browser);
+    await tester.pumpAndSettle();
+    expect(opened.single, endsWith('/app/privacy?lang=pt'));
+    await tester.pageBack();
+    await tester.pumpAndSettle();
     expect(find.text('Li e aceito'), findsOneWidget);
     expect(find.text('Cancelar'), findsOneWidget);
   });

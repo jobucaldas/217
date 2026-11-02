@@ -51,6 +51,16 @@ void main() {
           'https://a.example/217');
       expect(ApiClient.parseApiBase('https://a.example/?invite=ABCD2345#x'),
           'https://a.example');
+      // The web app's address and its invite links point under /app/.
+      expect(
+          ApiClient.parseApiBase('https://a.example/app/?invite=ABCD2345'),
+          'https://a.example');
+      expect(ApiClient.parseApiBase('a.example/app/privacy'),
+          'https://a.example');
+      expect(ApiClient.parseApiBase('https://a.example/apple'),
+          'https://a.example/apple');
+      expect(ApiClient.inviteCodeIn('https://a.example/app/?invite=ABCD2345'),
+          'ABCD2345');
       expect(ApiClient.inviteCodeIn('https://a.example/?invite=ABCD2345'),
           'ABCD2345');
       expect(ApiClient.inviteCodeIn('a.example/?invite= ab '), 'ab');

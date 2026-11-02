@@ -55,8 +55,8 @@
         file_server
     }
 
-    # The API redirects to the bare origin after sign-in and builds invite links
-    # as /?invite=..., so everything else lands in the app.
+    # Sign-in and invite links go to /app/ directly; older links (/?invite=...,
+    # the bare origin) and anything else still land in the app.
     handle {
         redir * /app{uri} 302
     }

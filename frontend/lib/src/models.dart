@@ -122,6 +122,7 @@ class SessionSnapshot {
     this.share,
     this.consentRequired = false,
     this.consentVersion = 0,
+    this.recentSignIn = false,
   });
 
   final User? user;
@@ -134,6 +135,10 @@ class SessionSnapshot {
   /// Privacy notice version the server asks consent for.
   final int consentVersion;
 
+  /// Signed in within the last few minutes: the privacy pages export,
+  /// withdraw or delete only then (otherwise they ask to sign in again).
+  final bool recentSignIn;
+
   factory SessionSnapshot.fromJson(Map<String, dynamic> json) {
     final userJson = json['user'];
     final consent = json['consent'];
@@ -145,6 +150,7 @@ class SessionSnapshot {
       consentRequired: consent is Map && consent['required'] == true,
       consentVersion:
           consent is Map ? (consent['version'] as num?)?.toInt() ?? 0 : 0,
+      recentSignIn: json['recent_sign_in'] == true,
     );
   }
 }
