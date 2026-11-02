@@ -207,6 +207,11 @@ void main() {
       await tester.tap(find.text('Advanced options'));
       await tester.pumpAndSettle();
 
+      await tester.scrollUntilVisible(
+        find.text('Test connection'),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
       // Copy speaks to self-hosters, not to local emulator setups.
       expect(find.text('Self-hosted server URL'), findsOneWidget);
       expect(find.textContaining('host your own 217 server'), findsOneWidget);
@@ -334,6 +339,14 @@ void main() {
     );
     await tester.pumpAndSettle();
     final guide = find.byKey(const ValueKey('self-host-guide'));
+    expect(guide, findsNothing);
+    await tester.scrollUntilVisible(
+      find.text('Advanced options'),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.text('Advanced options'));
+    await tester.pumpAndSettle();
     await tester.scrollUntilVisible(
       guide,
       200,

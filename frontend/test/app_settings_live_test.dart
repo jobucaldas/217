@@ -37,12 +37,21 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('auth-settings')));
     await tester.pumpAndSettle();
 
-    // The guide is reachable from Settings while signed out.
+    // The guide is reachable from Settings while signed out, under Advanced.
+    await tester.scrollUntilVisible(find.text('Advanced options'), 200,
+        scrollable: find.byType(Scrollable).first);
+    await tester.tap(find.text('Advanced options'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+        find.byKey(const ValueKey('self-host-guide')), 200,
+        scrollable: find.byType(Scrollable).first);
     expect(find.byKey(const ValueKey('self-host-guide')), findsOneWidget);
     // Signed out: no account actions to show.
     expect(find.text('Delete account'), findsNothing);
     expect(find.text('Log out'), findsNothing);
 
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, 3000));
+    await tester.pumpAndSettle();
     SegmentedButton<ThemeMode> themeToggle() =>
         tester.widget(find.byType(SegmentedButton<ThemeMode>));
     expect(themeToggle().selected, {ThemeMode.system});

@@ -51,6 +51,8 @@ class SettingsPage extends StatefulWidget {
     this.stageSuggestion,
     this.focusPersonal = false,
     this.stageUpdated = false,
+    this.onAccountDeleting,
+    this.onAccountDeleted,
   });
 
   final ApiClient api;
@@ -106,6 +108,9 @@ class SettingsPage extends StatefulWidget {
   /// Open with the "updated" notice in the Personal section (a suggested
   /// stage was just accepted on the calendar).
   final bool stageUpdated;
+  /// Signed in: the delete account control shows when [onAccountDeleted] is set.
+  final VoidCallback? onAccountDeleting;
+  final VoidCallback? onAccountDeleted;
 
   @override
   State<SettingsPage> createState() => _SettingsPageState();
@@ -237,9 +242,6 @@ class _SettingsPageState extends State<SettingsPage> {
                   ListTile(
                     key: const ValueKey('settings-partner-alerts'),
                     title: Text(widget.strings.partnerAlerts),
-                    subtitle: Text(_messageToggle == null
-                        ? widget.strings.partnerAlertsSubtitle
-                        : widget.strings.partnerAlertsWithMessagesSubtitle),
                     trailing: Icon(
                       Icons.chevron_right,
                       color: scheme.onSurfaceVariant,
@@ -293,7 +295,6 @@ class _SettingsPageState extends State<SettingsPage> {
                   SwitchListTile(
                     key: const ValueKey('settings-auto-update'),
                     title: Text(widget.strings.autoUpdateTitle),
-                    subtitle: Text(widget.strings.autoUpdateSubtitle),
                     value: widget.autoUpdate,
                     onChanged: widget.onAutoUpdateChanged,
                   ),
@@ -461,135 +462,32 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
             ],
           ],
-          // Signed out only: the server is picked before signing in, since
-          // an account lives on one server. Never on web, which is served by
-          // its own server (same origin, CORS-locked). Builds without a
-          // built-in server pick it on the server setup screen instead.
-          if (!kIsWeb &&
-              widget.user == null &&
-              widget.api.config.hasDefaultServer) ...[
-            const SizedBox(height: 20),
-            _SettingsSection(
-              children: [
-                ListTile(
-                  title: Text(
-                    _advancedOpen
-                        ? widget.strings.showLess
-                        : widget.strings.showMore,
-                    style: text.titleMedium?.copyWith(color: scheme.primary),
-                  ),
-                  trailing: Icon(
-                    _advancedOpen ? Icons.expand_less : Icons.expand_more,
-                    color: scheme.primary,
-                  ),
-                  onTap: () => setState(() => _advancedOpen = !_advancedOpen),
-                ),
-                if (_advancedOpen) ...[
-                  const Divider(height: 1, indent: 16, endIndent: 16),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-                    child: TextField(
-                      key: const ValueKey('server-url'),
-                      controller: _serverUrl,
-                      keyboardType: TextInputType.url,
-                      autocorrect: false,
-                      enableSuggestions: false,
-                      textInputAction: TextInputAction.done,
-                      onSubmitted: (_) => _saveServer(),
-                      onChanged: (_) {
-                        if (_serverError != null) {
-                          setState(() => _serverError = null);
-                        }
-                      },
-                      style: text.bodyLarge?.copyWith(color: scheme.onSurface),
-                      decoration: InputDecoration(
-                        labelText: widget.strings.serverUrl,
-                        hintText: widget.api.config.defaultApiBaseUrl,
-                        helperText: widget.strings.serverUrlHelp,
-                        helperMaxLines: 3,
-                        helperStyle: text.bodySmall?.copyWith(
-                          color: scheme.onSurfaceVariant,
-                        ),
-                        errorText: _serverError,
-                        errorMaxLines: 2,
-                      ),
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: FilledButton(
-                            style: FilledButton.styleFrom(
-                              minimumSize: const Size.fromHeight(44),
-                            ),
-                            onPressed: _saveServer,
-                            child: Text(widget.strings.save),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: OutlinedButton(
-                            style: OutlinedButton.styleFrom(
-                              minimumSize: const Size.fromHeight(44),
-                              foregroundColor: scheme.onSurface,
-                              side: BorderSide(
-                                color: scheme.outline.withValues(alpha: 0.8),
-                              ),
-                            ),
-                            onPressed: _testing ? null : _testServer,
-                            child: _testing
-                                ? const SizedBox.square(
-                                    dimension: 18,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                    ),
-                                  )
-                                : Text(widget.strings.testConnection),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ],
-          // Signed in or out, on web too: where to run your own server.
-          const SizedBox(height: 20),
-          _SettingsSection(
-            children: [
-              ListTile(
-                key: const ValueKey('self-host-guide'),
-                leading: Icon(Icons.dns_outlined, color: scheme.primary),
-                title: Text(widget.strings.selfHostGuide),
-                subtitle: Text(widget.strings.selfHostBlurb),
-                trailing:
-                    Icon(Icons.open_in_new, color: scheme.onSurfaceVariant),
-                onTap: _openGuide,
-              ),
-            ],
-          ),
           // Privacy (LGPD): the server's notice page, which is also where
           // people download or delete their data and withdraw consent.
-          const SizedBox(height: 20),
-          _SettingsSection(
-            children: [
-              ListTile(
+          Padding(
+            padding: const EdgeInsets.only(top: 20),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(
                 key: const ValueKey('privacy-notice'),
-                leading:
-                    Icon(Icons.privacy_tip_outlined, color: scheme.primary),
-                title: Text(widget.strings.privacyNotice),
-                subtitle: Text(widget.strings.privacyNoticeBlurb),
-                trailing:
-                    Icon(Icons.open_in_new, color: scheme.onSurfaceVariant),
-                onTap: () {
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  foregroundColor: scheme.primary,
+                ),
+                onPressed: () {
                   widget.onPrivacyPageOpened?.call();
                   openPrivacyNotice(context, widget.api, widget.strings);
                 },
+                child: Text(
+                  widget.strings.privacyNotice,
+                  style: text.bodyLarge?.copyWith(
+                    color: scheme.primary,
+                    decoration: TextDecoration.underline,
+                    decorationColor: scheme.primary,
+                  ),
+                ),
               ),
-            ],
+            ),
           ),
           if (widget.onLogout != null) ...[
             const SizedBox(height: 40),
@@ -610,10 +508,127 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
               ],
             ),
+            if (widget.onAccountDeleted != null) ...[
+              const SizedBox(height: 12),
+              DeleteAccountSection(
+                api: widget.api,
+                strings: widget.strings,
+                onAccountDeleting: widget.onAccountDeleting,
+                onAccountDeleted: () {
+                  widget.onAccountDeleted!();
+                  if (context.mounted) Navigator.of(context).pop();
+                },
+              ),
+            ],
+          ],
+          // Last: plain list rows, not a card. Opening it reveals more rows
+          // below. The server is picked before signing in, since an account
+          // lives on one server; never on web, which is served by its own
+          // server (same origin, CORS-locked), and builds without a built-in
+          // server pick it on the server setup screen instead.
+          const SizedBox(height: 20),
+          ListTile(
+            key: const ValueKey('settings-advanced'),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+            title: Text(
+              _advancedOpen
+                  ? widget.strings.showLess
+                  : widget.strings.showMore,
+              style: text.titleMedium?.copyWith(color: scheme.primary),
+            ),
+            trailing: Icon(
+              _advancedOpen ? Icons.expand_less : Icons.expand_more,
+              color: scheme.primary,
+            ),
+            onTap: () => setState(() => _advancedOpen = !_advancedOpen),
+          ),
+          if (_advancedOpen) ...[
+            if (_showServerField) ..._serverItems(context),
+            // Signed in or out, on web too: where to run your own server.
+            ListTile(
+              key: const ValueKey('self-host-guide'),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+              title: Text(widget.strings.selfHostGuide),
+              trailing:
+                  Icon(Icons.open_in_new, color: scheme.onSurfaceVariant),
+              onTap: _openGuide,
+            ),
           ],
         ],
       ),
     );
+  }
+
+  bool get _showServerField =>
+      !kIsWeb && widget.user == null && widget.api.config.hasDefaultServer;
+
+  List<Widget> _serverItems(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final text = Theme.of(context).textTheme;
+    return [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(4, 4, 4, 8),
+        child: TextField(
+          key: const ValueKey('server-url'),
+          controller: _serverUrl,
+          keyboardType: TextInputType.url,
+          autocorrect: false,
+          enableSuggestions: false,
+          textInputAction: TextInputAction.done,
+          onSubmitted: (_) => _saveServer(),
+          onChanged: (_) {
+            if (_serverError != null) setState(() => _serverError = null);
+          },
+          style: text.bodyLarge?.copyWith(color: scheme.onSurface),
+          decoration: InputDecoration(
+            labelText: widget.strings.serverUrl,
+            hintText: widget.api.config.defaultApiBaseUrl,
+            helperText: widget.strings.serverUrlHelp,
+            helperMaxLines: 3,
+            helperStyle: text.bodySmall?.copyWith(
+              color: scheme.onSurfaceVariant,
+            ),
+            errorText: _serverError,
+            errorMaxLines: 2,
+          ),
+        ),
+      ),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(4, 0, 4, 12),
+        child: Row(
+          children: [
+            Expanded(
+              child: FilledButton(
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size.fromHeight(44),
+                ),
+                onPressed: _saveServer,
+                child: Text(widget.strings.save),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: OutlinedButton(
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size.fromHeight(44),
+                  foregroundColor: scheme.onSurface,
+                  side: BorderSide(
+                    color: scheme.outline.withValues(alpha: 0.8),
+                  ),
+                ),
+                onPressed: _testing ? null : _testServer,
+                child: _testing
+                    ? const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : Text(widget.strings.testConnection),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ];
   }
 }
 
