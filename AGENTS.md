@@ -111,6 +111,7 @@ Offline-first client: `ApiClient` keeps the last session, months, cycle and aler
 - Frontend: `docker compose run --rm test-frontend`
 - Web tryout: `docker compose up --build` then open http://localhost:8787/
 - APK: `docker compose run --rm apk`
+- Store screenshots (`assets/*-screenshots`, rendered from the real screens): `./render-screenshots.sh`; add or change scenes in `frontend/tool/store_screenshots_test.dart`
 
 ## Remaining gaps
 - Offline: cycle predictions are the last ones the server sent (no on-device recomputation); share, role, consent and alert settings need the server; desktop/web keep the offline copy in memory only and sign in again when the session ends

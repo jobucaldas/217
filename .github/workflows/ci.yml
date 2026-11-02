@@ -247,13 +247,30 @@ jobs:
           path: frontend/build/217-setup.exe
           retention-days: 3
 
+  # Re-renders the store-listing screenshots (assets/*-screenshots) from the app's real
+  # screens. On main they ship with the release as 217-store-screenshots.zip.
+  screenshots:
+    name: Store screenshots
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/cirruslabs/flutter:stable
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./render-screenshots.sh
+      - if: github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: store-screenshots
+          path: assets/*-screenshots
+          retention-days: 3
+
   # main only: GHCR images + app releases (APK, Windows installer, AppImage), as the
   # rolling `nightly` pre-release and an immutable `0.YY.MMDD-RUN` release marked latest.
   # The tag is computed in `frontend`, because the APK's versionName must equal it.
   publish:
     name: Publish (GHCR + GitHub Releases)
     if: github.event_name == 'push'
-    needs: [backend, frontend, images, linux, windows]
+    needs: [backend, frontend, images, linux, windows, screenshots]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -272,6 +289,10 @@ jobs:
         with:
           name: windows-build
           path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: store-screenshots
+          path: dist/screenshots
       - name: Compute tags
         id: tags
         env:
@@ -311,6 +332,7 @@ jobs:
           SHORT_SHA="${GITHUB_SHA:0:7}"
           COMMIT_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}"
           APK=frontend/build/app/outputs/flutter-apk/app-release.apk
+          (cd dist/screenshots && zip -qr "$GITHUB_WORKSPACE/217-store-screenshots.zip" .)
           for tag in nightly "${TAG}"; do
             cp "$APK" "217-${tag}.apk"
             cp dist/217-x86_64.AppImage "217-${tag}-x86_64.AppImage"
@@ -323,6 +345,7 @@ jobs:
             "- \`.apk\`: Android (release build, signed with the project's release key; updates install over earlier releases)" \
             "- \`-setup.exe\`: Windows installer (per-user, unsigned: SmartScreen may warn)" \
             "- \`.AppImage\`: Linux (\`chmod +x\` and run)" \
+            "- \`217-store-screenshots.zip\`: store-listing screenshots rendered from this build" \
             "" \
             "Every app asks for your 217 server on first launch (see the README's Self-hosting section).")"
 
@@ -331,6 +354,6 @@ jobs:
           else
             gh release create nightly --title Nightly --target "$GITHUB_SHA" --notes "${NOTES}" --prerelease
           fi
-          gh release upload nightly 217-nightly.apk 217-nightly-x86_64.AppImage 217-nightly-setup.exe --clobber
+          gh release upload nightly 217-nightly.apk 217-nightly-x86_64.AppImage 217-nightly-setup.exe 217-store-screenshots.zip --clobber
           gh release create "$TAG" --title "$TAG" --target "$GITHUB_SHA" --notes "${NOTES}" --latest \
-            "217-${TAG}.apk" "217-${TAG}-x86_64.AppImage" "217-${TAG}-setup.exe"
+            "217-${TAG}.apk" "217-${TAG}-x86_64.AppImage" "217-${TAG}-setup.exe" 217-store-screenshots.zip
