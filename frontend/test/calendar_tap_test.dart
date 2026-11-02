@@ -95,4 +95,33 @@ void main() {
     expect(_todayCell(), findsOneWidget);
     expect(find.byType(DayEditorSheet), findsNothing);
   });
+
+  testWidgets('jump to today scrolls through every month within a second',
+      (tester) async {
+    await _pump(tester);
+    for (var i = 0; i < 6; i++) {
+      await tester.tap(find.byTooltip('Previous month'));
+      await tester.pumpAndSettle();
+    }
+
+    final now = DateTime.now();
+    final expected = {
+      for (var i = 0; i <= 6; i++)
+        '${DateTime(now.year, now.month - i).year}-'
+            '${DateTime(now.year, now.month - i).month}',
+    };
+    final seen = <String>{};
+    await tester.tap(_jump);
+    for (var t = 0; t < 1000; t += 16) {
+      await tester.pump(const Duration(milliseconds: 16));
+      for (final key in expected) {
+        if (find.byKey(ValueKey(key)).evaluate().isNotEmpty) seen.add(key);
+      }
+    }
+    expect(seen, expected);
+    // Done within the second: nothing left to animate.
+    expect(tester.hasRunningAnimations, isFalse);
+    expect(_jump, findsNothing);
+    expect(_todayCell(), findsOneWidget);
+  });
 }
