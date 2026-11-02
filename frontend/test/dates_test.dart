@@ -35,4 +35,20 @@ void main() {
     expect(dates.monthYear(oct31), 'October 2026');
     expect(dates.shortDayMonth(nov19), 'Nov 19');
   });
+
+  test('partner alert notifications are short', () {
+    const pt = Strings(AppLanguage.pt);
+    final start = DateTime(2026, 11, 2);
+    final end = DateTime(2026, 11, 8);
+    expect(pt.pmsNotifTitle, 'TPM prevista');
+    expect(
+      pt.pmsNotifBody('Ana Souza', pt.dates.numericDayMonth(start),
+          pt.dates.numericDayMonth(end)),
+      'Ana: prevista entre ~02/11 - 08/11',
+    );
+    expect(pt.pillNotifTitle, 'Remédio não tomado');
+    expect(pt.pillNotifBody('Ana Souza', pt.dates.time(oct31)),
+        'Ana: atualizado às 14:05');
+    expect(const Strings(AppLanguage.en).dates.numericDayMonth(start), '11/02');
+  });
 }

@@ -15,17 +15,21 @@ Future<LocalReminderSyncStatus> syncPartnerAlertsFrom({
   DateTime? now,
 }) {
   final dates = strings.dates;
+  final at = now ?? DateTime.now();
   final alerts = linked
       ? planPartnerAlerts(
-          now: now ?? DateTime.now(),
+          now: at,
           pref: pref,
           cycle: cycle,
           todayLogged: todayLogged,
           pmsTitle: (_) => strings.pmsNotifTitle,
           pmsBody: (w) => strings.pmsNotifBody(
-              ownerName, dates.shortDayMonth(w.periodStart)),
+            ownerName,
+            dates.numericDayMonth(w.pmsStart),
+            dates.numericDayMonth(w.pmsEnd),
+          ),
           pillTitle: strings.pillNotifTitle,
-          pillBody: strings.pillNotifBody(ownerName),
+          pillBody: strings.pillNotifBody(ownerName, dates.time(at)),
         )
       : const <PlannedAlert>[];
   return (scheduler ?? syncPartnerAlerts)(alerts);

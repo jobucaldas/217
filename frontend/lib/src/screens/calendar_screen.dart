@@ -523,10 +523,14 @@ class _CalendarScreenState extends State<CalendarScreen>
           pmsTitle: (_) => widget.strings.pmsNotifTitle,
           pmsBody: (window) => widget.strings.pmsNotifBody(
             widget.share.ownerName,
-            dates.shortDayMonth(window.periodStart),
+            dates.numericDayMonth(window.pmsStart),
+            dates.numericDayMonth(window.pmsEnd),
           ),
           pillTitle: widget.strings.pillNotifTitle,
-          pillBody: widget.strings.pillNotifBody(widget.share.ownerName),
+          pillBody: widget.strings.pillNotifBody(
+            widget.share.ownerName,
+            dates.time(now),
+          ),
         );
         if (queue != null) {
           await queue.scheduleBackgroundIfCurrent(
