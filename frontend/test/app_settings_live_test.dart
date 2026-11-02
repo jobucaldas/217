@@ -33,7 +33,7 @@ void main() {
     expect(find.text('Sign in'), findsOneWidget);
     // The guide lives in Settings, not on the sign-in screen.
     expect(find.text('Self-hosting guide'), findsNothing);
-    expect(find.byKey(const ValueKey('auth-self-host-tip')), findsOneWidget);
+    expect(find.byKey(const ValueKey('auth-server')), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('auth-settings')));
     await tester.pumpAndSettle();
 
@@ -125,16 +125,16 @@ void main() {
     await tester.pumpWidget(App217(config: api.config, api: api));
     await tester.pumpAndSettle();
     expect(find.text('Iniciar sesión'), findsOneWidget);
-    expect(find.text('calendario de anticonceptivos'), findsOneWidget);
+    expect(find.text('Calendario de Medicamentos'), findsOneWidget);
   });
 
-  testWidgets('self-host tip opens Settings at the server field',
+  testWidgets('server link opens Settings at the server field',
       (tester) async {
     final api = _signedOutApi();
     await tester.pumpWidget(App217(config: api.config, api: api));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const ValueKey('auth-self-host-tip')));
+    await tester.tap(find.byKey(const ValueKey('auth-server')));
     await tester.pumpAndSettle();
     expect(find.text('Settings'), findsOneWidget);
     await tester.scrollUntilVisible(

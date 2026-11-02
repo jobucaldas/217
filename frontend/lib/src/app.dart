@@ -916,9 +916,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     if (_user == null) {
       return AuthScreen(
         strings: _strings,
-        customServer: _api.config.usesCustomApiBase
-            ? Uri.tryParse(_api.config.apiBaseUrl)?.authority
-            : null,
+        server: Uri.tryParse(_api.config.apiBaseUrl)?.authority,
         onSignIn: _signIn,
         onOpenSettings: _openSettings,
         // Server choice happens before sign-in; web always uses its origin.
