@@ -40,6 +40,36 @@ class _FakeApi extends ApiClient {
 }
 
 void main() {
+  testWidgets('Taken is the right-hand status segment', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildApp217Theme(
+          brightness: Brightness.light,
+          palette: AppPalette.blue,
+        ),
+        home: const Scaffold(
+          body: DayEditorSheet(
+            strings: Strings(AppLanguage.en),
+            date: '2026-10-01',
+            initialTaken: null,
+            initialNotes: '',
+            initialHeart: false,
+            hadEntry: false,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final segmented = tester.widget<SegmentedButton<bool>>(
+      find.byType(SegmentedButton<bool>),
+    );
+    expect(segmented.segments.map((s) => s.value), [false, true]);
+    final missed = tester.getCenter(find.text('Missed'));
+    final taken = tester.getCenter(find.text('Taken'));
+    expect(taken.dx, greaterThan(missed.dx));
+  });
+
   test('deleteEntry clears a stored day mark', () async {
     final api = _FakeApi();
     await api.upsertEntry('2026-10-01', taken: true, notes: 'x', heart: true);
