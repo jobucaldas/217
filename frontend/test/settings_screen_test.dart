@@ -163,10 +163,69 @@ void main() {
     expect(tester.widget<Text>(find.text('Privacy notice')).style?.decoration,
         TextDecoration.underline);
     expect(find.text('Download my data'), findsNothing);
+    // Delete account hides in Advanced options until opened.
     expect(find.text('Delete account'), findsNothing);
 
     final logoutLabel = tester.widget<Text>(find.text('Log out'));
-    expect(logoutLabel.style?.color, const Color(0xFFEA580C));
+    expect(logoutLabel.style?.color, const Color(0xFFDC2626));
+  });
+
+  testWidgets('delete account sits in the advanced options', (tester) async {
+    FlutterSecureStorage.setMockInitialValues({});
+    final api = ApiClient(AppConfig.fromEnvironment());
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildApp217Theme(
+          brightness: Brightness.light,
+          palette: AppPalette.blue,
+        ),
+        home: SettingsPage(
+          api: api,
+          strings: const Strings(AppLanguage.en),
+          language: AppLanguage.en,
+          onLanguageChanged: (_) {},
+          themeMode: ThemeMode.system,
+          onThemeModeChanged: (_) {},
+          palette: AppPalette.blue,
+          onPaletteChanged: (_) {},
+          onApiBaseChanged: () {},
+          user: const User(
+            id: '1',
+            email: 'a@b.c',
+            name: 'Owner',
+            role: 'owner',
+          ),
+          share: const ShareState(status: 'none'),
+          onShareChanged: (_) {},
+          onLogout: () async {},
+          onAccountDeleted: () {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final scroll = find.byType(Scrollable).first;
+    await tester.scrollUntilVisible(
+      find.text('Advanced options'),
+      200,
+      scrollable: scroll,
+    );
+    expect(find.byKey(const ValueKey('delete-account')), findsNothing);
+    await tester.drag(scroll, const Offset(0, -300));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Advanced options'));
+    await tester.pumpAndSettle();
+    await tester.drag(scroll, const Offset(0, -2000));
+    await tester.pumpAndSettle();
+    expect(find.text('Delete account'), findsOneWidget);
+  });
+
+  testWidgets('snackbars are floating and rounded', (tester) async {
+    final theme = buildApp217Theme(
+      brightness: Brightness.dark,
+      palette: AppPalette.blue,
+    );
+    expect(theme.snackBarTheme.behavior, SnackBarBehavior.floating);
+    expect(theme.snackBarTheme.shape, isA<RoundedRectangleBorder>());
   });
 
   testWidgets('a failed stage save resets the dropdown to the saved stage',

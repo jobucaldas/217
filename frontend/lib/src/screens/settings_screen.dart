@@ -491,35 +491,30 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           if (widget.onLogout != null) ...[
             const SizedBox(height: 40),
-            _SettingsSection(
-              children: [
-                ListTile(
-                  title: Text(
-                    widget.strings.logout,
-                    style: text.bodyLarge?.copyWith(
-                      color: kLogoutActionColor,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                  onTap: () async {
-                    await widget.onLogout!();
-                    if (context.mounted) Navigator.of(context).pop();
-                  },
+            Material(
+              color: scheme.surface,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+                side: BorderSide(
+                  color: kDeleteAccountColor.withValues(alpha: 0.45),
                 ),
-              ],
-            ),
-            if (widget.onAccountDeleted != null) ...[
-              const SizedBox(height: 12),
-              DeleteAccountSection(
-                api: widget.api,
-                strings: widget.strings,
-                onAccountDeleting: widget.onAccountDeleting,
-                onAccountDeleted: () {
-                  widget.onAccountDeleted!();
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: ListTile(
+                key: const ValueKey('logout'),
+                title: Text(
+                  widget.strings.logout,
+                  style: text.titleMedium?.copyWith(
+                    color: kDeleteAccountColor,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                onTap: () async {
+                  await widget.onLogout!();
                   if (context.mounted) Navigator.of(context).pop();
                 },
               ),
-            ],
+            ),
           ],
           // Last: plain list rows, not a card. Opening it reveals more rows
           // below. The server is picked before signing in, since an account
@@ -553,6 +548,16 @@ class _SettingsPageState extends State<SettingsPage> {
                   Icon(Icons.open_in_new, color: scheme.onSurfaceVariant),
               onTap: _openGuide,
             ),
+            if (widget.onLogout != null && widget.onAccountDeleted != null)
+              DeleteAccountSection(
+                api: widget.api,
+                strings: widget.strings,
+                onAccountDeleting: widget.onAccountDeleting,
+                onAccountDeleted: () {
+                  widget.onAccountDeleted!();
+                  if (context.mounted) Navigator.of(context).pop();
+                },
+              ),
           ],
         ],
       ),

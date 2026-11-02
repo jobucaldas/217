@@ -332,20 +332,16 @@ class Strings {
       _t('Delete account', 'Excluir conta', 'Eliminar cuenta');
   String deleteAccountWarn(bool deletesLogin) => deletesLogin
       ? _t(
-          'This permanently deletes your data and WorkOS sign-in identity, and withdraws your consent. This cannot be undone.',
-          'Isso apaga permanentemente seus dados e sua identidade de login da WorkOS, e revoga seu consentimento. Não dá para desfazer.',
-          'Esto elimina permanentemente tus datos y tu identidad de inicio de sesión de WorkOS, y retira tu consentimiento. No se puede deshacer.',
+          'This permanently deletes your account and data and withdraws your consent. This cannot be undone.',
+          'Isso apaga permanentemente sua conta e seus dados e revoga seu consentimento. Não dá para desfazer.',
+          'Esto elimina permanentemente tu cuenta y tus datos y retira tu consentimiento. No se puede deshacer.',
         )
       : _t(
-          'This permanently deletes your data on this server and withdraws your consent. Your WorkOS login identity remains. This cannot be undone.',
-          'Isso apaga permanentemente seus dados neste servidor e revoga seu consentimento. Sua identidade de login da WorkOS permanece. Não dá para desfazer.',
-          'Esto elimina permanentemente tus datos en este servidor y retira tu consentimiento. Tu identidad de inicio de sesión de WorkOS permanece. No se puede deshacer.',
+          'This permanently deletes your data on this server and withdraws your consent. This cannot be undone.',
+          'Isso apaga permanentemente seus dados neste servidor e revoga seu consentimento. Não dá para desfazer.',
+          'Esto elimina permanentemente tus datos en este servidor y retira tu consentimiento. No se puede deshacer.',
         );
-  String get deleteAccountConfirm => _t(
-        'Delete permanently',
-        'Excluir definitivamente',
-        'Eliminar definitivamente',
-      );
+  String get deleteAccountConfirm => _t('Delete', 'Excluir', 'Eliminar');
   String get accountDeleted =>
       _t('Account deleted', 'Conta excluída', 'Cuenta eliminada');
 

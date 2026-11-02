@@ -70,11 +70,27 @@ void main() {
       await tester.pumpAndSettle();
       expect(
         find.text(
-          'This permanently deletes your data on this server and withdraws your consent. Your WorkOS login identity remains. This cannot be undone.',
+          'This permanently deletes your data on this server and withdraws your consent. This cannot be undone.',
         ),
         findsOneWidget,
       );
-      expect(find.text('Delete permanently'), findsOneWidget);
+      // Cancel is the bright default on the right, Delete the link on the left.
+      expect(find.text('Delete'), findsOneWidget);
+      expect(find.text('Cancel'), findsOneWidget);
+      expect(
+        tester.getCenter(find.byKey(const ValueKey('delete-confirm'))).dx,
+        lessThan(
+          tester.getCenter(find.byKey(const ValueKey('delete-cancel'))).dx,
+        ),
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('delete-cancel')),
+          matching: find.text('Cancel'),
+        ),
+        findsOneWidget,
+      );
+      expect(find.textContaining('WorkOS'), findsNothing);
     });
   }
 

@@ -231,10 +231,7 @@ String joinErrorText(Strings strings, Object err) =>
 /// Bright danger red for irreversible account deletion.
 const kDeleteAccountColor = Color(0xFFDC2626);
 
-/// Softer orangey-red for logout (okay action, less alarming than delete).
-const kLogoutActionColor = Color(0xFFEA580C);
-
-/// Destructive account control — grouped with logout in Settings.
+/// Delete-account row, shown among the advanced options in Settings.
 class DeleteAccountSection extends StatefulWidget {
   const DeleteAccountSection({
     super.key,
@@ -266,17 +263,18 @@ class _DeleteAccountSectionState extends State<DeleteAccountSection> {
         actions: [
           DialogActionRow(
             secondary: DialogLinkButton(
-              neutral: true,
-              onPressed: () => Navigator.pop(context, false),
-              label: widget.strings.cancel,
+              key: const ValueKey('delete-confirm'),
+              onPressed: () => Navigator.pop(context, true),
+              label: widget.strings.deleteAccountConfirm,
             ),
             primary: FilledButton(
+              key: const ValueKey('delete-cancel'),
               style: FilledButton.styleFrom(
                 backgroundColor: kDeleteAccountColor,
                 foregroundColor: Colors.white,
               ),
-              onPressed: () => Navigator.pop(context, true),
-              child: Text(widget.strings.deleteAccountConfirm),
+              onPressed: () => Navigator.pop(context, false),
+              child: Text(widget.strings.cancel),
             ),
           ),
         ],
@@ -301,26 +299,12 @@ class _DeleteAccountSectionState extends State<DeleteAccountSection> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final text = Theme.of(context).textTheme;
-    return Material(
-      color: scheme.surface,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(
-          color: kDeleteAccountColor.withValues(alpha: 0.45),
-        ),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: ListTile(
-        title: Text(
-          widget.strings.deleteAccount,
-          style: text.titleMedium?.copyWith(
-            color: kDeleteAccountColor,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        onTap: _busy ? null : _confirmDelete,
-      ),
+    return ListTile(
+      key: const ValueKey('delete-account'),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+      title: Text(widget.strings.deleteAccount),
+      trailing: Icon(Icons.delete_outline, color: scheme.onSurfaceVariant),
+      onTap: _busy ? null : _confirmDelete,
     );
   }
 }
@@ -393,17 +377,18 @@ class _PartnerJoinScreenState extends State<PartnerJoinScreen> {
         actions: [
           DialogActionRow(
             secondary: DialogLinkButton(
-              neutral: true,
-              onPressed: () => Navigator.pop(context, false),
-              label: widget.strings.cancel,
+              key: const ValueKey('delete-confirm'),
+              onPressed: () => Navigator.pop(context, true),
+              label: widget.strings.deleteAccountConfirm,
             ),
             primary: FilledButton(
+              key: const ValueKey('delete-cancel'),
               style: FilledButton.styleFrom(
                 backgroundColor: scheme.error,
                 foregroundColor: scheme.onError,
               ),
-              onPressed: () => Navigator.pop(context, true),
-              child: Text(widget.strings.deleteAccountConfirm),
+              onPressed: () => Navigator.pop(context, false),
+              child: Text(widget.strings.cancel),
             ),
           ),
         ],
