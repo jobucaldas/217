@@ -78,6 +78,9 @@ type Store interface {
 	// SetRole picks owner or partner; switching is refused while a share is live.
 	SetRole(userID, role string) (*model.User, error)
 	SetStage(userID, stage string) (*model.User, error)
+	// SetProfile updates the display name and/or birth month (YYYY-MM); a
+	// nil field is kept, an empty one cleared. Callers validate the values.
+	SetProfile(userID string, displayName, birthDate *string) (*model.User, error)
 
 	// Partner notification preferences (PMS heads-up, pill not logged)
 	GetPartnerAlerts(userID string) (*model.PartnerAlertPreference, error)

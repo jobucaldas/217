@@ -34,7 +34,7 @@ func (s *MemoryStore) ListMessages(userID string) ([]*model.Message, error) {
 		c.FromMe = m.SenderID() == userID
 		c.FromName, c.FromEmail = "", ""
 		if from := s.findUserLocked(m.SenderID()); from != nil {
-			c.FromName, c.FromEmail = from.Name, from.Email
+			c.FromName, c.FromEmail = from.PublicName(), from.Email
 		}
 		out = append(out, &c)
 	}
@@ -56,7 +56,7 @@ func (s *MemoryStore) SendMessage(senderID, body string) (*model.Message, error)
 	if user == nil {
 		return nil, fmt.Errorf("user not found")
 	}
-	m := &model.Message{ID: generateID(), Body: body, CreatedAt: time.Now().UTC(), FromName: user.Name, FromEmail: user.Email}
+	m := &model.Message{ID: generateID(), Body: body, CreatedAt: time.Now().UTC(), FromName: user.PublicName(), FromEmail: user.Email}
 	var recipient *model.User
 	consentErr := "calendar owner consent required"
 	switch model.NormalizeRole(user.Role) {

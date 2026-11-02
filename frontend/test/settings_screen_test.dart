@@ -215,4 +215,62 @@ void main() {
     expect(saved, ['{"stage":"menopause"}', '{"stage":"perimenopause"}']);
     expect(shown(), 'Cycling');
   });
+
+  for (final role in ['owner', 'partner']) {
+    testWidgets('Personal section saves the display name ($role)',
+        (tester) async {
+      FlutterSecureStorage.setMockInitialValues({});
+      final sent = <String>[];
+      final api = ApiClient(
+        AppConfig.fromEnvironment(),
+        httpClient: MockClient((request) async {
+          if (request.url.path == '/api/account/profile') {
+            sent.add(request.body);
+            return http.Response(
+                '{"user":{"id":"1","email":"a@b.c","name":"Sign-in",'
+                '"role":"$role","display_name":"Ana"}}',
+                200);
+          }
+          return http.Response('{}', 404);
+        }),
+      );
+      SessionSnapshot? saved;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildApp217Theme(brightness: Brightness.light),
+          home: SettingsPage(
+            api: api,
+            strings: const Strings(AppLanguage.en),
+            language: AppLanguage.en,
+            themeMode: ThemeMode.system,
+            palette: AppPalette.blue,
+            onLanguageChanged: (_) {},
+            onThemeModeChanged: (_) {},
+            onPaletteChanged: (_) {},
+            onApiBaseChanged: () {},
+            user: User(id: '1', email: 'a@b.c', name: 'Sign-in', role: role),
+            onLogout: () async {},
+            onProfileChanged: (session) => saved = session,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('PERSONAL'), findsOneWidget);
+      // Birth month and stage are the owner's only.
+      expect(find.byKey(const ValueKey('birth-date')),
+          role == 'owner' ? findsOneWidget : findsNothing);
+      expect(find.byKey(const ValueKey('stage-dropdown')),
+          role == 'owner' ? findsOneWidget : findsNothing);
+
+      await tester.enterText(
+          find.byKey(const ValueKey('display-name')), '  Ana ');
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('display-name-save')));
+      await tester.pumpAndSettle();
+      expect(sent, ['{"display_name":"Ana"}']);
+      expect(saved?.user?.displayName, 'Ana');
+      expect(find.text('Display name saved.'), findsOneWidget);
+    });
+  }
 }

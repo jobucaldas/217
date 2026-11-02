@@ -25,6 +25,16 @@ func canonID(id string) string {
 func userEmailCtx(userID string) string { return "users.email|" + canonID(userID) }
 func userNameCtx(userID string) string  { return "users.name|" + canonID(userID) }
 func userStageCtx(userID string) string { return "users.stage|" + canonID(userID) }
+func userProfileCtx(userID string) string {
+	return "users.profile|" + canonID(userID)
+}
+
+// profilePayload is the sealed users.profile_sealed: the chosen display name
+// and birth month.
+type profilePayload struct {
+	DisplayName string `json:"display_name,omitempty"`
+	BirthDate   string `json:"birth_date,omitempty"`
+}
 
 // Entries are unique per (user, date), which therefore identifies the row.
 func entryCtx(userID, date string) string {
@@ -120,7 +130,7 @@ func (s *PGStore) openUser(user *model.User, email, name []byte) error {
 
 // sealedColumns lists every sealed column, for key checks.
 var sealedColumns = []struct{ table, column string }{
-	{"users", "email_sealed"}, {"users", "name_sealed"}, {"users", "stage_sealed"}, {"entries", "sealed"},
+	{"users", "email_sealed"}, {"users", "name_sealed"}, {"users", "stage_sealed"}, {"users", "profile_sealed"}, {"entries", "sealed"},
 	{"partner_notes", "body_sealed"}, {"calendar_shares", "invite_sealed"},
 	{"push_subscriptions", "sealed"}, {"oauth_attempts", "sealed"},
 }
@@ -397,6 +407,21 @@ func (s *PGStore) reseal() error {
 		}
 		if err := swap(`UPDATE users SET stage_sealed = $2 WHERE id = $1 AND stage_sealed = $3`, r.id, sealJSON(s.kr, stage, userStageCtx(r.id)), r.x); err != nil {
 			return fmt.Errorf("resealing user stage: %w", err)
+		}
+	}
+
+	profiles, err := stale(`SELECT id, profile_sealed FROM users WHERE profile_sealed IS NOT NULL`,
+		func(rs *sql.Rows, r *sealedRow) error { return rs.Scan(&r.id, &r.x) })
+	if err != nil {
+		return fmt.Errorf("reading user profiles: %w", err)
+	}
+	for _, r := range profiles {
+		plain, err := s.kr.Open(r.x, userProfileCtx(r.id))
+		if err != nil {
+			return fmt.Errorf("opening user profile %s: %w", r.id, err)
+		}
+		if err := swap(`UPDATE users SET profile_sealed = $2 WHERE id = $1 AND profile_sealed = $3`, r.id, s.kr.Seal(plain, userProfileCtx(r.id)), r.x); err != nil {
+			return fmt.Errorf("resealing user profile: %w", err)
 		}
 	}
 

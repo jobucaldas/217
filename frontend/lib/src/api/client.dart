@@ -681,6 +681,21 @@ class ApiClient {
     return _sessionFrom(response);
   }
 
+  /// Sets the display name and/or birth month (`YYYY-MM`); a null field is
+  /// left as is, an empty one cleared.
+  Future<SessionSnapshot> updateProfile(
+      {String? displayName, String? birthDate}) async {
+    final response =
+        await _send('PUT', _uri('/api/account/profile'), body: {
+      if (displayName != null) 'display_name': displayName,
+      if (birthDate != null) 'birth_date': birthDate,
+    });
+    if (response.statusCode != 200) {
+      throw ApiException('update profile', response);
+    }
+    return _sessionFrom(response);
+  }
+
   /// Period history and predictions for the visible calendar. [today] is the
   /// device's local date (YYYY-MM-DD).
   /// Offline, the last predictions seen on this device.
