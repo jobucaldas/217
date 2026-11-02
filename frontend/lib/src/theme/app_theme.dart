@@ -210,6 +210,18 @@ ThemeData buildApp217Theme({
       titleTextStyle: textTheme.titleLarge?.copyWith(fontSize: 22),
       iconTheme: IconThemeData(color: scheme.onSurface),
     ),
+    snackBarTheme: SnackBarThemeData(
+      behavior: SnackBarBehavior.floating,
+      backgroundColor: scheme.surfaceContainerHigh,
+      contentTextStyle: textTheme.bodyMedium?.copyWith(color: scheme.onSurface),
+      actionTextColor: scheme.primary,
+      elevation: 0,
+      insetPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: BorderSide(color: scheme.outline.withValues(alpha: 0.55)),
+      ),
+    ),
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
         minimumSize: const Size.fromHeight(52),
