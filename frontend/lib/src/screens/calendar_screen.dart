@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -956,16 +957,26 @@ class _CalendarScreenState extends State<CalendarScreen>
     );
   }
 
-  /// Read-only card with everything known about [day].
+  /// The owner's day sheet, read-only: a partner sees the same marks and note
+  /// but cannot change them. Closes when calendar access is cleared.
   Future<void> _viewDay(DateTime day) {
-    return showDayInfoCard(
-      context,
-      strings: widget.strings,
-      day: day,
-      entry: _visibleEntry(DateFormat('yyyy-MM-dd').format(day)),
-      cycleKind: _cycle.kindOf(day),
-      palette: widget.palette,
-      closeSignal: _accessCleared,
+    final key = DateFormat('yyyy-MM-dd').format(day);
+    final existing = _visibleEntry(key);
+    return showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (context) => DayEditorSheet(
+        strings: widget.strings,
+        date: key,
+        initialTaken: existing?.taken,
+        initialNotes: existing?.notes ?? '',
+        initialHeart: existing?.heart ?? false,
+        initialPeriod: existing?.period ?? false,
+        hadEntry: existing != null,
+        readOnly: true,
+        closeSignal: _accessCleared,
+      ),
     );
   }
 
@@ -1734,6 +1745,8 @@ class DayEditorSheet extends StatefulWidget {
     this.initialHeart = false,
     this.initialPeriod = false,
     this.onCommit,
+    this.readOnly = false,
+    this.closeSignal,
   });
 
   final Strings strings;
@@ -1747,6 +1760,13 @@ class DayEditorSheet extends StatefulWidget {
   /// When set (production calendar), persist immediately — do not rely on the
   /// modal sheet's `Navigator.pop` value surviving a nested note dialog.
   final ValueChanged<DayEditResult>? onCommit;
+
+  /// Partner view: the same layout, with every control disabled. The note
+  /// opens read-only.
+  final bool readOnly;
+
+  /// Read-only only: the sheet closes when this changes (access cleared).
+  final ValueListenable<int>? closeSignal;
 
   @override
   State<DayEditorSheet> createState() => _DayEditorSheetState();
@@ -1852,6 +1872,16 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
     _commitSave();
   }
 
+  /// Read-only note card; the note cannot change from here.
+  Future<void> _viewNote() {
+    final notes = ValueNotifier<String>(_notes);
+    return showDayNoteCard(
+      context,
+      title: widget.strings.notes,
+      notes: notes,
+    ).whenComplete(notes.dispose);
+  }
+
   Future<void> _editNote() async {
     // Capture before the dialog await — sheet may unmount on web when the
     // nested route settles, and we still must persist note/heart.
@@ -1916,18 +1946,34 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
         ThemeData.estimateBrightnessForColor(periodColor) == Brightness.dark
             ? Colors.white
             : const Color(0xFF0B1220);
+    final gap = widget.readOnly ? 8.0 : 14.0;
     // Outside tap dismisses; no Cancel / Save — Done or Taken/Missed commit.
-    return Padding(
+    final sheet = Padding(
       padding: EdgeInsets.only(
         left: 20,
         right: 20,
-        top: 8,
-        bottom: MediaQuery.viewInsetsOf(context).bottom + 20,
+        top: widget.readOnly ? 0 : 8,
+        bottom: MediaQuery.viewInsetsOf(context).bottom +
+            (widget.readOnly ? 12 : 20),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          if (widget.readOnly)
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                key: const ValueKey('day-sheet-close'),
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  minimumSize: const Size(0, 36),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                onPressed: () => Navigator.of(context).pop(),
+                child: Text(widget.strings.close),
+              ),
+            ),
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
@@ -1946,7 +1992,7 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
                 solid: false,
                 icon: Icons.favorite_border,
                 selectedIcon: Icons.favorite,
-                onPressed: _toggleHeart,
+                onPressed: widget.readOnly ? null : _toggleHeart,
               ),
               const SizedBox(width: 4),
               _MarkButton(
@@ -1957,19 +2003,19 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
                 ink: periodInk,
                 icon: Icons.water_drop_outlined,
                 selectedIcon: Icons.water_drop,
-                onPressed: _togglePeriod,
+                onPressed: widget.readOnly ? null : _togglePeriod,
               ),
               const SizedBox(width: 4),
               IconButton.filledTonal(
                 tooltip: widget.strings.notes,
-                onPressed: _editNote,
+                onPressed: widget.readOnly ? _viewNote : _editNote,
                 icon: Icon(
                   hasNote ? Icons.sticky_note_2 : Icons.sticky_note_2_outlined,
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 14),
+          SizedBox(height: gap),
           SegmentedButton<bool>(
             emptySelectionAllowed: true,
             segments: [
@@ -1983,11 +2029,15 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
               ),
             ],
             selected: {if (_taken != null) _taken!},
-            onSelectionChanged: _onStatusChanged,
+            onSelectionChanged:
+                widget.readOnly ? null : _onStatusChanged,
           ),
         ],
       ),
     );
+    final closeSignal = widget.closeSignal;
+    if (!widget.readOnly || closeSignal == null) return sheet;
+    return CloseOnSignal(signal: closeSignal, child: sheet);
   }
 }
 
@@ -2114,7 +2164,9 @@ class _MarkButton extends StatelessWidget {
   final Color ink;
   final IconData icon;
   final IconData selectedIcon;
-  final VoidCallback onPressed;
+
+  /// Null disables the toggle (read-only sheet).
+  final VoidCallback? onPressed;
 
   /// Selected state fills the button with [color]; otherwise it stays a tint
   /// and only the symbol turns [ink].
