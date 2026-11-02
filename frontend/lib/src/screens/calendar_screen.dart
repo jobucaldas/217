@@ -2084,14 +2084,15 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
           const SizedBox(height: 14),
           SegmentedButton<bool>(
             emptySelectionAllowed: true,
+            // Taken is the common answer, so it sits on the right.
             segments: [
-              ButtonSegment(
-                value: true,
-                label: Text(widget.strings.takenLabel),
-              ),
               ButtonSegment(
                 value: false,
                 label: Text(widget.strings.missedLabel),
+              ),
+              ButtonSegment(
+                value: true,
+                label: Text(widget.strings.takenLabel),
               ),
             ],
             selected: {if (_taken != null) _taken!},
