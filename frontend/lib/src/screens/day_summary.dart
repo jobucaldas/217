@@ -221,7 +221,9 @@ class DaySummaryBar extends StatelessWidget {
                 : Icons.edit_calendar_outlined),
             label: Text(viewing
                 ? (isToday ? strings.viewToday : strings.viewDay(shortDay))
-                : (isToday ? strings.updateToday : strings.updateDay(shortDay))),
+                : (isToday
+                    ? strings.updateToday
+                    : strings.updateDay(shortDay))),
           );
 
     final barHeight = compact ? 48.0 : 52.0;
@@ -699,7 +701,8 @@ class _ExpandableDaySheetState extends State<ExpandableDaySheet> {
     final scheme = Theme.of(context).colorScheme;
     final strings = widget.strings;
     final readOnly = widget.sheet == null;
-    final more = readOnly ? _partnerCards(context, note) : _ownerMore(context, note);
+    final more =
+        readOnly ? _partnerCards(context, note) : _ownerMore(context, note);
     final handle = Semantics(
       button: true,
       label: _open ? strings.daySheetLess : strings.daySheetMore,
@@ -746,8 +749,6 @@ class _ExpandableDaySheetState extends State<ExpandableDaySheet> {
                 isFuture: widget.day.isAfter(widget.today),
               ),
             ),
-        // Keeps the resting sheet clear of the system navigation bar.
-        SizedBox(height: bottomInset),
       ],
     );
 
@@ -757,7 +758,9 @@ class _ExpandableDaySheetState extends State<ExpandableDaySheet> {
         final padding = MediaQuery.paddingOf(context);
         final scale = MediaQuery.textScalerOf(context).scale(1);
         // First frame: estimates until the parts are measured.
-        final restingPx = _restingPx ?? 170 * scale + padding.bottom;
+        // The resting part plus room for the system navigation bar, so it
+        // rests clear of it; open, the cards carry that room at the end.
+        final restingPx = (_restingPx ?? 170 * scale) + padding.bottom;
         final contentPx = _contentPx ?? height;
         final top = ((height - padding.top - 24) / height).clamp(0.3, 1.0);
         _resting = (restingPx / height).clamp(0.1, top);
@@ -794,8 +797,7 @@ class _ExpandableDaySheetState extends State<ExpandableDaySheet> {
                     resting,
                     Padding(
                       key: const ValueKey('day-more'),
-                      padding:
-                          EdgeInsets.fromLTRB(20, 0, 20, 20 + bottomInset),
+                      padding: EdgeInsets.fromLTRB(20, 0, 20, 20 + bottomInset),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: more,
@@ -811,7 +813,7 @@ class _ExpandableDaySheetState extends State<ExpandableDaySheet> {
     );
   }
 
-  /// The owner's sheet already shows what she logged: pulled up it adds the
+  /// The owner's sheet already shows what was logged: pulled up it adds the
   /// day's predictions, the whole note and what is coming up.
   List<Widget> _ownerMore(BuildContext context, String note) {
     final scheme = Theme.of(context).colorScheme;
@@ -829,7 +831,8 @@ class _ExpandableDaySheetState extends State<ExpandableDaySheet> {
             const SizedBox(width: 10),
             Expanded(
               child: Text(label,
-                  style: textTheme.bodyLarge?.copyWith(color: scheme.onSurface)),
+                  style:
+                      textTheme.bodyLarge?.copyWith(color: scheme.onSurface)),
             ),
           ]),
         );
@@ -1114,7 +1117,7 @@ List<_DayFact> _dayFacts({
 }
 
 /// The partner's sheet at rest: the date and a chip for each thing known
-/// about the day. Nothing here looks like a control: the day is hers.
+/// about the day. Nothing here looks like a control: only the owner logs the day.
 class _PartnerDayGlance extends StatelessWidget {
   const _PartnerDayGlance({
     required this.strings,
@@ -1155,7 +1158,8 @@ class _PartnerDayGlance extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(strings.dates.fullDate(day), style: theme.textTheme.headlineMedium),
+          Text(strings.dates.fullDate(day),
+              style: theme.textTheme.headlineMedium),
           const SizedBox(height: 14),
           Wrap(
             spacing: 8,
@@ -1286,7 +1290,8 @@ class _InfoCard extends StatelessWidget {
 
 /// A fact's icon, or the dashed PMS ring when it has none.
 class _FactMark extends StatelessWidget {
-  const _FactMark({required this.icon, required this.color, required this.size});
+  const _FactMark(
+      {required this.icon, required this.color, required this.size});
 
   final IconData? icon;
   final Color color;
