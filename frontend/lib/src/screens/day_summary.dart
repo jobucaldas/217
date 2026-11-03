@@ -976,7 +976,9 @@ class _ExpandableDaySheetState extends State<ExpandableDaySheet> {
       rest = GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: _toggle,
-        child: KeyedSubtree(key: _chipsKey, child: hint),
+        // The owner's editable day needs no "more" mark: only a little
+        // room above the pinned Missed/Taken.
+        child: KeyedSubtree(key: _chipsKey, child: const SizedBox(height: 4)),
       );
     } else {
       rest = GestureDetector(
@@ -1055,8 +1057,8 @@ class _ExpandableDaySheetState extends State<ExpandableDaySheet> {
               ),
               child: Padding(
                 padding: EdgeInsets.fromLTRB(20, 14, 20, 20 + padding.bottom),
-                // Its own width, as in the plain editor.
-                child: Center(child: editor.status),
+                // Full width, as in the plain editor's stretched column.
+                child: SizedBox(width: double.infinity, child: editor.status),
               ),
             ),
           );
