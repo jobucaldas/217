@@ -11,6 +11,7 @@ import '../notifications/partner_alert_sync_queue.dart';
 import '../platform/open_url.dart';
 import '../stage_suggestion.dart';
 import '../theme/app_theme.dart';
+import '../updates/update_check.dart';
 import 'partner_alerts_screen.dart';
 import 'personal_section.dart';
 import 'privacy_screens.dart';
@@ -561,6 +562,18 @@ class _SettingsPageState extends State<SettingsPage> {
                 },
               ),
           ],
+          // Build identity, bottom right: the release tag, or "dev" for local builds.
+          Align(
+            alignment: AlignmentDirectional.centerEnd,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(0, 16, 4, 0),
+              child: Text(
+                key: const ValueKey('app-version'),
+                appVersion.isEmpty ? 'dev' : 'v$appVersion',
+                style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+              ),
+            ),
+          ),
         ],
       ),
     );
