@@ -577,7 +577,18 @@ class Strings {
   String get comingUp => _t('Coming up', 'Próximos dias', 'Próximamente');
   String get dayThisDay => _t('This day', 'Neste dia', 'Este día');
   String get dayExpected => _t('Expected', 'Prevista', 'Prevista');
-  String get cycleNow => _t('Now', 'Agora', 'Ahora');
+  String cycleUntilDate(String date) =>
+      _t('until ~$date', 'até ~$date', 'hasta ~$date');
+  String get showMoreNote => _t(
+        'Show the whole note',
+        'Mostrar a nota inteira',
+        'Mostrar la nota entera',
+      );
+  String get showLessNote => _t(
+        'Show less of the note',
+        'Mostrar menos da nota',
+        'Mostrar menos de la nota',
+      );
   String cycleFromDate(String date) =>
       _t('from ~$date', 'a partir de ~$date', 'desde ~$date');
   String get cycleNoPredictions => _t(
@@ -591,11 +602,6 @@ class Strings {
   String get dayTapToLog =>
       _t('Tap to log', 'Toque para registrar', 'Toca para registrar');
   String get editNote => _t('Edit note', 'Editar nota', 'Editar nota');
-  String get daySheetViewOnly => _t(
-        'Partner Mode: view only',
-        'Modo Parceiro: somente leitura',
-        'Modo Pareja: solo lectura',
-      );
   String get daySheetFutureLocked => _t(
         'Future day: nothing to log yet',
         'Dia futuro: nada para registrar ainda',

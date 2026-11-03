@@ -425,6 +425,9 @@ void main() {
       await pull(tester, sheet, -600);
       final openTop = tester.getTopLeft(sheet).dy;
       expect(openTop, lessThan(restingTop));
+      // The long note unfolds.
+      await tester.tap(find.text('Show more'));
+      await tester.pumpAndSettle();
       await pull(tester, sheet, -300);
       expect(sheetScroll(tester), greaterThan(0), reason: '$asPartner');
 
@@ -516,15 +519,19 @@ void main() {
     expect(find.byKey(const ValueKey('day-sheet-locked')), findsOneWidget);
   });
 
-  testWidgets('the partner sheet shows the view-only eye', (tester) async {
+  testWidgets('the partner sheet has no eye beside the date', (tester) async {
     await tester.binding.setSurfaceSize(const Size(390, 844));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(_app(_calendar(entries: const [])));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('view-day-button')));
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('day-sheet-view-only')), findsOneWidget);
-    expect(find.byTooltip('Partner Mode: view only'), findsOneWidget);
+    expect(find.byKey(const ValueKey('partner-day-glance')), findsOneWidget);
+    expect(
+        find.descendant(
+            of: find.byType(ExpandableDaySheet),
+            matching: find.byIcon(Icons.visibility_outlined)),
+        findsNothing);
     expect(find.byKey(const ValueKey('day-sheet-locked')), findsNothing);
   });
 
@@ -571,7 +578,8 @@ void main() {
     // At rest: the chips and the "pull up" mark, nothing of the open state.
     const chips = ['day-chip-pill', 'day-chip-pms'];
     const tiles = ['day-card-pill', 'day-card-pms'];
-    const coming = ['day-coming-pms', 'day-coming-period'];
+    // Today's PMS is on its own card, so only the period comes up.
+    const coming = ['day-coming-period'];
     final more = find.byIcon(Icons.more_horiz);
     for (final k in chips) {
       expect(shown(ValueKey(k)), isTrue, reason: k);
@@ -604,6 +612,101 @@ void main() {
       find.descendant(
           of: find.byKey(const ValueKey('day-coming-period')),
           matching: find.textContaining('~')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('day-coming-pms')), findsNothing);
+    final end = today.add(const Duration(days: 5));
+    expect(
+      find.descendant(
+          of: find.byKey(const ValueKey('day-card-pms')),
+          matching: find.text(
+              'Today\nuntil ~${const Strings(AppLanguage.en).dates.shortDayMonth(end)}')),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('another day: the PMS going on now comes up with its end',
+      (tester) async {
+    await tester.binding.setSurfaceSize(const Size(412, 915));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final end = today.add(const Duration(days: 5));
+    final cycle = CycleInfo(predictions: [
+      CycleWindow(
+        periodStart: today.add(const Duration(days: 6)),
+        periodEnd: today.add(const Duration(days: 10)),
+        pmsStart: today.subtract(const Duration(days: 1)),
+        pmsEnd: end,
+      ),
+    ]);
+    await tester.pumpWidget(_app(_calendar(entries: const [], cycle: cycle)));
+    await tester.pumpAndSettle();
+    await tester.tap(cellOf(other));
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(cellOf(other));
+    await tester.pumpAndSettle();
+    await tester.drag(sheet, const Offset(0, -600));
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(
+          of: find.byKey(const ValueKey('day-coming-pms')),
+          matching: find.text(
+              'until ~${const Strings(AppLanguage.en).dates.shortDayMonth(end)}')),
+      findsOneWidget,
+    );
+    expect(find.text('Now'), findsNothing);
+  });
+
+  testWidgets('a long note unfolds on tap, read-only for a partner',
+      (tester) async {
+    await tester.binding.setSurfaceSize(const Size(412, 915));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final note = List.filled(30, 'A long line of the note.').join(' ');
+    await tester.pumpWidget(_app(_calendar(
+      entries: [Entry(date: _key(today), taken: true, notes: note)],
+    )));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('view-day-button')));
+    await tester.pumpAndSettle();
+    await tester.drag(sheet, const Offset(0, -600));
+    await tester.pumpAndSettle();
+
+    final card = find.byKey(const ValueKey('day-more-note'));
+    final folded = tester.getSize(card).height;
+    expect(find.text('Show more'), findsOneWidget);
+    await tester.tap(card);
+    await tester.pumpAndSettle();
+    expect(tester.getSize(card).height, greaterThan(folded));
+    expect(find.text('Show less'), findsOneWidget);
+    expect(find.byType(TextField), findsNothing);
+  });
+
+  testWidgets('the owner writes the note right in the open sheet',
+      (tester) async {
+    await tester.binding.setSurfaceSize(const Size(412, 915));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(_app(_calendar(
+      entries: [Entry(date: _key(today), taken: true, notes: 'Felt fine')],
+      user: owner,
+      share: solo,
+    )));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('update-day-button')));
+    await tester.pumpAndSettle();
+    await pull(tester, sheet, -500);
+
+    await tester.tap(find.byKey(const ValueKey('day-note-edit')));
+    await tester.pumpAndSettle();
+    // Inline: no dialog over the sheet.
+    expect(find.byType(AlertDialog), findsNothing);
+    await tester.enterText(
+        find.byKey(const ValueKey('day-note-field')), 'Headache');
+    await tester.tap(find.byKey(const ValueKey('day-note-save')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('day-note-field')), findsNothing);
+    expect(
+      find.descendant(
+          of: find.byKey(const ValueKey('day-more-note')),
+          matching: find.text('Headache')),
       findsOneWidget,
     );
   });
