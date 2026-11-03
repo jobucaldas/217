@@ -8,8 +8,10 @@ on:
 permissions:
   contents: read
 
+# Runs started by the screenshots job's bot commit get their own group, so they never
+# cancel the developer's in-progress run for the same ref.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.ref }}-${{ github.actor == 'github-actions[bot]' && 'bot' || 'dev' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -44,25 +46,19 @@ jobs:
       - run: go vet -mod=readonly ./...
       - run: go test -mod=readonly ./...
 
-  frontend:
-    name: Frontend (analyze, test, web + APK build)
+  # Computed once, ahead of the builds, so the web, APK, AppImage, installer and the
+  # release all carry the same version without serialising the heavy jobs behind `frontend`.
+  version:
+    name: Version
     runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/cirruslabs/flutter:stable
-    defaults:
-      run:
-        working-directory: frontend
     outputs:
       tag: ${{ steps.version.outputs.tag }}
+      build: ${{ steps.version.outputs.build }}
     steps:
       - uses: actions/checkout@v4
-      - run: |
-          git config --global --add safe.directory /sdks/flutter || true
-          flutter pub get
       - name: Compute version
         # Tag and versionName are `0.<yy>.<MMDD>-<run>` (UTC date at build time, not commit
-        # time; run = 1 + the highest run already tagged for that day). Computed once here
-        # and reused by publish. versionCode is 1 + the number of `0.*` release tags so far
+        # time; run = 1 + the highest run already tagged for that day). versionCode is 1 + the number of `0.*` release tags so far
         # (1, 2, 3, ...): it rises with every published build and stays far below Android's
         # 2.1 billion limit (Play warns about large jumps).
         id: version
@@ -73,11 +69,26 @@ jobs:
           RUN=$(( ${LAST:-0} + 1 ))
           echo "tag=${PREFIX}-${RUN}" >> "$GITHUB_OUTPUT"
           echo "build=$(( $(git ls-remote --tags origin 'refs/tags/0.*' | wc -l) + 1 ))" >> "$GITHUB_OUTPUT"
+
+  frontend:
+    name: Frontend (analyze, test, web + APK build)
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/cirruslabs/flutter:stable
+    defaults:
+      run:
+        working-directory: frontend
+    needs: version
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          git config --global --add safe.directory /sdks/flutter || true
+          flutter pub get
       - run: flutter analyze
       - run: flutter test
       - name: Build web bundle
         env:
-          APP_VERSION: ${{ steps.version.outputs.tag }}
+          APP_VERSION: ${{ needs.version.outputs.tag }}
         run: |
           # The bundle is served under /app/ (frontend/Caddyfile); keep this in sync.
           flutter build web --release --no-web-resources-cdn --pwa-strategy=none --base-href /app/ \
@@ -111,8 +122,8 @@ jobs:
         # The repository variable DEFAULT_SERVER_URL bakes a default server into
         # the APK. Unset, the APK asks for a server on first launch.
         env:
-          APP_VERSION: ${{ steps.version.outputs.tag }}
-          BUILD_NUMBER: ${{ steps.version.outputs.build }}
+          APP_VERSION: ${{ needs.version.outputs.tag }}
+          BUILD_NUMBER: ${{ needs.version.outputs.build }}
           DEFAULT_SERVER_URL: ${{ vars.DEFAULT_SERVER_URL }}
         run: |
           flutter build apk --release \
@@ -124,8 +135,8 @@ jobs:
         # Google Play takes an .aab signed with the upload key (the same release
         # key above); Play App Signing re-signs what it delivers to devices.
         env:
-          APP_VERSION: ${{ steps.version.outputs.tag }}
-          BUILD_NUMBER: ${{ steps.version.outputs.build }}
+          APP_VERSION: ${{ needs.version.outputs.tag }}
+          BUILD_NUMBER: ${{ needs.version.outputs.build }}
           DEFAULT_SERVER_URL: ${{ vars.DEFAULT_SERVER_URL }}
         run: |
           flutter build appbundle --release \
@@ -194,6 +205,7 @@ jobs:
 
   linux:
     name: Linux AppImage
+    needs: version
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -211,7 +223,9 @@ jobs:
       - run: flutter pub get
       - name: Build release bundle
         # No API_BASE_URL on purpose: like the APK, it asks for a server on first launch.
-        run: flutter build linux --release
+        env:
+          APP_VERSION: ${{ needs.version.outputs.tag }}
+        run: flutter build linux --release --dart-define=APP_VERSION="$APP_VERSION"
       - run: packaging/linux/build-appimage.sh
       - if: github.event_name == 'push'
         uses: actions/upload-artifact@v4
@@ -222,6 +236,7 @@ jobs:
 
   windows:
     name: Windows installer
+    needs: version
     runs-on: windows-latest
     defaults:
       run:
@@ -236,7 +251,11 @@ jobs:
       - run: flutter pub get
       - name: Build release bundle
         # No API_BASE_URL on purpose: like the APK, it asks for a server on first launch.
-        run: flutter build windows --release
+        # Only the dart-define: Windows' file version needs a numeric build-name, which the
+        # installer already takes from pubspec.yaml.
+        env:
+          APP_VERSION: ${{ needs.version.outputs.tag }}
+        run: flutter build windows --release --dart-define=APP_VERSION=$env:APP_VERSION
       - name: Bundle the Visual C++ runtime (app-local)
         run: |
           foreach ($dll in 'msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll') {
@@ -265,8 +284,9 @@ jobs:
 
   # Pull requests only: when the app's screens (or this tooling) changed, re-renders the
   # store-listing screenshots (assets/*-screenshots) and commits them to the PR branch.
-  # No loop: a push made with GITHUB_TOKEN starts no workflows, the job skips heads
-  # authored by the bot, and it commits nothing unless the files changed. Fork PRs are
+  # No loop: the bot's commit may start a CI run of its own (kept in a separate concurrency
+  # group, so it never cancels the developer's run), but the job skips heads authored by the
+  # bot, and it commits nothing unless the files changed. Fork PRs are
   # skipped (no write access).
   screenshots:
     name: Store screenshots
@@ -321,11 +341,11 @@ jobs:
 
   # main only: GHCR images + app releases (APK, Windows installer, AppImage), as the
   # rolling `nightly` pre-release and an immutable `0.YY.MMDD-RUN` release marked latest.
-  # The tag is computed in `frontend`, because the APK's versionName must equal it.
+  # The tag is computed in `version`, because the APK's versionName must equal it.
   publish:
     name: Publish (GHCR + GitHub Releases)
     if: github.event_name == 'push'
-    needs: [backend, frontend, images, linux, windows]
+    needs: [version, backend, frontend, images, linux, windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -347,7 +367,7 @@ jobs:
       - name: Compute tags
         id: tags
         env:
-          DATETIME_SHA: ${{ needs.frontend.outputs.tag }}
+          DATETIME_SHA: ${{ needs.version.outputs.tag }}
         run: |
           echo "datetime_sha=${DATETIME_SHA}" >> "$GITHUB_OUTPUT"
           echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/217" >> "$GITHUB_OUTPUT"
