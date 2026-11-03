@@ -73,7 +73,13 @@ void main() {
       )
       .first;
 
-  testWidgets('partner views a day in the owner sheet, read-only',
+  final sheet = find.byKey(const ValueKey('expandable-day-sheet'));
+
+  /// Whether [key] is on screen and not clipped away by the resting sheet.
+  bool shown(Key key) =>
+      find.byKey(key).hitTestable().evaluate().isNotEmpty;
+
+  testWidgets('partner views a day as read-only chips, no controls',
       (tester) async {
     await tester.binding.setSurfaceSize(const Size(390, 844));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -92,34 +98,28 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('view-day-button')));
     await tester.pumpAndSettle();
 
-    expect(find.byType(DayEditorSheet), findsOneWidget);
-    expect(find.text('Taken'), findsWidgets);
-    // Every control is shown but disabled.
-    expect(_disabled(tester, const ValueKey('day-heart-toggle')), isTrue);
-    expect(_disabled(tester, const ValueKey('day-period-toggle')), isTrue);
+    expect(find.byKey(const ValueKey('partner-day-glance')), findsOneWidget);
+    for (final id in ['pill', 'heart', 'period', 'note']) {
+      expect(shown(ValueKey('day-chip-$id')), isTrue, reason: id);
+    }
     expect(
-      tester
-          .widget<SegmentedButton<bool>>(find.byType(SegmentedButton<bool>))
-          .onSelectionChanged,
-      isNull,
+      find.descendant(
+          of: find.byKey(const ValueKey('day-chip-pill')),
+          matching: find.text('Taken')),
+      findsOneWidget,
     );
+    // Nothing that looks like the owner's controls.
+    expect(find.byType(DayEditorSheet), findsNothing);
+    expect(find.byType(SegmentedButton<bool>), findsNothing);
+    expect(find.byKey(const ValueKey('day-heart-toggle')), findsNothing);
+    expect(find.text('Missed'), findsNothing);
     expect(find.byType(TextField), findsNothing);
-
-    // The note opens read-only, in its card.
-    await tester.tap(find.byIcon(Icons.sticky_note_2));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('day-note-card')), findsOneWidget);
-    expect(find.text('Felt fine today'), findsWidgets);
-    expect(find.byType(TextField), findsNothing);
-    await tester.tapAt(const Offset(4, 4));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('day-note-card')), findsNothing);
 
     // Same as the owner's sheet: no close button, a tap outside dismisses.
     expect(find.text('Close'), findsNothing);
     await tester.tapAt(const Offset(195, 40));
     await tester.pumpAndSettle();
-    expect(find.byType(DayEditorSheet), findsNothing);
+    expect(find.byKey(const ValueKey('partner-day-glance')), findsNothing);
   });
 
   testWidgets('double tap on a day opens the read-only sheet for a partner',
@@ -133,18 +133,18 @@ void main() {
 
     await tester.tap(cellOf(other));
     await tester.pump(const Duration(milliseconds: 50));
-    expect(find.byType(DayEditorSheet), findsNothing);
+    expect(find.byKey(const ValueKey('partner-day-glance')), findsNothing);
     await tester.tap(cellOf(other));
     await tester.pumpAndSettle();
 
-    expect(find.byType(DayEditorSheet), findsOneWidget);
-    expect(find.text('Missed'), findsWidgets);
+    expect(find.byKey(const ValueKey('partner-day-glance')), findsOneWidget);
     expect(
-      tester
-          .widget<SegmentedButton<bool>>(find.byType(SegmentedButton<bool>))
-          .onSelectionChanged,
-      isNull,
+      find.descendant(
+          of: find.byKey(const ValueKey('day-chip-pill')),
+          matching: find.text('Missed')),
+      findsOneWidget,
     );
+    expect(find.byType(SegmentedButton<bool>), findsNothing);
   });
 
   testWidgets('partner can jump back to today', (tester) async {
@@ -165,24 +165,7 @@ void main() {
     expect(find.text('View today'), findsOneWidget);
   });
 
-  testWidgets('the sheet closes when the share is revoked', (tester) async {
-    await tester.binding.setSurfaceSize(const Size(390, 844));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
-    await tester.pumpWidget(_app(_calendar(entries: const [])));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('view-day-button')));
-    await tester.pumpAndSettle();
-    expect(find.byType(DayEditorSheet), findsOneWidget);
-
-    await tester.pumpWidget(_app(_calendar(
-      entries: const [],
-      share: const ShareState(status: 'revoked', canEditCalendar: false),
-    )));
-    await tester.pumpAndSettle();
-    expect(find.byType(DayEditorSheet), findsNothing);
-  });
-
-  testWidgets('an open note card closes too when the share is revoked',
+  testWidgets('the sheet, open or not, closes when the share is revoked',
       (tester) async {
     await tester.binding.setSurfaceSize(const Size(390, 844));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -193,70 +176,91 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('view-day-button')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byIcon(Icons.sticky_note_2));
+    await tester.drag(sheet, const Offset(0, -400));
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('day-note-card')), findsOneWidget);
+    expect(shown(const ValueKey('day-more-note')), isTrue);
 
     await tester.pumpWidget(_app(_calendar(
       entries: entries,
       share: const ShareState(status: 'revoked', canEditCalendar: false),
     )));
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('day-note-card')), findsNothing);
+    expect(find.byKey(const ValueKey('partner-day-glance')), findsNothing);
     expect(find.text('Private note'), findsNothing);
-    expect(find.byType(DayEditorSheet), findsNothing);
   });
 
-
-  testWidgets('partner pulls the sheet up for more, down to close',
+  testWidgets('partner pulls the sheet up into cards, down to close',
       (tester) async {
     await tester.binding.setSurfaceSize(const Size(390, 844));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     const longNote = 'A long note that the resting sheet does not spell out '
         'in full but the expanded one does.';
     await tester.pumpWidget(_app(_calendar(entries: [
-      Entry(date: _key(today), taken: true, notes: longNote),
+      Entry(date: _key(today), taken: true, notes: longNote, heart: true),
     ])));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('view-day-button')));
     await tester.pumpAndSettle();
 
-    final sheet = find.byKey(const ValueKey('expandable-day-sheet'));
     final restingTop = tester.getTopLeft(sheet).dy;
-    expect(find.byKey(const ValueKey('day-more-note')), findsOneWidget);
-    expect(find.byType(DayEditorSheet), findsOneWidget);
+    expect(shown(const ValueKey('day-card-pill')), isFalse);
+    expect(shown(const ValueKey('day-more-note')), isFalse);
 
-    await tester.drag(sheet, const Offset(0, -300));
+    // Dragged by its body, not only the handle.
+    await tester.drag(
+        find.byKey(const ValueKey('day-chip-pill')), const Offset(0, -400));
     await tester.pumpAndSettle();
     expect(tester.getTopLeft(sheet).dy, lessThan(restingTop));
+    for (final key in [
+      'day-card-pill',
+      'day-card-heart',
+      'day-more-note',
+      'day-more-coming-up',
+    ]) {
+      expect(shown(ValueKey(key)), isTrue, reason: key);
+    }
     expect(find.text(longNote), findsOneWidget);
-    expect(
-      tester
-          .widget<SegmentedButton<bool>>(find.byType(SegmentedButton<bool>))
-          .onSelectionChanged,
-      isNull,
-    );
+    expect(find.byType(SegmentedButton<bool>), findsNothing);
 
-    await tester.fling(sheet, const Offset(0, 600), 2000);
+    // Down once back to rest, once more to close.
+    await tester.fling(sheet, const Offset(0, 300), 2000);
     await tester.pumpAndSettle();
-    expect(find.byType(DayEditorSheet), findsNothing);
+    expect(tester.getTopLeft(sheet).dy, moreOrLessEquals(restingTop, epsilon: 1));
+    await tester.fling(sheet, const Offset(0, 300), 2000);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('partner-day-glance')), findsNothing);
   });
 
-  testWidgets('a day with nothing more keeps the owner-sized sheet',
+  testWidgets('an empty day still pulls up, and the handle toggles it',
       (tester) async {
-    await tester.binding.setSurfaceSize(const Size(390, 844));
+    await tester.binding.setSurfaceSize(const Size(412, 915));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(_app(_calendar(entries: const [])));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('view-day-button')));
     await tester.pumpAndSettle();
 
-    final sheet = find.byKey(const ValueKey('expandable-day-sheet'));
     final top = tester.getTopLeft(sheet).dy;
-    expect(find.byKey(const ValueKey('day-more-note')), findsNothing);
+    expect(
+      find.descendant(
+          of: find.byKey(const ValueKey('day-chip-pill')),
+          matching: find.text('Not logged yet')),
+      findsOneWidget,
+    );
+    expect(shown(const ValueKey('day-more-coming-up')), isFalse);
     await tester.drag(sheet, const Offset(0, -300));
     await tester.pumpAndSettle();
-    expect(tester.getTopLeft(sheet).dy, top);
+    expect(tester.getTopLeft(sheet).dy, lessThan(top));
+    expect(shown(const ValueKey('day-more-coming-up')), isTrue);
+
+    // Collapsing does not close it.
+    await tester.tap(find.byKey(const ValueKey('day-sheet-handle')));
+    await tester.pumpAndSettle();
+    expect(tester.getTopLeft(sheet).dy, moreOrLessEquals(top, epsilon: 1));
+    expect(find.byKey(const ValueKey('partner-day-glance')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('day-sheet-handle')));
+    await tester.pumpAndSettle();
+    expect(tester.getTopLeft(sheet).dy, lessThan(top));
   });
 
   testWidgets('the owner pulls the same sheet up, and it follows the note',
@@ -272,14 +276,41 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('update-day-button')));
     await tester.pumpAndSettle();
 
-    final sheet = find.byKey(const ValueKey('expandable-day-sheet'));
     final restingTop = tester.getTopLeft(sheet).dy;
     await tester.drag(sheet, const Offset(0, -300));
     await tester.pumpAndSettle();
     expect(tester.getTopLeft(sheet).dy, lessThan(restingTop));
-    expect(find.text('First note'), findsOneWidget);
+    expect(shown(const ValueKey('day-more-note')), isTrue);
     // Still the editor: its controls work.
     expect(_disabled(tester, const ValueKey('day-heart-toggle')), isFalse);
+  });
+
+  testWidgets('the owner pulls up an empty day too', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(412, 915));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(_app(_calendar(
+      entries: const [],
+      user: const User(id: 'o', email: 'o@b.c', name: 'O'),
+      share: const ShareState(status: 'none'),
+    )));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('update-day-button')));
+    await tester.pumpAndSettle();
+
+    final top = tester.getTopLeft(sheet).dy;
+    expect(shown(const ValueKey('day-more-coming-up')), isFalse);
+    // Dragged from the date, above the editor's controls.
+    await tester.drag(
+      find
+          .descendant(
+              of: find.byType(DayEditorSheet), matching: find.byType(Text))
+          .first,
+      const Offset(0, -300),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.getTopLeft(sheet).dy, lessThan(top));
+    expect(shown(const ValueKey('day-more-coming-up')), isTrue);
+    expect(find.byType(SegmentedButton<bool>), findsOneWidget);
   });
 
   testWidgets('owner still gets the editor, not the read-only sheet',
@@ -297,6 +328,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('update-day-button')));
     await tester.pumpAndSettle();
     expect(find.byType(DayEditorSheet), findsOneWidget);
+    expect(find.byKey(const ValueKey('partner-day-glance')), findsNothing);
     expect(find.text('Close'), findsNothing);
     expect(_disabled(tester, const ValueKey('day-heart-toggle')), isFalse);
   });

@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -996,13 +995,13 @@ class _CalendarScreenState extends State<CalendarScreen>
     return _showDaySheet(day, readOnly: false);
   }
 
-  /// A partner's view of [day]: the owner's sheet with nothing to change.
+  /// A partner's view of [day]: what was logged, read-only.
   Future<void> _viewDay(DateTime day) => _showDaySheet(day, readOnly: true);
 
   /// The one day sheet, for both sides: the owner edits in it, a partner
   /// only reads it (and it closes when calendar access is cleared). Either
   /// can pull it up for what else is known about the day (predictions, the
-  /// whole note).
+  /// whole note, what is coming up).
   Future<void> _showDaySheet(DateTime day, {required bool readOnly}) {
     final key = DateFormat('yyyy-MM-dd').format(day);
     final existing = _visibleEntry(key);
@@ -1013,39 +1012,47 @@ class _CalendarScreenState extends State<CalendarScreen>
       isScrollControlled: true,
       // The expandable sheet draws its own surface and handle.
       backgroundColor: Colors.transparent,
-      builder: (context) => ExpandableDaySheet(
-        strings: widget.strings,
-        palette: widget.palette,
-        day: day,
-        notes: notes,
-        cycleKind: _cycle.kindOf(day),
-        sheet: DayEditorSheet(
+      builder: (context) {
+        final sheet = ExpandableDaySheet(
           strings: widget.strings,
-          date: key,
-          initialTaken: existing?.taken,
-          initialNotes: existing?.notes ?? '',
-          initialHeart: existing?.heart ?? false,
-          initialPeriod: existing?.period ?? false,
-          hadEntry: existing != null,
-          readOnly: readOnly,
-          closeSignal: readOnly ? _accessCleared : null,
-          // Persist via onCommit — not the sheet's pop value. Nested note
-          // dialog → sheet pop races on web and can drop the result (note/
-          // heart "save" that only sticks after Taken/Missed re-tap).
-          onCommit: readOnly
+          palette: widget.palette,
+          day: day,
+          today: _today,
+          notes: notes,
+          cycle: _cycle,
+          entry: existing,
+          // A partner gets read-only chips and cards instead of the editor.
+          sheet: readOnly
               ? null
-              : (result) {
-                  notes.value = result.clear ? '' : result.notes;
-                  _persistDay(key, result).catchError((Object err) {
-                    if (mounted &&
-                        !_handleConsentFailure(err, closeDayEditor: true)) {
-                      setState(
-                          () => _error = friendlyError(widget.strings, err));
-                    }
-                  });
-                },
-        ),
-      ),
+              : DayEditorSheet(
+                  strings: widget.strings,
+                  date: key,
+                  initialTaken: existing?.taken,
+                  initialNotes: existing?.notes ?? '',
+                  initialHeart: existing?.heart ?? false,
+                  initialPeriod: existing?.period ?? false,
+                  hadEntry: existing != null,
+                  // Persist via onCommit — not the sheet's pop value. Nested
+                  // note dialog → sheet pop races on web and can drop the
+                  // result (note/heart "save" that only sticks after
+                  // Taken/Missed re-tap).
+                  onCommit: (result) {
+                    notes.value = result.clear ? '' : result.notes;
+                    _persistDay(key, result).catchError((Object err) {
+                      if (mounted &&
+                          !_handleConsentFailure(err, closeDayEditor: true)) {
+                        setState(
+                            () => _error = friendlyError(widget.strings, err));
+                      }
+                    });
+                  },
+                ),
+        );
+        // A partner's sheet closes when calendar access is cleared.
+        return readOnly
+            ? CloseOnSignal(signal: _accessCleared, child: sheet)
+            : sheet;
+      },
     ).whenComplete(notes.dispose);
   }
 
@@ -1839,8 +1846,6 @@ class DayEditorSheet extends StatefulWidget {
     this.initialHeart = false,
     this.initialPeriod = false,
     this.onCommit,
-    this.readOnly = false,
-    this.closeSignal,
   });
 
   final Strings strings;
@@ -1854,13 +1859,6 @@ class DayEditorSheet extends StatefulWidget {
   /// When set (production calendar), persist immediately — do not rely on the
   /// modal sheet's `Navigator.pop` value surviving a nested note dialog.
   final ValueChanged<DayEditResult>? onCommit;
-
-  /// Partner view: the same layout, with every control disabled. The note
-  /// opens read-only.
-  final bool readOnly;
-
-  /// Read-only only: the sheet closes when this changes (access cleared).
-  final ValueListenable<int>? closeSignal;
 
   @override
   State<DayEditorSheet> createState() => _DayEditorSheetState();
@@ -1966,28 +1964,6 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
     _commitSave();
   }
 
-  /// Read-only note card; the note cannot change from here.
-  Future<void> _viewNote() {
-    final notes = ValueNotifier<String>(_notes);
-    // Emptying it closes the card, so it never outlives cleared access.
-    // The signal can change mid-build, so it waits for the frame to end.
-    var closed = false;
-    void clear() => WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!closed) notes.value = '';
-        });
-    final signal = widget.closeSignal;
-    signal?.addListener(clear);
-    return showDayNoteCard(
-      context,
-      title: widget.strings.notes,
-      notes: notes,
-    ).whenComplete(() {
-      closed = true;
-      signal?.removeListener(clear);
-      notes.dispose();
-    });
-  }
-
   Future<void> _editNote() async {
     // Capture before the dialog await — sheet may unmount on web when the
     // nested route settles, and we still must persist note/heart.
@@ -2082,7 +2058,7 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
                 solid: false,
                 icon: Icons.favorite_border,
                 selectedIcon: Icons.favorite,
-                onPressed: widget.readOnly ? null : _toggleHeart,
+                onPressed: _toggleHeart,
               ),
               const SizedBox(width: 4),
               _MarkButton(
@@ -2093,12 +2069,12 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
                 ink: periodInk,
                 icon: Icons.water_drop_outlined,
                 selectedIcon: Icons.water_drop,
-                onPressed: widget.readOnly ? null : _togglePeriod,
+                onPressed: _togglePeriod,
               ),
               const SizedBox(width: 4),
               IconButton.filledTonal(
                 tooltip: widget.strings.notes,
-                onPressed: widget.readOnly ? _viewNote : _editNote,
+                onPressed: _editNote,
                 icon: Icon(
                   hasNote ? Icons.sticky_note_2 : Icons.sticky_note_2_outlined,
                 ),
@@ -2120,14 +2096,12 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
               ),
             ],
             selected: {if (_taken != null) _taken!},
-            onSelectionChanged: widget.readOnly ? null : _onStatusChanged,
+            onSelectionChanged: _onStatusChanged,
           ),
         ],
       ),
     );
-    final closeSignal = widget.closeSignal;
-    if (!widget.readOnly || closeSignal == null) return sheet;
-    return CloseOnSignal(signal: closeSignal, child: sheet);
+    return sheet;
   }
 }
 
