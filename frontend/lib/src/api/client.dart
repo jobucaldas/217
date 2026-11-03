@@ -237,6 +237,8 @@ class ApiClient {
 
   /// The last account's session as kept on the device, while it can still
   /// talk to the server (token or device key).
+  Future<SessionSnapshot?> cachedSession() => _cachedSession();
+
   Future<SessionSnapshot?> _cachedSession() async {
     final userId = await _local.readDoc(localGlobalUser, _lastUserDoc);
     if (userId == null || userId.isEmpty) return null;

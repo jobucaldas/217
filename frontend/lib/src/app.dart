@@ -299,15 +299,24 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     User? user;
     var share = const ShareState(status: 'none');
     SessionSnapshot? session;
+    var fromDevice = false;
     try {
       await _api.loadPersistedApiBase();
       if (!_api.config.needsServerSetup) {
-        await _api.loadAuthConfig();
-        session = await _api.currentSession();
-        _clearRemindersIfConsentRequired(session);
-        if (session.user == null) unawaited(_cancelAllNotifications());
-        user = session.user;
-        share = session.share ?? share;
+        // A session kept on the device opens the app at once; the server is
+        // asked in the background (it may be off, and each try waits).
+        final cached = _webPage == null ? await _api.cachedSession() : null;
+        if (cached?.user != null) {
+          session = cached;
+          fromDevice = true;
+        } else {
+          await _api.loadAuthConfig();
+          session = await _api.currentSession();
+          _clearRemindersIfConsentRequired(session);
+          if (session.user == null) unawaited(_cancelAllNotifications());
+        }
+        user = session?.user;
+        share = session?.share ?? share;
       }
     } catch (_) {
       // Unreachable server: show the signed-out screen.
@@ -320,6 +329,15 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
       _setConsent(session);
       _loading = false;
     });
+    if (fromDevice) {
+      final epoch = _accountEpoch;
+      try {
+        // Null: the server was out of reach, the device's copy stands.
+        await _refreshSession(keepWhenOffline: true);
+      } catch (_) {}
+      if (!mounted || epoch != _accountEpoch) return;
+      user = _user;
+    }
     // The privacy pages stand alone: no invite offer, reminders or updates.
     if (_webPage != null) return;
     if (user != null && !_consentRequired) {
@@ -385,6 +403,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
 
   /// One session refresh at a time, however many requests were refused.
   Future<void> _recoverConsent() => _consentRecovery ??= _refreshSession()
+      .then<void>((_) {})
       .catchError((Object _) {})
       .whenComplete(() => _consentRecovery = null);
 
@@ -395,11 +414,17 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     unawaited(_recoverConsent());
   }
 
-  Future<void> _refreshSession() async {
+  /// Re-reads the session from the server and applies it. With
+  /// [keepWhenOffline] an unreachable server leaves what is shown alone.
+  /// Returns the applied session, or null when nothing was applied.
+  Future<SessionSnapshot?> _refreshSession({
+    bool keepWhenOffline = false,
+  }) async {
     final epoch = _accountEpoch;
     await _api.loadAuthConfig();
     final session = await _api.currentSession();
-    if (!mounted || epoch != _accountEpoch) return;
+    if (!mounted || epoch != _accountEpoch) return null;
+    if (keepWhenOffline && _api.offline.value) return null;
     _cancelOwnerReminderIfSessionLeavesOwner(session);
     _cancelPartnerAlertsIfSessionLeavesPartner(session);
     // Signed out meanwhile (e.g. account deleted on the privacy page): a
@@ -419,6 +444,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     if (session.consentRequired || session.user == null) {
       _navKey.currentState?.popUntil((route) => route.isFirst);
     }
+    return session;
   }
 
   Future<void> _refreshConsentSession() async {
