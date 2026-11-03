@@ -257,7 +257,7 @@ class CycleWindow {
 }
 
 /// Day kinds the calendar draws from cycle predictions.
-enum CycleDayKind { none, pms, predictedPeriod }
+enum CycleDayKind { none, pms, expectedPeriod }
 
 /// Logged period starts plus the next predicted periods / PMS windows.
 class CycleInfo {
@@ -299,7 +299,7 @@ class CycleInfo {
     for (final w in predictions) {
       if (w.pmsStart.year > 1 && _within(d, w.pmsStart, w.pmsEnd)) return CycleDayKind.pms;
       if (_within(d, w.periodStart, w.periodEnd)) {
-        return CycleDayKind.predictedPeriod;
+        return CycleDayKind.expectedPeriod;
       }
     }
     return CycleDayKind.none;

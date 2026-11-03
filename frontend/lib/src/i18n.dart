@@ -532,30 +532,30 @@ class Strings {
 
   // Cycle / PMS
   String get periodLabel => _t('Period', 'Menstruação', 'Regla');
-  String get predictedPeriod =>
-      _t('Predicted period', 'Menstruação prevista', 'Regla prevista');
+  String get expectedPeriod =>
+      _t('Expected period', 'Menstruação prevista', 'Regla prevista');
   String get expectedPms => _t('Expected PMS', 'TPM prevista', 'SPM previsto');
   String cyclePmsFrom(String pms) => _t(
         'Expected PMS from ~$pms',
         'TPM prevista a partir de ~$pms',
         'SPM previsto desde ~$pms',
       );
-  String cycleNextPeriod(String period) => _t(
-        'Next period ~$period',
-        'Próxima menstruação ~$period',
-        'Próxima regla ~$period',
+  String cycleExpectedPeriod(String period) => _t(
+        'Expected period ~$period',
+        'Menstruação prevista ~$period',
+        'Regla prevista ~$period',
       );
-  String get cyclePmsLikelyNow =>
-      _t('PMS likely now', 'Provável TPM agora', 'Posible SPM ahora');
+  String get cyclePmsNow =>
+      _t('Expected PMS now', 'TPM prevista agora', 'SPM previsto ahora');
   String get cyclePeriodNow => _t(
-        'Period expected around now',
-        'Menstruação prevista para agora',
-        'Regla prevista para estos días',
+        'Expected period now',
+        'Menstruação prevista agora',
+        'Regla prevista ahora',
       );
   String get cycleHintOwner => _t(
-        'Mark period days to see PMS predictions',
-        'Marque os dias de menstruação para ver a previsão de TPM',
-        'Marca los días de regla para ver la previsión de SPM',
+        'Mark period days to see the expected PMS',
+        'Marque os dias de menstruação para ver a TPM prevista',
+        'Marca los días de regla para ver el SPM previsto',
       );
   // Day sheet: the partner's read-only day, and pulling the sheet up
   String get pillLabel => _t('Pill', 'Pílula', 'Píldora');
@@ -564,21 +564,21 @@ class Strings {
   String get pillNotDue =>
       _t('Not due yet', 'Ainda não chegou', 'Todavía no toca');
   String get dayLogged => _t('Logged', 'Registrado', 'Registrado');
-  String get periodExpectedThisDay => _t(
-        'Expected around this day',
-        'Prevista para por volta deste dia',
-        'Prevista para estos días',
+  String get expectedPeriodThisDay => _t(
+        'Expected period this day',
+        'Menstruação prevista neste dia',
+        'Regla prevista este día',
       );
-  String get pmsLikelyThisDay => _t(
-        'Likely around this day',
-        'Provável por volta deste dia',
-        'Probable por estos días',
+  String get expectedPmsThisDay => _t(
+        'Expected PMS this day',
+        'TPM prevista neste dia',
+        'SPM previsto este día',
       );
   String get comingUp => _t('Coming up', 'Próximos dias', 'Próximamente');
   String get cycleNoPredictions => _t(
-        'No period or PMS predictions for now.',
-        'Sem previsões de menstruação ou TPM por enquanto.',
-        'Sin previsiones de regla ni SPM por ahora.',
+        'No expected period or PMS for now.',
+        'Sem menstruação ou TPM prevista por enquanto.',
+        'Sin regla ni SPM previstos por ahora.',
       );
   String get daySheetMore => _t('Show more', 'Mostrar mais', 'Mostrar más');
   String get daySheetLess =>
@@ -699,7 +699,7 @@ class Strings {
       );
   String partnerName(String name) =>
       name.trim().isEmpty ? _t('She', 'Ela', 'Ella') : name.trim();
-  String get pmsNotifTitle => _t('PMS expected', 'TPM prevista', 'SPM previsto');
+  String get pmsNotifTitle => _t('Expected PMS', 'TPM prevista', 'SPM previsto');
   String pmsNotifBody(String name, String start, String end) => _t(
         '${partnerFirstName(name)}: expected between ~$start - $end',
         '${partnerFirstName(name)}: prevista entre ~$start - $end',

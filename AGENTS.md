@@ -8,7 +8,7 @@ Android-first Flutter app for tracking anticonceptional intake via a calendar UI
 Roles are picked once after first sign-in (`users.role` is NULL until then):
 - **owner** — takes the pill; logs Taken/Missed, notes, intimacy and period days; creates the invite. Never joins another calendar.
 - **partner** — joins one owner's calendar read-only via invite; gets optional PMS and pill-not-logged alerts (separate toggles + times).
-Switching role is refused while a calendar is shared. Period days drive cycle/PMS predictions (`backend/internal/cycle`), drawn on both calendars (dashed amber ring = expected PMS, the 7 days before a predicted period; pink drop = period, outlined drop = predicted period).
+Switching role is refused while a calendar is shared. Period days drive cycle/PMS predictions (`backend/internal/cycle`), drawn on both calendars (dashed amber ring = expected PMS, the 7 days before an expected period; pink drop = period, outlined drop = expected period).
 Owners can record cycling, perimenopause, or menopause; menopause suppresses PMS, while perimenopause keeps PMS when period days are logged. "I don't have cycles" (`no_cycles`) is never suggested and suppresses all period and PMS predictions.
 Linked owner and partner can message each other (Messages screen, unread badge on the calendar app bar); bodies are sealed in `partner_notes` (`sender` = owner|partner).
 
@@ -78,7 +78,7 @@ Offline-first client: `ApiClient` keeps the last session, months, cycle and aler
 - `GET /api/entries?year=YYYY&month=MM`
 - `GET|POST|DELETE /api/entries/{date}` — body `{taken, notes, heart, period}`
 - `GET /api/stats?year=YYYY&month=MM`
-- `GET /api/cycle?today=YYYY-MM-DD` — period starts + next predicted periods/PMS windows; for the owner herself also `suggested_stage` (omitted when none) from `cycle.SuggestStage`: needs a birth month: menopause from age 45 when the latest logged period day is ≥ 12 months before `today`, perimenopause at age 45–55, only ever forward from the current stage, nothing from `no_cycles`; the home banner shows once per suggested value (marked seen when first displayed), afterwards only Settings › Personal and the cog dot
+- `GET /api/cycle?today=YYYY-MM-DD` — period starts + next expected periods/PMS windows; for the owner herself also `suggested_stage` (omitted when none) from `cycle.SuggestStage`: needs a birth month: menopause from age 45 when the latest logged period day is ≥ 12 months before `today`, perimenopause at age 45–55, only ever forward from the current stage, nothing from `no_cycles`; the home banner shows once per suggested value (marked seen when first displayed), afterwards only Settings › Personal and the cog dot
 
 ### Reminders (auth required)
 - `GET|PUT /api/reminders/preferences` — `{enabled, time, timezone, repeat_enabled, repeat_minutes}`; `repeat_minutes` is 1-120 and repeats the owner's own "pill not logged" reminder until logged or day end

@@ -1120,14 +1120,14 @@ class _CalendarScreenState extends State<CalendarScreen>
       }
     } else if (inPms) {
       cycleLines
-        ..add((pms: true, now: true, text: widget.strings.cyclePmsLikelyNow))
+        ..add((pms: true, now: true, text: widget.strings.cyclePmsNow))
         ..add((
           pms: false,
           now: false,
           text: widget.strings
-              .cycleNextPeriod(dates.shortDayMonth(next.periodStart)),
+              .cycleExpectedPeriod(dates.shortDayMonth(next.periodStart)),
         ));
-    } else if (todayKind == CycleDayKind.predictedPeriod) {
+    } else if (todayKind == CycleDayKind.expectedPeriod) {
       cycleLines
           .add((pms: false, now: true, text: widget.strings.cyclePeriodNow));
     } else {
@@ -1142,7 +1142,7 @@ class _CalendarScreenState extends State<CalendarScreen>
         pms: false,
         now: false,
         text: widget.strings
-            .cycleNextPeriod(dates.shortDayMonth(next.periodStart)),
+            .cycleExpectedPeriod(dates.shortDayMonth(next.periodStart)),
       ));
     }
 
@@ -1700,8 +1700,8 @@ class _DayCell extends StatelessWidget {
     final hasNote = entry != null && entry!.notes.trim().isNotEmpty;
     final hasHeart = entry != null && entry!.heart;
     final loggedPeriod = entry != null && entry!.period;
-    final predictedPeriod =
-        !loggedPeriod && cycleKind == CycleDayKind.predictedPeriod;
+    final expectedPeriod =
+        !loggedPeriod && cycleKind == CycleDayKind.expectedPeriod;
     final isPms = cycleKind == CycleDayKind.pms;
     final periodColor =
         bg == null ? App217Colors.period(brightness, palette) : onCell;
@@ -1710,7 +1710,7 @@ class _DayCell extends StatelessWidget {
       onTap: () => onTap(day),
       borderRadius: BorderRadius.circular(12),
       // Expected PMS days: a light, sparsely dashed ring in the gap around
-      // the cell (an estimate, like the outlined predicted-period drop), so
+      // the cell (an estimate, like the outlined expected-period drop), so
       // it reads on top of Taken/Missed fills and next to the selection ring.
       child: CustomPaint(
         key: isPms ? ValueKey('pms-${day.month}-${day.day}') : null,
@@ -1756,10 +1756,7 @@ class _DayCell extends StatelessWidget {
                   // label gives way to its marks; the bold number still shows it.
                   SizedBox(
                     height: 12,
-                    child: hasNote ||
-                            hasHeart ||
-                            loggedPeriod ||
-                            predictedPeriod
+                    child: hasNote || hasHeart || loggedPeriod || expectedPeriod
                         ? Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
@@ -1771,16 +1768,16 @@ class _DayCell extends StatelessWidget {
                                   size: 11,
                                   color: periodColor,
                                 ),
-                              if (predictedPeriod)
+                              if (expectedPeriod)
                                 Icon(
                                   Icons.water_drop_outlined,
                                   key: ValueKey(
-                                    'predicted-period-${day.month}-${day.day}',
+                                    'expected-period-${day.month}-${day.day}',
                                   ),
                                   size: 11,
                                   color: periodColor,
                                 ),
-                              if ((loggedPeriod || predictedPeriod) &&
+                              if ((loggedPeriod || expectedPeriod) &&
                                   (hasHeart || hasNote))
                                 const SizedBox(width: 2),
                               if (hasHeart)
