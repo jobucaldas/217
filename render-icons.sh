@@ -29,6 +29,8 @@ if ! command -v magick >/dev/null 2>&1; then
 fi
 
 out=.
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"; [ "$out" = . ] || rm -rf "$out"' EXIT
 [ "${1:-}" = "--check" ] && out="$(mktemp -d)"
 
 src=assets/branding
@@ -57,8 +59,6 @@ done
 mkdir -p "$fe/web"
 cp "$src/favicon.svg" "$fe/web/favicon.svg"
 # The PNG favicon is the wordmark in the brand red (the SVG one follows the color scheme).
-tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"; [ "$out" = . ] || rm -rf "$out"' EXIT
 sed 's/#1A1A1A/#F43F5E/' "$src/favicon.svg" > "$tmp/favicon-red.svg"
 png "$tmp/favicon-red.svg" 64 "$fe/web/favicon.png" PNG32
 
