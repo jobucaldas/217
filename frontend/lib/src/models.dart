@@ -297,8 +297,7 @@ class CycleInfo {
   CycleDayKind kindOf(DateTime day) {
     final d = DateTime(day.year, day.month, day.day);
     for (final w in predictions) {
-      if (w.pmsStart.year > 1 && _within(d, w.pmsStart, w.pmsEnd))
-        return CycleDayKind.pms;
+      if (w.pmsStart.year > 1 && _within(d, w.pmsStart, w.pmsEnd)) return CycleDayKind.pms;
       if (_within(d, w.periodStart, w.periodEnd)) {
         return CycleDayKind.expectedPeriod;
       }
