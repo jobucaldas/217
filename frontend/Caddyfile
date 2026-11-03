@@ -46,7 +46,9 @@
     # deploy shows up at once instead of an old bundle lingering in the cache.
     @appBare path /app
     handle @appBare {
-        redir * /app/?{query} 308
+        @withQuery expression {query} != ""
+        redir @withQuery /app/?{query} 308
+        redir * /app/ 308
     }
 
     # Missing files (.js, .wasm, .png...) must 404; only extension-less paths
