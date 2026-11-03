@@ -115,8 +115,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
   /// here to pick up theme, language and session changes made from them.
   final _changes = _ChangeTicker();
   final ValueNotifier<int> _stageChanges = ValueNotifier(0);
-  late final StageSuggestion _stageSuggestion =
-      StageSuggestion(prefs: _prefs);
+  late final StageSuggestion _stageSuggestion = StageSuggestion(prefs: _prefs);
   late final DailyReminderSyncQueue _dailyReminderSyncQueue =
       DailyReminderSyncQueue(
     widget.dailyReminderScheduler ?? syncLocalDailyReminder,
@@ -310,8 +309,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
           session = cached;
           fromDevice = true;
         } else {
-          await _api.loadAuthConfig();
-          session = await _api.currentSession();
+          session = await _loadConfigAndSession();
           _clearRemindersIfConsentRequired(session);
           if (session.user == null) unawaited(_cancelAllNotifications());
         }
@@ -414,6 +412,18 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     unawaited(_recoverConsent());
   }
 
+  /// Auth config and session asked together, so an unreachable server costs
+  /// one request timeout instead of two. The config load never throws.
+  Future<SessionSnapshot> _loadConfigAndSession() async {
+    final config = _api.loadAuthConfig();
+    final session = _api.currentSession();
+    try {
+      return await session;
+    } finally {
+      await config;
+    }
+  }
+
   /// Re-reads the session from the server and applies it. With
   /// [keepWhenOffline] an unreachable server leaves what is shown alone.
   /// Returns the applied session, or null when nothing was applied.
@@ -421,12 +431,12 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     bool keepWhenOffline = false,
   }) async {
     final epoch = _accountEpoch;
-    await _api.loadAuthConfig();
-    final session = await _api.currentSession();
+    final session = await _loadConfigAndSession();
     if (!mounted || epoch != _accountEpoch) return null;
     if (keepWhenOffline && _api.offline.value) return null;
     _cancelOwnerReminderIfSessionLeavesOwner(session);
     _cancelPartnerAlertsIfSessionLeavesPartner(session);
+    if (session.user == null) unawaited(_cancelAllNotifications());
     // Signed out meanwhile (e.g. account deleted on the privacy page): a
     // message shown for this account must not outlive its session.
     if (_user != null && session.user == null) {

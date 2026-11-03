@@ -3,6 +3,7 @@
 #
 #   frontend/android/.../mipmap-*/ic_launcher.png      Android launcher (legacy)
 #   frontend/android/.../mipmap-*/ic_launcher_foreground.png  adaptive icon + Android 12 splash
+#   frontend/android/.../mipmap-*/ic_launcher_monochrome.png  Android 13 themed icon
 #   frontend/web/icons/*, favicon.svg, favicon.png     web app and manifest
 #   frontend/linux/runner/icon.png                     Linux (AppImage)
 #   frontend/windows/runner/resources/app_icon.ico     Windows (exe, installer)
@@ -48,6 +49,11 @@ done
 # Adaptive icon foreground (108dp canvas); res/mipmap-anydpi-v26 pairs it with a black background.
 for d in mdpi:108 hdpi:162 xhdpi:216 xxhdpi:324 xxxhdpi:432; do
   png "$src/app-icon-foreground.svg" "${d#*:}" "$fe/android/app/src/main/res/mipmap-${d%:*}/ic_launcher_foreground.png" PNG32
+done
+
+# Android 13 themed icon layer: single colour, same canvas as the foreground.
+for d in mdpi:108 hdpi:162 xhdpi:216 xxhdpi:324 xxxhdpi:432; do
+  png "$src/app-icon-monochrome.svg" "${d#*:}" "$fe/android/app/src/main/res/mipmap-${d%:*}/ic_launcher_monochrome.png" PNG32
 done
 
 for s in 192 512; do

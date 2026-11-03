@@ -54,7 +54,7 @@ void main() {
     );
     expect(pt.pillNotifTitle, 'Remédio não tomado');
     expect(pt.pillNotifBody('Ana Souza', pt.dates.time(oct31)),
-        'Ana: verificado às 14:05');
+        'Ana: sem registro às 14:05');
     expect(const Strings(AppLanguage.en).dates.numericDayMonth(start), '11/02');
   });
 }
