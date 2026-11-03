@@ -13,7 +13,9 @@ COPY pubspec.yaml pubspec.lock ./
 COPY packages packages
 RUN git config --global --add safe.directory /sdks/flutter && flutter pub get
 COPY . .
-RUN flutter build web --release --no-web-resources-cdn --pwa-strategy=none --base-href /app/
+ARG APP_VERSION=
+RUN flutter build web --release --no-web-resources-cdn --pwa-strategy=none --base-href /app/ \
+    --dart-define=APP_VERSION="$APP_VERSION"
 
 FROM docker.io/library/caddy:alpine AS runtime
 RUN adduser -D -H -u 65532 -g nonroot nonroot \

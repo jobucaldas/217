@@ -353,4 +353,38 @@ void main() {
       expect(find.widgetWithText(TextField, 'Ana'), findsOneWidget);
     });
   }
+
+  testWidgets('bottom of settings shows the build version (dev when unset)',
+      (tester) async {
+    final api = ApiClient(AppConfig.fromEnvironment());
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildApp217Theme(
+          brightness: Brightness.light,
+          palette: AppPalette.blue,
+        ),
+        home: SettingsPage(
+          api: api,
+          strings: const Strings(AppLanguage.en),
+          language: AppLanguage.en,
+          themeMode: ThemeMode.system,
+          palette: AppPalette.blue,
+          onLanguageChanged: (_) {},
+          onThemeModeChanged: (_) {},
+          onPaletteChanged: (_) {},
+          onApiBaseChanged: () {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('app-version')),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    // Tests run without --dart-define=APP_VERSION, so a dev build shows "dev".
+    expect(find.text('dev'), findsOneWidget);
+    expect(find.byKey(const ValueKey('app-version')), findsOneWidget);
+  });
 }
