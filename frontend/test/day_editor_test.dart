@@ -255,8 +255,7 @@ void main() {
     expect(find.byIcon(Icons.favorite), findsWidgets);
   });
 
-  testWidgets(
-      'Em aberto: reopen after Done shows persisted note + heart',
+  testWidgets('Em aberto: reopen after Done shows persisted note + heart',
       (tester) async {
     final api = _FakeApi();
     DayEditResult? committed;
@@ -371,7 +370,7 @@ void main() {
     expect(result?.heart, isTrue);
   });
 
-  testWidgets('unselecting status clears existing mark immediately',
+  testWidgets('unselecting status keeps the heart and the note',
       (tester) async {
     DayEditResult? result;
     await tester.pumpWidget(
@@ -407,7 +406,45 @@ void main() {
 
     expect(find.text('Clear mark'), findsNothing);
     expect(find.text('Cancel'), findsNothing);
-    // Unselect Taken → autosave clear (no Save).
+    // Unselect Taken → only the status goes.
+    await tester.tap(find.text('Taken'));
+    await tester.pumpAndSettle();
+    expect(result?.clear, isFalse);
+    expect(result?.taken, isNull);
+    expect(result?.heart, isTrue);
+  });
+
+  testWidgets('unselecting the only mark deletes the entry', (tester) async {
+    DayEditResult? result;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildApp217Theme(
+          brightness: Brightness.light,
+          palette: AppPalette.blue,
+        ),
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => TextButton(
+              onPressed: () async {
+                result = await showModalBottomSheet<DayEditResult>(
+                  context: context,
+                  builder: (_) => const DayEditorSheet(
+                    strings: Strings(AppLanguage.en),
+                    date: '2026-10-01',
+                    initialTaken: true,
+                    initialNotes: '',
+                    hadEntry: true,
+                  ),
+                );
+              },
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Taken'));
     await tester.pumpAndSettle();
     expect(result?.clear, isTrue);
@@ -522,8 +559,7 @@ void main() {
     expect(find.byIcon(Icons.favorite), findsWidgets);
   });
 
-  testWidgets(
-      'onCommit: heart-only Done persists with status left unchanged',
+  testWidgets('onCommit: heart-only Done persists with status left unchanged',
       (tester) async {
     DayEditResult? committed;
     await tester.pumpWidget(

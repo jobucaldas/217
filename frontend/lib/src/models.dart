@@ -242,6 +242,10 @@ class CycleWindow {
   final DateTime pmsStart;
   final DateTime pmsEnd;
 
+  /// False when the server sent no PMS window (menopause, no cycles): the
+  /// dates then hold the year-1 placeholder.
+  bool get hasPms => pmsStart.year > 1;
+
   static DateTime _day(Object? raw) {
     if (raw == null || raw == '') return DateTime(1);
     final parsed = DateTime.parse(raw as String);
@@ -255,6 +259,11 @@ class CycleWindow {
         pmsEnd: _day(json['pms_end']),
       );
 }
+
+/// Whether [day] lies after [today], by calendar date (time of day ignored).
+bool isFutureDay(DateTime day, DateTime today) =>
+    DateTime(day.year, day.month, day.day)
+        .isAfter(DateTime(today.year, today.month, today.day));
 
 /// Day kinds the calendar draws from cycle predictions.
 enum CycleDayKind { none, pms, expectedPeriod }
@@ -297,7 +306,7 @@ class CycleInfo {
   CycleDayKind kindOf(DateTime day) {
     final d = DateTime(day.year, day.month, day.day);
     for (final w in predictions) {
-      if (w.pmsStart.year > 1 && _within(d, w.pmsStart, w.pmsEnd)) return CycleDayKind.pms;
+      if (w.hasPms && _within(d, w.pmsStart, w.pmsEnd)) return CycleDayKind.pms;
       if (_within(d, w.periodStart, w.periodEnd)) {
         return CycleDayKind.expectedPeriod;
       }

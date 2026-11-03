@@ -251,7 +251,7 @@ void main() {
     expect(
       find.descendant(
           of: find.byKey(const ValueKey('day-chip-pill')),
-          matching: find.text('Not logged yet')),
+          matching: find.text('Open')),
       findsOneWidget,
     );
     expect(shown(const ValueKey('day-coming-up-title')), isFalse);
@@ -599,14 +599,15 @@ void main() {
     for (final k in [...tiles, ...coming, 'day-coming-up-title']) {
       expect(shown(ValueKey(k)), isTrue, reason: k);
     }
-    // Equal squares.
+    // Equal tiles, square or as tall as their content needs.
     final sizes = [
       for (final k in [...tiles, ...coming])
         tester.getSize(find.byKey(ValueKey(k))),
     ];
     for (final size in sizes) {
-      expect(size.width, moreOrLessEquals(size.height, epsilon: 0.01));
-      expect(size.width, moreOrLessEquals(sizes.first.width, epsilon: 0.01));
+      expect(size.height, greaterThanOrEqualTo(size.width - 0.01));
+      expect(size.height - size.width, lessThan(12));
+      expect(size, sizes.first);
     }
     expect(
       find.descendant(

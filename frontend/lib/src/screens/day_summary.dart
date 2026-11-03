@@ -278,7 +278,12 @@ class DaySummaryBar extends StatelessWidget {
           children: [
             if (note.isNotEmpty && !noteAsTag) ...[
               // Capped to three lines; tapping opens the whole note.
-              DayNotePanel(notes: note, maxLines: 3, onTap: onOpenNote),
+              DayNotePanel(
+                notes: note,
+                maxLines: 3,
+                onTap: onOpenNote,
+                semanticsLabel: strings.notes,
+              ),
               const SizedBox(height: 8),
             ],
             _summary(compact, tagWrap, actions),
@@ -370,7 +375,7 @@ class _DayTagState extends State<_DayTag> {
           onTap: toggle,
           child: AnimatedSize(
             duration: const Duration(milliseconds: 150),
-            alignment: Alignment.centerLeft,
+            alignment: AlignmentDirectional.centerStart,
             child: ConstrainedBox(
               // At least a 32px touch target while closed.
               constraints: const BoxConstraints(minWidth: 36, minHeight: 32),
@@ -418,9 +423,14 @@ class DayNotePanel extends StatelessWidget {
     this.alignment = Alignment.topCenter,
     this.maxLines,
     this.onTap,
+    this.semanticsLabel,
   });
 
   final String notes;
+
+  /// Announced before the note (e.g. "Note"); the panel reads as a button
+  /// when it opens the note.
+  final String? semanticsLabel;
 
   /// Opens the full note; without it the panel ignores taps.
   final VoidCallback? onTap;
@@ -485,13 +495,18 @@ class DayNotePanel extends StatelessWidget {
               ],
             ),
           );
+          final label =
+              semanticsLabel == null ? notes : '$semanticsLabel: $notes';
           return Align(
             alignment: alignment,
-            child: onTap == null
-                ? panel
-                : Semantics(
-                    button: true,
-                    child: Material(
+            child: Semantics(
+              button: onTap != null,
+              label: label,
+              excludeSemantics: true,
+              onTap: onTap,
+              child: onTap == null
+                  ? panel
+                  : Material(
                       type: MaterialType.transparency,
                       child: InkWell(
                         borderRadius: BorderRadius.circular(18),
@@ -499,7 +514,7 @@ class DayNotePanel extends StatelessWidget {
                         child: panel,
                       ),
                     ),
-                  ),
+            ),
           );
         },
       ),
@@ -559,6 +574,8 @@ Future<void> showDayNoteCard(
   required String title,
   required ValueListenable<String> notes,
 }) {
+  // One close per card, however often the empty note rebuilds.
+  var closing = false;
   return showDialog<void>(
     context: context,
     useRootNavigator: true,
@@ -573,9 +590,12 @@ Future<void> showDayNoteCard(
         valueListenable: notes,
         builder: (_, value, __) {
           if (value.isEmpty) {
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (dialogContext.mounted) Navigator.of(dialogContext).maybePop();
-            });
+            if (!closing) {
+              closing = true;
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (dialogContext.mounted) closeOwnRoute(dialogContext);
+              });
+            }
             return const SizedBox.shrink();
           }
           return AlertDialog(
@@ -643,6 +663,23 @@ class DayEditing {
   final Widget status;
 }
 
+/// What an open day sheet shows besides the editor's own state: the logged
+/// entry, the predictions and today's date. The calendar feeds it a new one
+/// whenever any of them changes, so an open sheet never goes stale.
+class DayView {
+  const DayView(
+      {required this.entry, required this.cycle, required this.today});
+
+  final Entry? entry;
+  final CycleInfo cycle;
+  final DateTime today;
+
+  bool sameAs(DayView other) =>
+      identical(entry, other.entry) &&
+      identical(cycle, other.cycle) &&
+      today == other.today;
+}
+
 /// A day sheet that can be pulled up, for both sides of a calendar.
 ///
 /// Editable (the owner's past days and today, [editor] set): at rest the
@@ -662,28 +699,21 @@ class ExpandableDaySheet extends StatefulWidget {
     required this.strings,
     required this.palette,
     required this.day,
-    required this.today,
-    required this.notes,
-    required this.cycle,
+    required this.view,
     this.editor,
-    this.entry,
     this.partner = false,
   });
 
   final Strings strings;
   final AppPalette palette;
   final DateTime day;
-  final DateTime today;
 
-  /// The day's note, followed live. The [editor]'s note, when set, wins.
-  final ValueListenable<String> notes;
-  final CycleInfo cycle;
+  /// The day's entry, the predictions and today, followed live. The
+  /// [editor]'s note, when set, wins over the entry's.
+  final ValueListenable<DayView> view;
 
   /// The owner's editor; null when the day is read-only.
   final DayEditing? editor;
-
-  /// What was logged for [day]; read by the read-only chips and cards.
-  final Entry? entry;
 
   /// Read by a partner rather than the owner (lock on future days).
   final bool partner;
@@ -710,6 +740,11 @@ class _ExpandableDaySheetState extends State<ExpandableDaySheet> {
   double? _barPx;
   double? _contentPx;
 
+  /// What the last measurement was scheduled for: width, text scale and
+  /// everything that changes the content. Measuring again waits for a change.
+  Object? _measureSig;
+  bool _measureQueued = false;
+
   /// Sheet sizes, as fractions of the room the modal gives it.
   double _resting = 0.25;
   double _max = 0.7;
@@ -731,6 +766,17 @@ class _ExpandableDaySheetState extends State<ExpandableDaySheet> {
     _controller.dispose();
     _progress.dispose();
     super.dispose();
+  }
+
+  /// Measures once after the frame when [sig] is not what was last measured.
+  void _measureIfChanged(Object sig) {
+    if (sig == _measureSig || _measureQueued) return;
+    _measureSig = sig;
+    _measureQueued = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _measureQueued = false;
+      _measure();
+    });
   }
 
   /// Fits the resting and open sizes to what was laid out.
@@ -826,12 +872,13 @@ class _ExpandableDaySheetState extends State<ExpandableDaySheet> {
 
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<String>(
-      valueListenable: widget.notes,
-      builder: (context, note, _) {
-        WidgetsBinding.instance.addPostFrameCallback((_) => _measure());
-        return _build(context, widget.editor?.notes.trim() ?? note);
-      },
+    return ValueListenableBuilder<DayView>(
+      valueListenable: widget.view,
+      builder: (context, view, _) => _build(
+        context,
+        view,
+        widget.editor?.notes.trim() ?? view.entry?.notes.trim() ?? '',
+      ),
     );
   }
 
@@ -849,7 +896,7 @@ class _ExpandableDaySheetState extends State<ExpandableDaySheet> {
   static double _span(double t, double begin, double end) =>
       Curves.easeInOut.transform(((t - begin) / (end - begin)).clamp(0.0, 1.0));
 
-  Widget _build(BuildContext context, String note) {
+  Widget _build(BuildContext context, DayView view, String note) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final strings = widget.strings;
@@ -894,13 +941,13 @@ class _ExpandableDaySheetState extends State<ExpandableDaySheet> {
         builder: (context, t, child) {
           final shown = 1 - _span(t, 0, 0.45);
           return Align(
-            alignment: Alignment.centerRight,
+            alignment: AlignmentDirectional.centerEnd,
             widthFactor: 1 - _span(t, 0, 0.5),
             child: _fade(shown, child!),
           );
         },
         child: Padding(
-          padding: const EdgeInsets.only(left: 8),
+          padding: const EdgeInsetsDirectional.only(start: 8),
           child: editor.actions,
         ),
       );
@@ -956,8 +1003,8 @@ class _ExpandableDaySheetState extends State<ExpandableDaySheet> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: editor != null
-            ? _ownerCards(context, note, editor)
-            : _readOnlyCards(context, note),
+            ? _ownerCards(context, view, note, editor)
+            : _readOnlyCards(context, view, note),
       ),
     );
     // What shows at rest and fades away as the sheet opens: the chips of a
@@ -999,11 +1046,11 @@ class _ExpandableDaySheetState extends State<ExpandableDaySheet> {
                     widget.partner ? 'partner-day-glance' : 'owner-day-glance'),
                 strings: strings,
                 palette: widget.palette,
-                entry: widget.entry,
+                entry: view.entry,
                 note: note,
-                cycleKind: widget.cycle.kindOf(widget.day),
-                cycleDetail: _cycleDetail(context),
-                isFuture: widget.day.isAfter(widget.today),
+                cycleKind: view.cycle.kindOf(widget.day),
+                cycleDetail: _cycleDetail(context, view),
+                isFuture: isFutureDay(widget.day, view.today),
               ),
               hint,
             ],
@@ -1083,6 +1130,14 @@ class _ExpandableDaySheetState extends State<ExpandableDaySheet> {
         final height = constraints.maxHeight;
         _height = height;
         final scale = MediaQuery.textScalerOf(context).scale(1);
+        _measureIfChanged((
+          constraints.maxWidth,
+          scale,
+          note,
+          view,
+          editor?.heart,
+          editor?.period,
+        ));
         // First frame: estimates until the parts are measured. At rest the
         // date and the chips (or the pinned bar), clear of the system
         // navigation bar; open, everything.
@@ -1163,11 +1218,12 @@ class _ExpandableDaySheetState extends State<ExpandableDaySheet> {
   /// The owner's open sheet: sex and period as tiles that still edit the
   /// day (plus the day's prediction), the note as a card, then what is
   /// coming up.
-  List<Widget> _ownerCards(BuildContext context, String note, DayEditing e) {
+  List<Widget> _ownerCards(
+      BuildContext context, DayView view, String note, DayEditing e) {
     final strings = widget.strings;
     final brightness = Theme.of(context).brightness;
     final scheme = Theme.of(context).colorScheme;
-    final cycleKind = widget.cycle.kindOf(widget.day);
+    final cycleKind = view.cycle.kindOf(widget.day);
     return [
       _TileGrid(
         children: [
@@ -1189,8 +1245,8 @@ class _ExpandableDaySheetState extends State<ExpandableDaySheet> {
             value: e.period
                 ? strings.dayLogged
                 : (cycleKind == CycleDayKind.expectedPeriod
-                    ? (_viewingToday
-                        ? '${strings.dayExpected} ${_until(context)}'
+                    ? (_viewingToday(view)
+                        ? '${strings.dayExpected} ${_until(context, view)}'
                         : strings.dayExpected)
                     : strings.dayTapToLog),
             muted: !e.period && cycleKind != CycleDayKind.expectedPeriod,
@@ -1203,7 +1259,7 @@ class _ExpandableDaySheetState extends State<ExpandableDaySheet> {
               color: App217Colors.pms(brightness, widget.palette),
               icon: null,
               title: strings.expectedPms,
-              value: _cycleDetail(context),
+              value: _cycleDetail(context, view),
             ),
         ],
       ),
@@ -1216,13 +1272,13 @@ class _ExpandableDaySheetState extends State<ExpandableDaySheet> {
         onSave: e.onSaveNote,
       ),
       const SizedBox(height: 22),
-      _comingUp(context, owner: true),
+      _comingUp(context, view, owner: true),
     ];
   }
 
   /// A read-only day: the pill, sex and the cycle as tiles, the note as a
   /// card, then what is coming up.
-  List<Widget> _readOnlyCards(BuildContext context, String note) {
+  List<Widget> _readOnlyCards(BuildContext context, DayView view, String note) {
     final strings = widget.strings;
     final scheme = Theme.of(context).colorScheme;
     final brightness = Theme.of(context).brightness;
@@ -1231,11 +1287,11 @@ class _ExpandableDaySheetState extends State<ExpandableDaySheet> {
       palette: widget.palette,
       brightness: brightness,
       scheme: scheme,
-      entry: widget.entry,
+      entry: view.entry,
       note: note,
-      cycleKind: widget.cycle.kindOf(widget.day),
-      cycleDetail: _cycleDetail(context),
-      isFuture: widget.day.isAfter(widget.today),
+      cycleKind: view.cycle.kindOf(widget.day),
+      cycleDetail: _cycleDetail(context, view),
+      isFuture: isFutureDay(widget.day, view.today),
     );
     return [
       _TileGrid(
@@ -1260,18 +1316,18 @@ class _ExpandableDaySheetState extends State<ExpandableDaySheet> {
         ),
       ],
       const SizedBox(height: 22),
-      _comingUp(context, owner: !widget.partner),
+      _comingUp(context, view, owner: !widget.partner),
     ];
   }
 
-  bool get _viewingToday => DateUtils.isSameDay(widget.day, widget.today);
+  bool _viewingToday(DayView view) => DateUtils.isSameDay(widget.day, view.today);
 
   /// "until ~date": the last day of the PMS days or period [widget.day]
   /// falls in.
-  String _until(BuildContext context) {
-    final w = widget.cycle.windowAt(widget.day);
+  String _until(BuildContext context, DayView view) {
+    final w = view.cycle.windowAt(widget.day);
     if (w == null) return '';
-    final end = widget.cycle.kindOf(widget.day) == CycleDayKind.pms
+    final end = view.cycle.kindOf(widget.day) == CycleDayKind.pms
         ? w.pmsEnd
         : w.periodEnd;
     return widget.strings
@@ -1280,31 +1336,31 @@ class _ExpandableDaySheetState extends State<ExpandableDaySheet> {
 
   /// What the day's own PMS / expected period card says: "This day", or
   /// for today "Today" and until when it lasts.
-  String _cycleDetail(BuildContext context) => _viewingToday
-      ? '${widget.strings.today}\n${_until(context)}'
+  String _cycleDetail(BuildContext context, DayView view) => _viewingToday(view)
+      ? '${widget.strings.today}\n${_until(context, view)}'
       : widget.strings.dayThisDay;
 
   /// The "Coming up" section: a tile for the next PMS window and one for
   /// the next period, or why there are none. What today's own cards already
   /// show (viewing today) is left out.
-  Widget _comingUp(BuildContext context, {required bool owner}) {
+  Widget _comingUp(BuildContext context, DayView view, {required bool owner}) {
     final strings = widget.strings;
     final scheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
     final brightness = Theme.of(context).brightness;
     final dates = strings.dates;
-    final cycle = widget.cycle;
-    final todayKind = cycle.kindOf(widget.today);
-    var next = cycle.nextWindow(widget.today);
+    final cycle = view.cycle;
+    final todayKind = cycle.kindOf(view.today);
+    var next = cycle.nextWindow(view.today);
     // Viewing today during an expected period: that period is on its card,
     // so the next one comes up.
     if (next != null &&
-        _viewingToday &&
+        _viewingToday(view) &&
         todayKind == CycleDayKind.expectedPeriod) {
       next = cycle.windowAfter(next);
     }
     final current =
-        next != null && identical(next, cycle.windowAt(widget.today));
+        next != null && identical(next, cycle.windowAt(view.today));
     final pmsColor = App217Colors.pms(brightness, widget.palette);
     final periodColor = App217Colors.period(brightness, widget.palette);
     // Same facts as the calendar's header, soonest first.
@@ -1323,7 +1379,7 @@ class _ExpandableDaySheetState extends State<ExpandableDaySheet> {
       } else {
         if (current && todayKind == CycleDayKind.pms) {
           // Today's own card says it when today is the day viewed.
-          if (!_viewingToday) {
+          if (!_viewingToday(view)) {
             tiles.add(_InfoTile(
               key: const ValueKey('day-coming-pms'),
               color: pmsColor,
@@ -1332,7 +1388,7 @@ class _ExpandableDaySheetState extends State<ExpandableDaySheet> {
               value: until(next.pmsEnd),
             ));
           }
-        } else if (next.pmsStart.year >= 2) {
+        } else if (next.hasPms) {
           tiles.add(_InfoTile(
             key: const ValueKey('day-coming-pms'),
             color: pmsColor,
@@ -1361,7 +1417,7 @@ class _ExpandableDaySheetState extends State<ExpandableDaySheet> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Padding(
-          padding: const EdgeInsets.only(left: 2, bottom: 10),
+          padding: const EdgeInsetsDirectional.only(start: 2, bottom: 10),
           child: Text(
             strings.comingUp,
             key: const ValueKey('day-coming-up-title'),
@@ -1613,7 +1669,10 @@ class _InfoChip extends StatelessWidget {
   }
 }
 
-/// Equal square tiles, three to a row (two on very narrow panes).
+/// Equal tiles, three to a row (fewer where they would get too narrow).
+/// Tiles are square where their content fits and as tall as it needs
+/// otherwise (narrow phones, large text); they grow to fill the row, so a
+/// wide sheet has no gap on its far side.
 class _TileGrid extends StatelessWidget {
   const _TileGrid({required this.children});
 
@@ -1621,21 +1680,52 @@ class _TileGrid extends StatelessWidget {
 
   static const gap = 10.0;
 
+  /// Narrowest a tile gets before the row takes one tile less.
+  static const minWidth = 96.0;
+
+  /// Tallest a square tile grows.
+  static const maxSquare = 140.0;
+
+  /// Height the tile's content needs: padding, the icon row, the title and a
+  /// value of two lines, at the text scale tiles clamp to ([_InfoTile]).
+  static double contentHeight(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    final scaler = MediaQuery.textScalerOf(context).clamp(
+      maxScaleFactor: _InfoTile.maxTextScale,
+    );
+    double line(TextStyle? style, double height) =>
+        scaler.scale(style?.fontSize ?? 14) * (style?.height ?? height);
+    return 20 + // padding
+        30 + // icon
+        6 + // air between the icon and the text
+        line(text.labelLarge, 1.45) +
+        1 +
+        2 * line(text.titleSmall, 1.15) +
+        2;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final floor = contentHeight(context);
     return LayoutBuilder(
       builder: (context, constraints) {
-        final cols = constraints.maxWidth < 220 ? 2 : 3;
-        final side = math.min(
-          (constraints.maxWidth - gap * (cols - 1)) / cols,
-          140.0,
-        );
+        final width = constraints.maxWidth;
+        var cols = ((width + gap) / (minWidth + gap)).floor().clamp(1, 3);
+        // Only a few tiles on a wide sheet: share the row among them (a
+        // phone keeps the size its three-up row has).
+        if (children.isNotEmpty &&
+            children.length < cols &&
+            width > 3 * maxSquare + 2 * gap) {
+          cols = children.length;
+        }
+        final tileWidth = (width - gap * (cols - 1)) / cols;
+        final tileHeight = math.max(floor, math.min(tileWidth, maxSquare));
         return Wrap(
           spacing: gap,
           runSpacing: gap,
           children: [
             for (final c in children)
-              SizedBox.square(dimension: side, child: c),
+              SizedBox(width: tileWidth, height: tileHeight, child: c),
           ],
         );
       },
@@ -1648,6 +1738,9 @@ class _TileGrid extends StatelessWidget {
 /// With [onTap] it is one of the owner's controls: a corner mark (+ / check)
 /// and a ripple. Without it, it only reads out the day.
 class _InfoTile extends StatelessWidget {
+  /// Device text scale the tile's content is clamped to.
+  static const maxTextScale = 1.15;
+
   const _InfoTile({
     super.key,
     required this.color,
@@ -1689,7 +1782,7 @@ class _InfoTile extends StatelessWidget {
       padding: const EdgeInsets.all(10),
       // Big device text must not push the tile out of its square.
       child: MediaQuery.withClampedTextScaling(
-        maxScaleFactor: 1.15,
+        maxScaleFactor: maxTextScale,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1717,7 +1810,7 @@ class _InfoTile extends StatelessWidget {
               children: [
                 FittedBox(
                   fit: BoxFit.scaleDown,
-                  alignment: Alignment.centerLeft,
+                  alignment: AlignmentDirectional.centerStart,
                   child: Text(
                     title,
                     maxLines: 1,
@@ -1755,7 +1848,7 @@ class _InfoTile extends StatelessWidget {
     return Semantics(
       button: true,
       toggled: selected,
-      label: title,
+      label: '$title, $value',
       excludeSemantics: true,
       onTap: onTap,
       child: Material(
@@ -2170,7 +2263,20 @@ class _FactMark extends StatelessWidget {
   }
 }
 
-/// Pops the dialog it sits in when [signal] changes.
+/// Closes the route [context] belongs to, whatever is on top of it now
+/// (a plain pop would close the wrong route).
+void closeOwnRoute(BuildContext context) {
+  final route = ModalRoute.of(context);
+  final navigator = route?.navigator;
+  if (route == null || navigator == null || !route.isActive) return;
+  if (route.isCurrent) {
+    navigator.pop();
+  } else {
+    navigator.removeRoute(route);
+  }
+}
+
+/// Closes the route it sits in when [signal] changes.
 class CloseOnSignal extends StatefulWidget {
   const CloseOnSignal({super.key, required this.signal, required this.child});
 
@@ -2182,7 +2288,7 @@ class CloseOnSignal extends StatefulWidget {
 }
 
 class CloseOnSignalState extends State<CloseOnSignal> {
-  late final int _opened;
+  late int _opened;
 
   @override
   void initState() {
@@ -2192,15 +2298,23 @@ class CloseOnSignalState extends State<CloseOnSignal> {
   }
 
   @override
+  void didUpdateWidget(covariant CloseOnSignal oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.signal, widget.signal)) {
+      oldWidget.signal.removeListener(_check);
+      _opened = widget.signal.value;
+      widget.signal.addListener(_check);
+    }
+  }
+
+  @override
   void dispose() {
     widget.signal.removeListener(_check);
     super.dispose();
   }
 
   void _check() {
-    if (widget.signal.value != _opened && mounted) {
-      Navigator.of(context).maybePop();
-    }
+    if (widget.signal.value != _opened && mounted) closeOwnRoute(context);
   }
 
   @override
