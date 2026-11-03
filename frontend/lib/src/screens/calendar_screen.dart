@@ -611,9 +611,8 @@ class _CalendarScreenState extends State<CalendarScreen>
     _snapCommit = 0;
     if (commit == 0) return false;
     _month = DateTime(_month.year, _month.month + commit);
-    final width = _carouselWidth > 0
-        ? _carouselWidth
-        : MediaQuery.sizeOf(context).width;
+    final width =
+        _carouselWidth > 0 ? _carouselWidth : MediaQuery.sizeOf(context).width;
     _dragPx += commit * width;
     return true;
   }
@@ -924,10 +923,10 @@ class _CalendarScreenState extends State<CalendarScreen>
     }
     final now = _today;
     final target = DateTime(now.year, now.month);
-    final delta = (target.year - _month.year) * 12 + target.month - _month.month;
-    final width = _carouselWidth > 0
-        ? _carouselWidth
-        : MediaQuery.sizeOf(context).width;
+    final delta =
+        (target.year - _month.year) * 12 + target.month - _month.month;
+    final width =
+        _carouselWidth > 0 ? _carouselWidth : MediaQuery.sizeOf(context).width;
     if (delta == 0) {
       // Already here (a settled snap may have left it off-centre).
       if (_dragPx != 0) _animateMonthTo(0, commitDelta: 0);
@@ -975,13 +974,13 @@ class _CalendarScreenState extends State<CalendarScreen>
     final crossed = pos.floor().clamp(0, steps);
     final month =
         DateTime(_jumpFrom.year, _jumpFrom.month + _jumpSteps.sign * crossed);
-    final width = _carouselWidth > 0
-        ? _carouselWidth
-        : MediaQuery.sizeOf(context).width;
+    final width =
+        _carouselWidth > 0 ? _carouselWidth : MediaQuery.sizeOf(context).width;
     final changed = month != _month;
     setState(() {
       _month = month;
-      _dragPx = crossed >= steps ? 0 : -_jumpSteps.sign * (pos - crossed) * width;
+      _dragPx =
+          crossed >= steps ? 0 : -_jumpSteps.sign * (pos - crossed) * width;
       if (changed) _showCachedMonths();
     });
     if (changed) _monthShown();
@@ -1289,28 +1288,34 @@ class _CalendarScreenState extends State<CalendarScreen>
                     ],
                   ),
                 ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                child: Row(
-                  children: [
-                    IconButton(
-                      tooltip: widget.strings.previousMonth,
-                      onPressed: () => _shiftMonth(-1),
-                      icon: const Icon(Icons.chevron_left),
+              Center(
+                child: ConstrainedBox(
+                  constraints:
+                      const BoxConstraints(maxWidth: _calendarMaxWidth),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: Row(
+                      children: [
+                        IconButton(
+                          tooltip: widget.strings.previousMonth,
+                          onPressed: () => _shiftMonth(-1),
+                          icon: const Icon(Icons.chevron_left),
+                        ),
+                        Expanded(
+                          child: Text(
+                            monthLabel,
+                            textAlign: TextAlign.center,
+                            style: text.titleLarge,
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: widget.strings.nextMonth,
+                          onPressed: () => _shiftMonth(1),
+                          icon: const Icon(Icons.chevron_right),
+                        ),
+                      ],
                     ),
-                    Expanded(
-                      child: Text(
-                        monthLabel,
-                        textAlign: TextAlign.center,
-                        style: text.titleLarge,
-                      ),
-                    ),
-                    IconButton(
-                      tooltip: widget.strings.nextMonth,
-                      onPressed: () => _shiftMonth(1),
-                      icon: const Icon(Icons.chevron_right),
-                    ),
-                  ],
+                  ),
                 ),
               ),
               // Errors overlay the carousel instead of inserting Column chrome
@@ -1418,9 +1423,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                 onView: widget.share.canEditCalendar
                     ? null
                     : () => _viewDay(selectedDay),
-                onJumpToToday: _awayFromToday
-                    ? _jumpToToday
-                    : null,
+                onJumpToToday: _awayFromToday ? _jumpToToday : null,
                 isFuture: selectedDay.isAfter(_today),
                 note: selectedNotes,
                 noteAsTag: noteAsTag,
@@ -1490,6 +1493,9 @@ class _CalendarScreenState extends State<CalendarScreen>
   }
 }
 
+/// Widest the month header and grid grow on big screens; phones are narrower.
+const double _calendarMaxWidth = 560;
+
 class _MonthGrid extends StatelessWidget {
   const _MonthGrid({
     super.key,
@@ -1506,6 +1512,7 @@ class _MonthGrid extends StatelessWidget {
   });
 
   static const double _weekdayRowHeight = 28;
+  static const int _maxWeekRows = 6;
 
   static int _rowCount(DateTime month) {
     final leading = DateTime(month.year, month.month, 1).weekday % 7;
@@ -1557,71 +1564,85 @@ class _MonthGrid extends StatelessWidget {
     // Exact-fit rows: each week gets 1/rowCount of remaining height so the
     // full month never crops on short or ultrawide viewports (GridView
     // aspect-ratio clamps used to overflow).
-    return Padding(
-      padding: EdgeInsets.fromLTRB(12, 4, 12, bottomInset),
-      child: Column(
-        children: [
-          SizedBox(
-            height: _weekdayRowHeight,
-            child: Row(
-              children: [
-                for (final label in weekdayLabels)
-                  Expanded(
-                    child: Center(
-                      child: Text(
-                        label,
-                        style:
-                            Theme.of(context).textTheme.labelMedium?.copyWith(
+    return Align(
+      alignment: Alignment.topCenter,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: _calendarMaxWidth),
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(12, 4, 12, bottomInset),
+          child: Column(
+            children: [
+              SizedBox(
+                height: _weekdayRowHeight,
+                child: Row(
+                  children: [
+                    for (final label in weekdayLabels)
+                      Expanded(
+                        child: Center(
+                          child: Text(
+                            label,
+                            style: Theme.of(context)
+                                .textTheme
+                                .labelMedium
+                                ?.copyWith(
                                   color: Theme.of(context)
                                       .colorScheme
                                       .onSurfaceVariant,
                                 ),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                // Rows share the height but never get taller than 1.15x the
-                // cell width, so portrait phones keep compact cells instead of
-                // stretching them across the screen.
-                final rowHeight = math.min(
-                  constraints.maxHeight / rowCount,
-                  constraints.maxWidth / 7 * 1.15,
-                );
-                return Align(
-                  alignment: Alignment.topCenter,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      for (var row = 0; row < rowCount; row++)
-                        SizedBox(
-                          height: rowHeight,
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              for (var col = 0; col < 7; col++)
-                                Expanded(
-                                  // 1px per side: 2px between neighbouring
-                                  // cells so the dashed PMS rings don't touch.
-                                  child: Padding(
-                                    padding: const EdgeInsets.all(1),
-                                    child: slot(row * 7 + col),
-                                  ),
-                                ),
-                            ],
                           ),
                         ),
-                    ],
-                  ),
-                );
-              },
-            ),
+                      ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    // Rows share the height but never get taller than 1.15x the
+                    // cell width, so portrait phones keep compact cells instead of
+                    // stretching them across the screen.
+                    // Wide screens (the grid hits its max width) always size for
+                    // six weeks, so 4-, 5- and 6-row months share one cell size.
+                    // Phones keep fitting the month's own rows: their height is
+                    // scarce and six-week sizing squashes every cell.
+                    final wide =
+                        MediaQuery.sizeOf(context).width >= _calendarMaxWidth;
+                    final rowHeight = math.min(
+                      constraints.maxHeight / (wide ? _maxWeekRows : rowCount),
+                      constraints.maxWidth / 7 * 1.15,
+                    );
+                    return Align(
+                      alignment: Alignment.topCenter,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          for (var row = 0; row < rowCount; row++)
+                            SizedBox(
+                              height: rowHeight,
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  for (var col = 0; col < 7; col++)
+                                    Expanded(
+                                      // 1px per side: 2px between neighbouring
+                                      // cells so the dashed PMS rings don't touch.
+                                      child: Padding(
+                                        padding: const EdgeInsets.all(1),
+                                        child: slot(row * 7 + col),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -2099,8 +2120,7 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
               ),
             ],
             selected: {if (_taken != null) _taken!},
-            onSelectionChanged:
-                widget.readOnly ? null : _onStatusChanged,
+            onSelectionChanged: widget.readOnly ? null : _onStatusChanged,
           ),
         ],
       ),
