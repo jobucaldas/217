@@ -44,20 +44,35 @@
     # keeps the root of the origin. SPA fallback so deep links / refresh serve
     # the Flutter shell. Revalidate on every load (ETag keeps it cheap) so a new
     # deploy shows up at once instead of an old bundle lingering in the cache.
-    handle /app {
-        redir * /app/ 308
+    @appBare path /app
+    handle @appBare {
+        redir * /app/?{query} 308
     }
 
+    # Missing files (.js, .wasm, .png...) must 404; only extension-less paths
+    # that are not real files fall back to the shell.
     handle_path /app/* {
         root * /app/dist
         header Cache-Control "no-cache"
-        try_files {path} /index.html
+        @spa {
+            not file
+            not path_regexp \.[A-Za-z0-9]+$
+        }
+        rewrite @spa /index.html
         file_server
     }
 
     # Sign-in and invite links go to /app/ directly; older links (/?invite=...,
-    # the bare origin) and anything else still land in the app.
-    handle {
+    # the bare origin) still land in the app. Everything else is not found.
+    @origin {
+        method GET HEAD
+        path /
+    }
+    handle @origin {
         redir * /app{uri} 302
+    }
+
+    handle {
+        respond "Not found" 404
     }
 }

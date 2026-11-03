@@ -89,7 +89,7 @@ class PrivacyPage extends StatefulWidget {
 
   final Future<bool> Function(String url) openUrl;
   final bool Function(String fileName, List<int> bytes, String mimeType)
-      download;
+  download;
 
   @override
   State<PrivacyPage> createState() => _PrivacyPageState();
@@ -122,10 +122,13 @@ class _PrivacyPageState extends State<PrivacyPage> {
   /// open when given (where a fresh sign-in comes back to).
   String _pagePath([PrivacyAction? action]) {
     final path = _deletePage ? accountDeletePagePath : privacyPagePath;
-    return Uri(path: path, queryParameters: {
-      'lang': _s.language.id,
-      if (action != null) 'confirm': action.id,
-    }).toString();
+    return Uri(
+      path: path,
+      queryParameters: {
+        'lang': _s.language.id,
+        if (action != null) 'confirm': action.id,
+      },
+    ).toString();
   }
 
   String get _server {
@@ -145,10 +148,9 @@ class _PrivacyPageState extends State<PrivacyPage> {
 
   Future<void> _openInBrowser() async {
     widget.onBrowserOpened?.call();
-    await _open(widget.api.privacyPageUrl(
-      _s.language.id,
-      deleteAccount: _deletePage,
-    ));
+    await _open(
+      widget.api.privacyPageUrl(_s.language.id, deleteAccount: _deletePage),
+    );
   }
 
   Future<void> _signIn([PrivacyAction? action]) async {
@@ -163,15 +165,25 @@ class _PrivacyPageState extends State<PrivacyPage> {
   }
 
   /// Whether the browser signed in recently, asking the server again (the
-  /// page may have stayed open for a while).
-  Future<bool> _recentSignIn() async {
+  /// page may have stayed open for a while). Null when the server cannot be
+  /// reached: that is not the same as needing to sign in again.
+  Future<bool?> _recentSignIn() async {
     try {
       final session = await widget.api.currentSession();
+      if (widget.api.offline.value) return null;
       return session.user != null && session.recentSignIn;
     } catch (_) {
-      // Unknown: ask to sign in again rather than trust an old answer.
-      return false;
+      return null;
     }
+  }
+
+  void _afterDeleted() {
+    widget.web?.onDeleted();
+    setState(() {
+      _deleted = true;
+      _notice = _t.doneDeleted;
+      _error = null;
+    });
   }
 
   Future<void> _start(PrivacyAction action) async {
@@ -181,9 +193,14 @@ class _PrivacyPageState extends State<PrivacyPage> {
       _error = null;
       _notice = null;
     });
-    final fresh = await _recentSignIn();
+    final recent = await _recentSignIn();
     if (!mounted) return;
     setState(() => _busy = false);
+    if (recent == null) {
+      setState(() => _error = _t.offline);
+      return;
+    }
+    final fresh = recent;
     final confirmed = await _confirm(action, fresh: fresh);
     if (!mounted || confirmed != true) return;
     if (!fresh) {
@@ -197,20 +214,20 @@ class _PrivacyPageState extends State<PrivacyPage> {
     final danger = action != PrivacyAction.download;
     final (title, warn, label) = switch (action) {
       PrivacyAction.download => (
-          _t.downloadConfirmTitle,
-          _t.downloadWarn,
-          _t.downloadConfirm
-        ),
+        _t.downloadConfirmTitle,
+        _t.downloadWarn,
+        _t.downloadConfirm,
+      ),
       PrivacyAction.withdraw => (
-          _t.withdrawConfirmTitle,
-          _t.withdrawWarn,
-          _t.withdrawTitle
-        ),
+        _t.withdrawConfirmTitle,
+        _t.withdrawWarn,
+        _t.withdrawTitle,
+      ),
       PrivacyAction.delete => (
-          _t.deleteConfirmTitle,
-          _t.deleteWarn(widget.api.workosUserDeletion),
-          _t.deleteConfirm
-        ),
+        _t.deleteConfirmTitle,
+        _t.deleteWarn(widget.api.workosUserDeletion),
+        _t.deleteConfirm,
+      ),
     };
     return showDialog<bool>(
       context: context,
@@ -224,10 +241,7 @@ class _PrivacyPageState extends State<PrivacyPage> {
             Text(warn),
             if (!fresh) ...[
               const SizedBox(height: 12),
-              Text(
-                _t.reauthNote,
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
+              Text(_t.reauthNote, style: Theme.of(context).textTheme.bodySmall),
             ],
           ],
         ),
@@ -284,13 +298,7 @@ class _PrivacyPageState extends State<PrivacyPage> {
           if (mounted) setState(() => _notice = _t.doneWithdrawn);
         case PrivacyAction.delete:
           await widget.api.deleteAccount();
-          web.onDeleted();
-          if (mounted) {
-            setState(() {
-              _deleted = true;
-              _notice = _t.doneDeleted;
-            });
-          }
+          if (mounted) _afterDeleted();
       }
     } catch (err) {
       if (!mounted) return;
@@ -302,11 +310,30 @@ class _PrivacyPageState extends State<PrivacyPage> {
         await _signIn(action);
         return;
       }
-      setState(() => _error = switch (action) {
-            PrivacyAction.download => _t.downloadFailed,
-            PrivacyAction.withdraw => _t.withdrawFailed,
-            PrivacyAction.delete => _t.deleteFailed,
-          });
+      // A lost answer to a delete that went through: the retry is signed out.
+      if (action == PrivacyAction.delete &&
+          err is ApiException &&
+          err.statusCode == 401) {
+        try {
+          final session = await widget.api.currentSession();
+          if (!widget.api.offline.value && session.user == null) {
+            if (mounted) _afterDeleted();
+            return;
+          }
+        } catch (_) {}
+      }
+      if (!mounted) return;
+      if (err is! ApiException) {
+        setState(() => _error = _t.offline);
+        return;
+      }
+      setState(
+        () => _error = switch (action) {
+          PrivacyAction.download => _t.downloadFailed,
+          PrivacyAction.withdraw => _t.withdrawFailed,
+          PrivacyAction.delete => _t.deleteFailed,
+        },
+      );
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -359,8 +386,9 @@ class _PrivacyPageState extends State<PrivacyPage> {
                 const SizedBox(height: 8),
                 Text(
                   _deletePage ? t.deletePageIntro : t.intro,
-                  style:
-                      text.bodyLarge?.copyWith(color: scheme.onSurfaceVariant),
+                  style: text.bodyLarge?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
                 ),
                 if (_notice != null)
                   _Banner(
@@ -393,18 +421,22 @@ class _PrivacyPageState extends State<PrivacyPage> {
                         padding: const EdgeInsets.symmetric(horizontal: 4),
                       ),
                       onPressed: () => kIsWeb
-                          ? goToWebPath(Uri(
-                              path: privacyPagePath,
-                              queryParameters: {'lang': _s.language.id},
-                            ).toString())
-                          : Navigator.of(context).push(MaterialPageRoute(
-                              builder: (_) => PrivacyPage(
-                                api: widget.api,
-                                strings: widget.strings,
-                                onBrowserOpened: widget.onBrowserOpened,
-                                openUrl: widget.openUrl,
+                          ? goToWebPath(
+                              Uri(
+                                path: privacyPagePath,
+                                queryParameters: {'lang': _s.language.id},
+                              ).toString(),
+                            )
+                          : Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => PrivacyPage(
+                                  api: widget.api,
+                                  strings: widget.strings,
+                                  onBrowserOpened: widget.onBrowserOpened,
+                                  openUrl: widget.openUrl,
+                                ),
                               ),
-                            )),
+                            ),
                       child: Text(t.privacyNoticeLink),
                     ),
                   ),
@@ -424,7 +456,10 @@ class _PrivacyPageState extends State<PrivacyPage> {
       _Section(title: t.whatTitle, body: t.whatBody),
       _Section(title: t.whyTitle, body: t.whyBody),
       _Section(title: t.whereTitle, body: t.whereBody(_server)),
-      _Section(title: t.rightsTitle, body: t.rightsBody),
+      _Section(
+        title: t.rightsTitle,
+        body: kIsWeb ? t.rightsBody : t.rightsBodyApp,
+      ),
       const SizedBox(height: 24),
       _SectionTitle(t.contactTitle),
       _contact(context, t.contactNone),
@@ -450,9 +485,10 @@ class _PrivacyPageState extends State<PrivacyPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(t.deleteStepsTitle,
-                  style:
-                      text.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
+              Text(
+                t.deleteStepsTitle,
+                style: text.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+              ),
               const SizedBox(height: 12),
               for (var i = 0; i < steps.length; i++)
                 Padding(
@@ -616,27 +652,27 @@ class _Banner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 16),
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: color.withValues(alpha: 0.45)),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(icon, color: color),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                text,
-                style: Theme.of(context).textTheme.bodyLarge,
+    return Semantics(
+      liveRegion: true,
+      child: Padding(
+        padding: const EdgeInsets.only(top: 16),
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: color.withValues(alpha: 0.45)),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(icon, color: color),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(text, style: Theme.of(context).textTheme.bodyLarge),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -653,11 +689,14 @@ class _SectionTitle extends StatelessWidget {
     final theme = Theme.of(context);
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
-      child: Text(
-        text,
-        style: theme.textTheme.titleMedium?.copyWith(
-          color: theme.colorScheme.onSurface,
-          fontWeight: FontWeight.w600,
+      child: Semantics(
+        header: true,
+        child: Text(
+          text,
+          style: theme.textTheme.titleMedium?.copyWith(
+            color: theme.colorScheme.onSurface,
+            fontWeight: FontWeight.w600,
+          ),
         ),
       ),
     );
@@ -681,8 +720,9 @@ class _Section extends StatelessWidget {
           _SectionTitle(title),
           Text(
             body,
-            style: theme.textTheme.bodyLarge
-                ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+            style: theme.textTheme.bodyLarge?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
           ),
         ],
       ),
@@ -712,8 +752,10 @@ class _HighlightCard extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  Icon(Icons.health_and_safety_outlined,
-                      color: scheme.onPrimaryContainer),
+                  Icon(
+                    Icons.health_and_safety_outlined,
+                    color: scheme.onPrimaryContainer,
+                  ),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
@@ -729,8 +771,9 @@ class _HighlightCard extends StatelessWidget {
               const SizedBox(height: 8),
               Text(
                 body,
-                style:
-                    text.bodyLarge?.copyWith(color: scheme.onPrimaryContainer),
+                style: text.bodyLarge?.copyWith(
+                  color: scheme.onPrimaryContainer,
+                ),
               ),
             ],
           ),
@@ -765,26 +808,24 @@ class _ActionCard extends StatelessWidget {
     const size = Size.fromHeight(48);
     final button = switch (style) {
       _ActionStyle.primary => FilledButton(
-          style: FilledButton.styleFrom(minimumSize: size),
-          onPressed: onPressed,
-          child: Text(label),
-        ),
+        style: FilledButton.styleFrom(minimumSize: size),
+        onPressed: onPressed,
+        child: Text(label),
+      ),
       _ActionStyle.outlined => OutlinedButton(
-          style: OutlinedButton.styleFrom(minimumSize: size),
-          onPressed: onPressed,
-          child: Text(label),
-        ),
+        style: OutlinedButton.styleFrom(minimumSize: size),
+        onPressed: onPressed,
+        child: Text(label),
+      ),
       _ActionStyle.danger => OutlinedButton(
-          style: OutlinedButton.styleFrom(
-            minimumSize: size,
-            foregroundColor: kDeleteAccountColor,
-            side: BorderSide(
-              color: kDeleteAccountColor.withValues(alpha: 0.6),
-            ),
-          ),
-          onPressed: onPressed,
-          child: Text(label),
+        style: OutlinedButton.styleFrom(
+          minimumSize: size,
+          foregroundColor: kDeleteAccountColor,
+          side: BorderSide(color: kDeleteAccountColor.withValues(alpha: 0.6)),
         ),
+        onPressed: onPressed,
+        child: Text(label),
+      ),
     };
     return Padding(
       padding: const EdgeInsets.only(top: 12),
@@ -810,8 +851,9 @@ class _ActionCard extends StatelessWidget {
               const SizedBox(height: 4),
               Text(
                 body,
-                style:
-                    text.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
+                style: text.bodyMedium?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
               ),
               const SizedBox(height: 12),
               button,

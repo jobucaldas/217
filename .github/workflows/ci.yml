@@ -179,6 +179,10 @@ jobs:
           curl -fsSL http://localhost:8787/ | grep -qi '<base href="/app/">'
           curl -fsS http://localhost:8787/app/some/deep/link | grep -qi '<html'
           curl -fsSL 'http://localhost:8787/?invite=ABCD1234' -o /dev/null -w '%{url_effective}\n' | grep -q '/app/?invite=ABCD1234'
+          # /app keeps its query; a missing asset is a 404, not the shell; unknown paths are not the app.
+          test "$(curl -s -o /dev/null -w '%{redirect_url}' 'http://localhost:8787/app?invite=ABCD1234')" = 'http://localhost:8787/app/?invite=ABCD1234'
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8787/app/missing.js)" = 404
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8787/robots.txt)" = 404
           # /api answered through Caddy -> https://backend; postgres refuses plaintext over the network.
           curl -fsSI http://localhost:8787/api/auth/config | grep -qi '^cache-control: no-store'
           PGPASSWORD="$(sed -n 's/^POSTGRES_PASSWORD=//p' .env)"
