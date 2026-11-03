@@ -67,7 +67,7 @@ List<PlannedAlert> planPartnerAlerts({
   required String Function(CycleWindow window) pmsTitle,
   required String Function(CycleWindow window) pmsBody,
   required String pillTitle,
-  required String pillBody,
+  required String Function(DateTime when) pillBody,
 }) {
   final out = <PlannedAlert>[];
   if (pref.pmsEnabled) {
@@ -103,7 +103,7 @@ List<PlannedAlert> planPartnerAlerts({
           id: partnerPillIdBase + d,
           when: when,
           title: pillTitle,
-          body: pillBody,
+          body: pillBody(when),
         ));
       }
       if (pref.pillRepeatEnabled &&
@@ -121,7 +121,7 @@ List<PlannedAlert> planPartnerAlerts({
             id: partnerPillRepeatIdBase + d * maxPillRepeatsPerDay + r,
             when: repeatWhen,
             title: pillTitle,
-            body: pillBody,
+            body: pillBody(repeatWhen),
           ));
         }
       }

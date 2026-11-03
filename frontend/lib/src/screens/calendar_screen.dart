@@ -537,9 +537,9 @@ class _CalendarScreenState extends State<CalendarScreen>
             dates.numericDayMonth(window.pmsEnd),
           ),
           pillTitle: widget.strings.pillNotifTitle,
-          pillBody: widget.strings.pillNotifBody(
+          pillBody: (when) => widget.strings.pillNotifBody(
             widget.share.ownerName,
-            dates.time(now),
+            dates.time(when),
           ),
         );
         if (queue != null) {

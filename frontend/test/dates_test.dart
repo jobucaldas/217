@@ -31,9 +31,15 @@ void main() {
 
   test('English is unchanged', () {
     final dates = const Strings(AppLanguage.en).dates;
-    expect(dates.dayMonth(oct31), 'October 31');
+    expect(dates.dayMonth(oct31), 'October 31st');
     expect(dates.monthYear(oct31), 'October 2026');
-    expect(dates.shortDayMonth(nov19), 'Nov 19');
+    expect(dates.shortDayMonth(nov19), 'Nov 19th');
+    expect(dates.dayMonth(DateTime(2026, 11, 3)), 'November 3rd');
+    expect(dates.dayMonth(DateTime(2026, 11, 2)), 'November 2nd');
+    expect(dates.dayMonth(DateTime(2026, 11, 4)), 'November 4th');
+    expect(dates.dayMonth(DateTime(2026, 11, 11)), 'November 11th');
+    expect(dates.dayMonth(DateTime(2026, 11, 22)), 'November 22nd');
+    expect(dates.fullDate(oct31), 'October 31st, 2026');
   });
 
   test('partner alert notifications are short', () {
@@ -48,7 +54,7 @@ void main() {
     );
     expect(pt.pillNotifTitle, 'Remédio não tomado');
     expect(pt.pillNotifBody('Ana Souza', pt.dates.time(oct31)),
-        'Ana: atualizado às 14:05');
+        'Ana: verificado às 14:05');
     expect(const Strings(AppLanguage.en).dates.numericDayMonth(start), '11/02');
   });
 }

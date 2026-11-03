@@ -88,7 +88,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('update-day-button')), findsNothing);
-    expect(find.text('See today'), findsOneWidget);
+    expect(find.text('View today'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('view-day-button')));
     await tester.pumpAndSettle();
 
@@ -157,12 +157,12 @@ void main() {
     await tester.tap(cellOf(other));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('jump-to-today-button')), findsOneWidget);
-    expect(find.text('See today'), findsNothing);
+    expect(find.text('View today'), findsNothing);
 
     await tester.tap(find.byKey(const ValueKey('jump-to-today-button')));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('jump-to-today-button')), findsNothing);
-    expect(find.text('See today'), findsOneWidget);
+    expect(find.text('View today'), findsOneWidget);
   });
 
   testWidgets('the sheet closes when the share is revoked', (tester) async {

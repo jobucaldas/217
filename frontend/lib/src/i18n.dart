@@ -246,7 +246,7 @@ class Strings {
       _t('Update today', 'Atualizar hoje', 'Actualizar hoy');
   String updateDay(String day) =>
       _t('Update $day', 'Atualizar $day', 'Actualizar $day');
-  String get viewToday => _t('See today', 'Ver hoje', 'Ver hoy');
+  String get viewToday => _t('View today', 'Ver hoje', 'Ver hoy');
   String viewDay(String day) => _t('View $day', 'Ver $day', 'Ver $day');
   String get close => _t('Close', 'Fechar', 'Cerrar');
 
@@ -685,9 +685,9 @@ class Strings {
         'Medicamento no tomado',
       );
   String pillNotifBody(String name, String time) => _t(
-        '${partnerFirstName(name)}: updated at $time',
-        '${partnerFirstName(name)}: atualizado às $time',
-        '${partnerFirstName(name)}: actualizado a las $time',
+        '${partnerFirstName(name)}: checked at $time',
+        '${partnerFirstName(name)}: verificado às $time',
+        '${partnerFirstName(name)}: comprobado a las $time',
       );
   String partnerFirstName(String name) =>
       partnerName(name).split(RegExp(r'\s+')).first;

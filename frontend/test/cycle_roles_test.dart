@@ -171,7 +171,7 @@ void main() {
           pmsTitle: (_) => 'pms',
           pmsBody: (w) => 'pms ${w.periodStart.day}',
           pillTitle: 'pill',
-          pillBody: 'pill body',
+          pillBody: (_) => 'pill body',
         );
 
     test('nothing when both toggles are off', () {
@@ -207,7 +207,7 @@ void main() {
         pmsTitle: (_) => 'pms',
         pmsBody: (_) => 'pms',
         pillTitle: 'pill',
-        pillBody: 'pill',
+        pillBody: (_) => 'pill',
       );
       expect(alerts.where((a) => a.title == 'pms'), isEmpty);
       expect(alerts.where((a) => a.title == 'pill'), isNotEmpty);
@@ -236,7 +236,7 @@ void main() {
         pmsTitle: (_) => 'pms',
         pmsBody: (window) => window.periodStart.day.toString(),
         pillTitle: 'pill',
-        pillBody: 'pill',
+        pillBody: (_) => 'pill',
       );
       expect(alerts, hasLength(1));
       expect(alerts.single.when, DateTime(2, 1, 2, 9));
@@ -317,7 +317,7 @@ void main() {
           pmsTitle: (_) => 'pms',
           pmsBody: (_) => 'pms',
           pillTitle: 'pill',
-          pillBody: 'pill',
+          pillBody: (_) => 'pill',
         );
         expect(repeatsForDay(alerts, 0).length, maxPillRepeatsPerDay);
       });
@@ -337,7 +337,7 @@ void main() {
           pmsTitle: (_) => 'pms',
           pmsBody: (_) => 'pms',
           pillTitle: 'pill',
-          pillBody: 'pill',
+          pillBody: (_) => 'pill',
         );
         final totalRepeats =
             alerts.where((a) => a.id >= partnerPillRepeatIdBase).length;
