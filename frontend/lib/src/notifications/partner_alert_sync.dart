@@ -29,7 +29,7 @@ Future<LocalReminderSyncStatus> syncPartnerAlertsFrom({
             dates.numericDayMonth(w.pmsEnd),
           ),
           pillTitle: strings.pillNotifTitle,
-          pillBody: strings.pillNotifBody(ownerName, dates.time(at)),
+          pillBody: (when) => strings.pillNotifBody(ownerName, dates.time(when)),
         )
       : const <PlannedAlert>[];
   return (scheduler ?? syncPartnerAlerts)(alerts);
