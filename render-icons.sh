@@ -1,7 +1,8 @@
 #!/usr/bin/env sh
 # Renders every icon from the SVG sources in assets/branding/, the only place to edit them:
 #
-#   frontend/android/.../mipmap-*/ic_launcher.png      Android launcher
+#   frontend/android/.../mipmap-*/ic_launcher.png      Android launcher (legacy)
+#   frontend/android/.../mipmap-*/ic_launcher_foreground.png  adaptive icon + Android 12 splash
 #   frontend/web/icons/*, favicon.svg, favicon.png     web app and manifest
 #   frontend/linux/runner/icon.png                     Linux (AppImage)
 #   frontend/windows/runner/resources/app_icon.ico     Windows (exe, installer)
@@ -42,6 +43,11 @@ png() {
 
 for d in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
   png "$src/app-icon.svg" "${d#*:}" "$fe/android/app/src/main/res/mipmap-${d%:*}/ic_launcher.png"
+done
+
+# Adaptive icon foreground (108dp canvas); res/mipmap-anydpi-v26 pairs it with a black background.
+for d in mdpi:108 hdpi:162 xhdpi:216 xxhdpi:324 xxxhdpi:432; do
+  png "$src/app-icon-foreground.svg" "${d#*:}" "$fe/android/app/src/main/res/mipmap-${d%:*}/ic_launcher_foreground.png" PNG32
 done
 
 for s in 192 512; do
