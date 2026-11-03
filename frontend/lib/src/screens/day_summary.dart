@@ -138,10 +138,10 @@ class DaySummaryBar extends StatelessWidget {
           color: period,
           mark: DayMark(color: period, icon: Icons.water_drop),
         )
-      else if (cycleKind == CycleDayKind.predictedPeriod)
+      else if (cycleKind == CycleDayKind.expectedPeriod)
         _DayTag(
-          key: const ValueKey('day-tag-predicted-period'),
-          label: strings.predictedPeriod,
+          key: const ValueKey('day-tag-expected-period'),
+          label: strings.expectedPeriod,
           color: period,
           mark: DayMark(color: period, icon: Icons.water_drop_outlined),
         ),
@@ -838,10 +838,10 @@ class _ExpandableDaySheetState extends State<ExpandableDaySheet> {
         );
 
     return [
-      if (cycleKind == CycleDayKind.predictedPeriod)
+      if (cycleKind == CycleDayKind.expectedPeriod)
         row(
-          const ValueKey('day-more-predicted-period'),
-          widget.strings.predictedPeriod,
+          const ValueKey('day-more-expected-period'),
+          widget.strings.expectedPeriod,
           DayMark(color: period, icon: Icons.water_drop_outlined),
         ),
       if (cycleKind == CycleDayKind.pms)
@@ -969,11 +969,11 @@ class _ExpandableDaySheetState extends State<ExpandableDaySheet> {
     // Same lines as the calendar's header, soonest first.
     final lines = <(Widget, String)>[];
     if (next != null) {
-      if (todayKind == CycleDayKind.predictedPeriod) {
+      if (todayKind == CycleDayKind.expectedPeriod) {
         lines.add((periodMark, strings.cyclePeriodNow));
       } else {
         if (todayKind == CycleDayKind.pms) {
-          lines.add((pmsMark, strings.cyclePmsLikelyNow));
+          lines.add((pmsMark, strings.cyclePmsNow));
         } else if (next.pmsStart.year >= 2) {
           lines.add((
             pmsMark,
@@ -982,7 +982,7 @@ class _ExpandableDaySheetState extends State<ExpandableDaySheet> {
         }
         lines.add((
           periodMark,
-          strings.cycleNextPeriod(dates.shortDayMonth(next.periodStart)),
+          strings.cycleExpectedPeriod(dates.shortDayMonth(next.periodStart)),
         ));
       }
     }
@@ -1085,14 +1085,14 @@ List<_DayFact> _dayFacts({
         label: strings.periodLabel,
         detail: strings.dayLogged,
       )
-    else if (cycleKind == CycleDayKind.predictedPeriod)
+    else if (cycleKind == CycleDayKind.expectedPeriod)
       (
-        id: 'predicted-period',
+        id: 'expected-period',
         icon: Icons.water_drop_outlined,
         color: period,
-        title: strings.predictedPeriod,
-        label: strings.predictedPeriod,
-        detail: strings.periodExpectedThisDay,
+        title: strings.expectedPeriod,
+        label: strings.expectedPeriod,
+        detail: strings.expectedPeriodThisDay,
       ),
     if (cycleKind == CycleDayKind.pms)
       (
@@ -1101,7 +1101,7 @@ List<_DayFact> _dayFacts({
         color: pms,
         title: strings.expectedPms,
         label: strings.expectedPms,
-        detail: strings.pmsLikelyThisDay,
+        detail: strings.expectedPmsThisDay,
       ),
     // The note gets its own full-width card when the sheet is open.
     if (note.isNotEmpty)

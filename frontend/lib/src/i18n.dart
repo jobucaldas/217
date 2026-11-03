@@ -218,7 +218,8 @@ class Strings {
           '$changes salvas neste celular. Sua sessão continua ativa; elas serão enviadas quando o servidor voltar.',
           '$changes guardados en este teléfono. Sigues con la sesión iniciada; se enviarán cuando vuelva el servidor.');
     }
-    return _t('$changes saved on this phone, not yet on the server.',
+    return _t(
+        '$changes saved on this phone, not yet on the server.',
         '$changes salvas neste celular, ainda não no servidor.',
         '$changes guardados en este teléfono, aún no en el servidor.');
   }
@@ -235,8 +236,7 @@ class Strings {
   String get paletteCyan => _t('Cyan', 'Ciano', 'Cian');
   String get palettePurple => _t('Purple', 'Roxo', 'Morado');
   String get today => _t('Today', 'Hoje', 'Hoy');
-  String get jumpToToday =>
-      _t('Jump to today', 'Ir para hoje', 'Ir a hoy');
+  String get jumpToToday => _t('Jump to today', 'Ir para hoje', 'Ir a hoy');
   String get previousMonth =>
       _t('Previous month', 'Mês anterior', 'Mes anterior');
   String get nextMonth => _t('Next month', 'Próximo mês', 'Mes siguiente');
@@ -532,30 +532,30 @@ class Strings {
 
   // Cycle / PMS
   String get periodLabel => _t('Period', 'Menstruação', 'Regla');
-  String get predictedPeriod =>
-      _t('Predicted period', 'Menstruação prevista', 'Regla prevista');
+  String get expectedPeriod =>
+      _t('Expected period', 'Menstruação prevista', 'Regla prevista');
   String get expectedPms => _t('Expected PMS', 'TPM prevista', 'SPM previsto');
   String cyclePmsFrom(String pms) => _t(
         'Expected PMS from ~$pms',
         'TPM prevista a partir de ~$pms',
         'SPM previsto desde ~$pms',
       );
-  String cycleNextPeriod(String period) => _t(
-        'Next period ~$period',
-        'Próxima menstruação ~$period',
-        'Próxima regla ~$period',
+  String cycleExpectedPeriod(String period) => _t(
+        'Expected period ~$period',
+        'Menstruação prevista ~$period',
+        'Regla prevista ~$period',
       );
-  String get cyclePmsLikelyNow =>
-      _t('PMS likely now', 'Provável TPM agora', 'Posible SPM ahora');
+  String get cyclePmsNow =>
+      _t('Expected PMS now', 'TPM prevista agora', 'SPM previsto ahora');
   String get cyclePeriodNow => _t(
-        'Period expected around now',
-        'Menstruação prevista para agora',
-        'Regla prevista para estos días',
+        'Expected period now',
+        'Menstruação prevista agora',
+        'Regla prevista ahora',
       );
   String get cycleHintOwner => _t(
-        'Mark period days to see PMS predictions',
-        'Marque os dias de menstruação para ver a previsão de TPM',
-        'Marca los días de regla para ver la previsión de SPM',
+        'Mark period days to see the expected PMS',
+        'Marque os dias de menstruação para ver a TPM prevista',
+        'Marca los días de regla para ver el SPM previsto',
       );
   // Day sheet: the partner's read-only day, and pulling the sheet up
   String get pillLabel => _t('Pill', 'Pílula', 'Píldora');
@@ -564,25 +564,24 @@ class Strings {
   String get pillNotDue =>
       _t('Not due yet', 'Ainda não chegou', 'Todavía no toca');
   String get dayLogged => _t('Logged', 'Registrado', 'Registrado');
-  String get periodExpectedThisDay => _t(
-        'Expected around this day',
-        'Prevista para por volta deste dia',
-        'Prevista para estos días',
+  String get expectedPeriodThisDay => _t(
+        'Expected period this day',
+        'Menstruação prevista neste dia',
+        'Regla prevista este día',
       );
-  String get pmsLikelyThisDay => _t(
-        'Likely around this day',
-        'Provável por volta deste dia',
-        'Probable por estos días',
+  String get expectedPmsThisDay => _t(
+        'Expected PMS this day',
+        'TPM prevista neste dia',
+        'SPM previsto este día',
       );
   String get comingUp => _t('Coming up', 'Próximos dias', 'Próximamente');
   String get cycleNoPredictions => _t(
-        'No period or PMS predictions for now.',
-        'Sem previsões de menstruação ou TPM por enquanto.',
+        'No expected period or PMS for now.',
+        'Sem menstruação ou TPM prevista por enquanto.',
         'Sin previsiones de regla ni SPM por ahora.',
       );
   String get daySheetMore => _t('Show more', 'Mostrar mais', 'Mostrar más');
-  String get daySheetLess =>
-      _t('Show less', 'Mostrar menos', 'Mostrar menos');
+  String get daySheetLess => _t('Show less', 'Mostrar menos', 'Mostrar menos');
   String cycleStageNote(String code) => switch (code) {
         'pms_suppressed_menopause' => _t(
             '217 counts no PMS because you told 217 you are in menopause.',
@@ -621,8 +620,8 @@ class Strings {
   String get personal => _t('Personal', 'Pessoal', 'Personal');
   String get displayName =>
       _t('Display name', 'Nome de exibição', 'Nombre visible');
-  String get displayNameSaved =>
-      _t('Display name saved.', 'Nome de exibição salvo.', 'Nombre visible guardado.');
+  String get displayNameSaved => _t('Display name saved.',
+      'Nome de exibição salvo.', 'Nombre visible guardado.');
   String get birthDate =>
       _t('Birth month', 'Mês de nascimento', 'Mes de nacimiento');
   String get birthDateHelp => _t(
@@ -634,17 +633,13 @@ class Strings {
   String get year => _t('Year', 'Ano', 'Año');
   String get clear => _t('Clear', 'Limpar', 'Borrar');
   String stageSuggestionBody(String stage) => stage == 'menopause'
-      ? _t(
-          'You might be at menopause',
-          'Você pode estar na menopausa',
+      ? _t('You might be at menopause', 'Você pode estar na menopausa',
           'Puede que estés en la menopausia')
-      : _t(
-          'You might be in perimenopause',
-          'Você pode estar na perimenopausa',
+      : _t('You might be in perimenopause', 'Você pode estar na perimenopausa',
           'Puede que estés en la perimenopausia');
   String get stageSuggestionUpdate => _t('Update', 'Atualizar', 'Actualizar');
-  String get stageUpdated => _t('Updated successfully', 'Atualizado com sucesso',
-      'Actualizado correctamente');
+  String get stageUpdated => _t('Updated successfully',
+      'Atualizado com sucesso', 'Actualizado correctamente');
   String get pmsNotCounted => _t(
       'PMS is not counted for the stage you selected.',
       'A TPM não é contada na fase que você selecionou.',
@@ -670,8 +665,7 @@ class Strings {
         'Repetir hasta registrar la píldora',
       );
   String get pillRepeatEveryLabel => _t('Every', 'A cada', 'Cada');
-  String get pillRepeatMinutesUnit =>
-      _t('minutes', 'minutos', 'minutos');
+  String get pillRepeatMinutesUnit => _t('minutes', 'minutos', 'minutos');
   String get pillRepeatRangeError => _t(
         'Enter 1 to 120 minutes',
         'Informe de 1 a 120 minutos',
@@ -699,7 +693,8 @@ class Strings {
       );
   String partnerName(String name) =>
       name.trim().isEmpty ? _t('She', 'Ela', 'Ella') : name.trim();
-  String get pmsNotifTitle => _t('PMS expected', 'TPM prevista', 'SPM previsto');
+  String get pmsNotifTitle =>
+      _t('Expected PMS', 'TPM prevista', 'SPM previsto');
   String pmsNotifBody(String name, String start, String end) => _t(
         '${partnerFirstName(name)}: expected between ~$start - $end',
         '${partnerFirstName(name)}: prevista entre ~$start - $end',

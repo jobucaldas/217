@@ -122,7 +122,7 @@ void main() {
       expect(info.kindOf(DateTime(2026, 10, 23)), CycleDayKind.none);
       expect(info.kindOf(DateTime(2026, 10, 24)), CycleDayKind.pms);
       expect(info.kindOf(DateTime(2026, 10, 28, 15)), CycleDayKind.pms);
-      expect(info.kindOf(DateTime(2026, 11, 1)), CycleDayKind.predictedPeriod);
+      expect(info.kindOf(DateTime(2026, 11, 1)), CycleDayKind.expectedPeriod);
       expect(info.nextWindow(DateTime(2026, 11, 1))?.periodStart,
           DateTime(2026, 10, 29));
       expect(info.nextWindow(DateTime(2026, 11, 2)), isNull);
@@ -141,7 +141,7 @@ void main() {
       });
       expect(info.note, 'pms_suppressed_menopause');
       expect(info.kindOf(DateTime(2026, 10, 28)), CycleDayKind.none);
-      expect(info.kindOf(DateTime(2026, 10, 29)), CycleDayKind.predictedPeriod);
+      expect(info.kindOf(DateTime(2026, 10, 29)), CycleDayKind.expectedPeriod);
     });
   });
 
@@ -472,7 +472,7 @@ void main() {
       expect(line, findsOneWidget);
       expect(
         find.descendant(
-            of: line, matching: find.textContaining('PMS likely now')),
+            of: line, matching: find.textContaining('Expected PMS now')),
         findsOneWidget,
       );
       expect(find.byKey(ValueKey('pms-${today.month}-${today.day}')),
@@ -480,7 +480,7 @@ void main() {
       final inPeriod = _d(today, 4);
       expect(
         find.byKey(
-            ValueKey('predicted-period-${inPeriod.month}-${inPeriod.day}')),
+            ValueKey('expected-period-${inPeriod.month}-${inPeriod.day}')),
         findsWidgets,
       );
       if (yesterday.month == today.month) {
@@ -492,7 +492,7 @@ void main() {
       // PMS and the next period get a line each.
       expect(
         find.descendant(
-            of: line, matching: find.textContaining('Next period ~')),
+            of: line, matching: find.textContaining('Expected period ~')),
         findsOneWidget,
       );
       // No legend: today's tags show their mark and reveal the label on tap.
@@ -509,16 +509,15 @@ void main() {
         await tester.pumpAndSettle();
       }
       await tester.tap(find
-          .byKey(
-              ValueKey('predicted-period-${inPeriod.month}-${inPeriod.day}'))
+          .byKey(ValueKey('expected-period-${inPeriod.month}-${inPeriod.day}'))
           .hitTestable());
       await tester.pumpAndSettle();
-      final predicted = find.byKey(const ValueKey('day-tag-predicted-period'));
+      final predicted = find.byKey(const ValueKey('day-tag-expected-period'));
       expect(predicted, findsOneWidget);
       expect(find.byKey(const ValueKey('day-tag-status')), findsNothing);
       await tester.tap(predicted);
       await tester.pumpAndSettle();
-      expect(find.text('Predicted period'), findsOneWidget);
+      expect(find.text('Expected period'), findsOneWidget);
     });
 
     testWidgets(
@@ -548,7 +547,7 @@ void main() {
       expect(find.textContaining('217 counts no PMS'), findsOneWidget);
       final line = find.byKey(const ValueKey('cycle-line'));
       expect(line, findsOneWidget);
-      expect(find.textContaining('Next period ~'), findsOneWidget);
+      expect(find.textContaining('Expected period ~'), findsOneWidget);
       expect(find.textContaining('0001'), findsNothing);
       expect(find.byKey(const ValueKey('cycle-stage-note')), findsOneWidget);
       expect(find.byKey(ValueKey('pms-${today.month}-${today.day}')),
@@ -582,7 +581,7 @@ void main() {
       expect(find.textContaining('perimenopause. Cycles can still happen'),
           findsOneWidget);
       expect(find.byKey(const ValueKey('cycle-stage-note')), findsOneWidget);
-      expect(find.textContaining('PMS likely now'), findsOneWidget);
+      expect(find.textContaining('Expected PMS now'), findsOneWidget);
       expect(find.byKey(ValueKey('pms-${today.month}-${today.day}')),
           findsWidgets);
     });
@@ -710,7 +709,7 @@ void main() {
       expect(find.byKey(const ValueKey('cycle-line')), findsNothing);
       expect(find.byKey(const ValueKey('cycle-stage-note')), findsOneWidget);
       expect(
-          find.text('Mark period days to see PMS predictions'), findsNothing);
+          find.text('Mark period days to see the expected PMS'), findsNothing);
     });
 
     testWidgets(
@@ -728,8 +727,8 @@ void main() {
         ),
       ));
       await tester.pumpAndSettle();
-      expect(
-          find.text('Mark period days to see PMS predictions'), findsOneWidget);
+      expect(find.text('Mark period days to see the expected PMS'),
+          findsOneWidget);
     });
 
     testWidgets('day sheet period toggle saves and stays open ($brightness)',
