@@ -98,8 +98,10 @@ void main() {
         // The summary's own height follows the day shown (tags), not the button.
         expect((await _layout(tester)).sublist(0, 4), home.sublist(0, 4));
 
-        final action = find
-            .byKey(ValueKey(partner ? 'view-day-button' : 'update-day-button'));
+        // Whichever action the day has: future days are only viewed.
+        final action = find.byWidgetPredicate((w) =>
+            w.key == const ValueKey('view-day-button') ||
+            w.key == const ValueKey('update-day-button'));
         expect(tester.getSize(find.byKey(_jump)).height,
             tester.getSize(action).height);
 

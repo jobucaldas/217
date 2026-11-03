@@ -575,6 +575,11 @@ class Strings {
         'SPM previsto este día',
       );
   String get comingUp => _t('Coming up', 'Próximos dias', 'Próximamente');
+  String get dayThisDay => _t('This day', 'Neste dia', 'Este día');
+  String get dayExpected => _t('Expected', 'Prevista', 'Prevista');
+  String get cycleNow => _t('Now', 'Agora', 'Ahora');
+  String cycleFromDate(String date) =>
+      _t('from ~$date', 'a partir de ~$date', 'desde ~$date');
   String get cycleNoPredictions => _t(
         'No expected period or PMS for now.',
         'Sem menstruação ou TPM prevista por enquanto.',
@@ -583,6 +588,19 @@ class Strings {
   String get daySheetMore => _t('Show more', 'Mostrar mais', 'Mostrar más');
   String get daySheetLess =>
       _t('Show less', 'Mostrar menos', 'Mostrar menos');
+  String get dayTapToLog =>
+      _t('Tap to log', 'Toque para registrar', 'Toca para registrar');
+  String get editNote => _t('Edit note', 'Editar nota', 'Editar nota');
+  String get daySheetViewOnly => _t(
+        'Partner Mode: view only',
+        'Modo Parceiro: somente leitura',
+        'Modo Pareja: solo lectura',
+      );
+  String get daySheetFutureLocked => _t(
+        'Future day: nothing to log yet',
+        'Dia futuro: nada para registrar ainda',
+        'Día futuro: aún no hay nada que registrar',
+      );
   String cycleStageNote(String code) => switch (code) {
         'pms_suppressed_menopause' => _t(
             '217 counts no PMS because you told 217 you are in menopause.',
