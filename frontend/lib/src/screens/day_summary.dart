@@ -206,35 +206,46 @@ class DaySummaryBar extends StatelessWidget {
     final compact =
         size.width >= 600 || (size.height < 600 && size.width >= 480);
     final viewing = onEdit == null && onView != null;
+    // Web and desktop default to a compact density that would shrink the
+    // pill below the square button beside it; both are pinned to one height.
+    final barHeight = compact ? 48.0 : 52.0;
     final button = onEdit == null && onView == null
         ? null
-        : FilledButton.icon(
-            key: ValueKey(viewing ? 'view-day-button' : 'update-day-button'),
-            // Viewing stays enabled on future days: they show predictions.
-            onPressed: viewing ? onView : (isFuture ? null : onEdit),
-            // The theme's full-width minimum would not fit beside the tags.
-            style: compact
-                ? FilledButton.styleFrom(minimumSize: const Size(0, 48))
-                : null,
-            icon: Icon(viewing
-                ? Icons.visibility_outlined
-                : Icons.edit_calendar_outlined),
-            label: Text(viewing
-                ? (isToday ? strings.viewToday : strings.viewDay(shortDay))
-                : (isToday
-                    ? strings.updateToday
-                    : strings.updateDay(shortDay))),
+        : SizedBox(
+            height: barHeight,
+            child: FilledButton.icon(
+              key: ValueKey(viewing ? 'view-day-button' : 'update-day-button'),
+              // Viewing stays enabled on future days: they show predictions.
+              onPressed: viewing ? onView : (isFuture ? null : onEdit),
+              // The theme's full-width minimum would not fit beside the tags.
+              style: FilledButton.styleFrom(
+                visualDensity: VisualDensity.standard,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                minimumSize: compact ? Size(0, barHeight) : null,
+              ),
+              icon: Icon(viewing
+                  ? Icons.visibility_outlined
+                  : Icons.edit_calendar_outlined),
+              label: Text(viewing
+                  ? (isToday ? strings.viewToday : strings.viewDay(shortDay))
+                  : (isToday
+                      ? strings.updateToday
+                      : strings.updateDay(shortDay))),
+            ),
           );
 
-    final barHeight = compact ? 48.0 : 52.0;
-    final jump = onJumpToToday == null
-        ? null
-        : SizedBox.square(
-            dimension: barHeight,
-            child: IconButton.filledTonal(
+    // The slot stays reserved while the button is hidden, so showing it never
+    // resizes the tags or moves the calendar above.
+    final jump = SizedBox.square(
+      dimension: barHeight,
+      child: onJumpToToday == null
+          ? null
+          : IconButton.filledTonal(
               key: const ValueKey('jump-to-today-button'),
               // Square, with the corners of the update-day button beside it.
               style: IconButton.styleFrom(
+                visualDensity: VisualDensity.standard,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(14)),
               ),
@@ -242,16 +253,15 @@ class DaySummaryBar extends StatelessWidget {
               onPressed: onJumpToToday,
               icon: const Icon(Icons.today),
             ),
-          );
-    final actions = button == null && jump == null
+    );
+    final actions = button == null
         ? null
         : Row(
             mainAxisSize: compact ? MainAxisSize.min : MainAxisSize.max,
             children: [
-              if (button != null)
-                if (compact) button else Expanded(child: button),
-              if (button != null && jump != null) const SizedBox(width: 8),
-              if (jump != null) jump,
+              if (compact) button else Expanded(child: button),
+              const SizedBox(width: 8),
+              jump,
             ],
           );
 
