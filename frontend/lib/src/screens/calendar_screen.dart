@@ -985,24 +985,24 @@ class _CalendarScreenState extends State<CalendarScreen>
     if (changed) _monthShown();
   }
 
-  /// Selects [day] for the summary; on an editable calendar, also opens
-  /// its editor. Future days are only selected: their tags show what is
-  /// expected, and nothing can be logged yet.
+  /// Selects [day] for the summary and opens its sheet: the editor on an
+  /// editable calendar, read-only for a partner and for future days
+  /// (nothing can be logged ahead of time, but what is expected shows).
   Future<void> _openDay(DateTime day) async {
     setState(() => _selected = _isSameDay(day, _today) ? null : day);
     if (!widget.share.canEditCalendar) return _viewDay(day);
-    if (day.isAfter(_today)) return;
-    return _showDaySheet(day, readOnly: false);
+    return _showDaySheet(day, readOnly: day.isAfter(_today));
   }
 
   /// A partner's view of [day]: what was logged, read-only.
   Future<void> _viewDay(DateTime day) => _showDaySheet(day, readOnly: true);
 
   /// The one day sheet, for both sides: the owner edits in it, a partner
-  /// only reads it (and it closes when calendar access is cleared). Either
-  /// can pull it up for what else is known about the day (predictions, the
-  /// whole note, what is coming up).
+  /// only reads it (and it closes when calendar access is cleared), as does
+  /// the owner on future days. Either can pull it up for what else is known
+  /// about the day (predictions, the whole note, what is coming up).
   Future<void> _showDaySheet(DateTime day, {required bool readOnly}) {
+    final partner = !widget.share.canEditCalendar;
     final key = DateFormat('yyyy-MM-dd').format(day);
     final existing = _visibleEntry(key);
     // The pulled-up part follows the note as the owner edits it.
@@ -1013,43 +1013,46 @@ class _CalendarScreenState extends State<CalendarScreen>
       // The expandable sheet draws its own surface and handle.
       backgroundColor: Colors.transparent,
       builder: (context) {
-        final sheet = ExpandableDaySheet(
-          strings: widget.strings,
-          palette: widget.palette,
-          day: day,
-          today: _today,
-          notes: notes,
-          cycle: _cycle,
-          entry: existing,
-          // A partner gets read-only chips and cards instead of the editor.
-          sheet: readOnly
-              ? null
-              : DayEditorSheet(
-                  strings: widget.strings,
-                  date: key,
-                  initialTaken: existing?.taken,
-                  initialNotes: existing?.notes ?? '',
-                  initialHeart: existing?.heart ?? false,
-                  initialPeriod: existing?.period ?? false,
-                  hadEntry: existing != null,
-                  // Persist via onCommit — not the sheet's pop value. Nested
-                  // note dialog → sheet pop races on web and can drop the
-                  // result (note/heart "save" that only sticks after
-                  // Taken/Missed re-tap).
-                  onCommit: (result) {
-                    notes.value = result.clear ? '' : result.notes;
-                    _persistDay(key, result).catchError((Object err) {
-                      if (mounted &&
-                          !_handleConsentFailure(err, closeDayEditor: true)) {
-                        setState(
-                            () => _error = friendlyError(widget.strings, err));
-                      }
-                    });
-                  },
-                ),
-        );
+        ExpandableDaySheet expandable(DayEditing? editor) => ExpandableDaySheet(
+              strings: widget.strings,
+              palette: widget.palette,
+              day: day,
+              today: _today,
+              notes: notes,
+              cycle: _cycle,
+              entry: existing,
+              editor: editor,
+              partner: partner,
+            );
+        // Read-only days get chips and cards instead of the editor.
+        final sheet = readOnly
+            ? expandable(null)
+            : DayEditorSheet(
+                strings: widget.strings,
+                date: key,
+                initialTaken: existing?.taken,
+                initialNotes: existing?.notes ?? '',
+                initialHeart: existing?.heart ?? false,
+                initialPeriod: existing?.period ?? false,
+                hadEntry: existing != null,
+                // Persist via onCommit — not the sheet's pop value. Nested
+                // note dialog → sheet pop races on web and can drop the
+                // result (note/heart "save" that only sticks after
+                // Taken/Missed re-tap).
+                onCommit: (result) {
+                  notes.value = result.clear ? '' : result.notes;
+                  _persistDay(key, result).catchError((Object err) {
+                    if (mounted &&
+                        !_handleConsentFailure(err, closeDayEditor: true)) {
+                      setState(
+                          () => _error = friendlyError(widget.strings, err));
+                    }
+                  });
+                },
+                builder: (context, editing) => expandable(editing),
+              );
         // A partner's sheet closes when calendar access is cleared.
-        return readOnly
+        return partner
             ? CloseOnSignal(signal: _accessCleared, child: sheet)
             : sheet;
       },
@@ -1843,6 +1846,7 @@ class DayEditorSheet extends StatefulWidget {
     this.initialHeart = false,
     this.initialPeriod = false,
     this.onCommit,
+    this.builder,
   });
 
   final Strings strings;
@@ -1856,6 +1860,10 @@ class DayEditorSheet extends StatefulWidget {
   /// When set (production calendar), persist immediately — do not rely on the
   /// modal sheet's `Navigator.pop` value surviving a nested note dialog.
   final ValueChanged<DayEditResult>? onCommit;
+
+  /// Lays the editor out somewhere else (the calendar's expandable sheet)
+  /// from its state and controls; without it, the plain editor is shown.
+  final Widget Function(BuildContext context, DayEditing editing)? builder;
 
   @override
   State<DayEditorSheet> createState() => _DayEditorSheetState();
@@ -2025,8 +2033,75 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
         ThemeData.estimateBrightnessForColor(periodColor) == Brightness.dark
             ? Colors.white
             : const Color(0xFF0B1220);
+    final actions = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _MarkButton(
+          key: const ValueKey('day-heart-toggle'),
+          tooltip: widget.strings.heartLabel,
+          selected: _heart,
+          color: heartColor,
+          ink: heartColor,
+          solid: false,
+          icon: Icons.favorite_border,
+          selectedIcon: Icons.favorite,
+          onPressed: _toggleHeart,
+        ),
+        const SizedBox(width: 4),
+        _MarkButton(
+          key: const ValueKey('day-period-toggle'),
+          tooltip: widget.strings.periodLabel,
+          selected: _period,
+          color: periodColor,
+          ink: periodInk,
+          icon: Icons.water_drop_outlined,
+          selectedIcon: Icons.water_drop,
+          onPressed: _togglePeriod,
+        ),
+        const SizedBox(width: 4),
+        IconButton.filledTonal(
+          tooltip: widget.strings.notes,
+          onPressed: _editNote,
+          icon: Icon(
+            hasNote ? Icons.sticky_note_2 : Icons.sticky_note_2_outlined,
+          ),
+        ),
+      ],
+    );
+    final status = SegmentedButton<bool>(
+      emptySelectionAllowed: true,
+      // Taken is the common answer, so it sits on the right.
+      segments: [
+        ButtonSegment(
+          value: false,
+          label: Text(widget.strings.missedLabel),
+        ),
+        ButtonSegment(
+          value: true,
+          label: Text(widget.strings.takenLabel),
+        ),
+      ],
+      selected: {if (_taken != null) _taken!},
+      onSelectionChanged: _onStatusChanged,
+    );
+    final builder = widget.builder;
+    if (builder != null) {
+      return builder(
+        context,
+        DayEditing(
+          notes: _notes,
+          heart: _heart,
+          period: _period,
+          onToggleHeart: _toggleHeart,
+          onTogglePeriod: _togglePeriod,
+          onEditNote: _editNote,
+          actions: actions,
+          status: status,
+        ),
+      );
+    }
     // Outside tap dismisses; no Cancel / Save — Done or Taken/Missed commit.
-    final sheet = Padding(
+    return Padding(
       padding: EdgeInsets.only(
         left: 20,
         right: 20,
@@ -2046,59 +2121,14 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
                   style: Theme.of(context).textTheme.headlineMedium,
                 ),
               ),
-              _MarkButton(
-                key: const ValueKey('day-heart-toggle'),
-                tooltip: widget.strings.heartLabel,
-                selected: _heart,
-                color: heartColor,
-                ink: heartColor,
-                solid: false,
-                icon: Icons.favorite_border,
-                selectedIcon: Icons.favorite,
-                onPressed: _toggleHeart,
-              ),
-              const SizedBox(width: 4),
-              _MarkButton(
-                key: const ValueKey('day-period-toggle'),
-                tooltip: widget.strings.periodLabel,
-                selected: _period,
-                color: periodColor,
-                ink: periodInk,
-                icon: Icons.water_drop_outlined,
-                selectedIcon: Icons.water_drop,
-                onPressed: _togglePeriod,
-              ),
-              const SizedBox(width: 4),
-              IconButton.filledTonal(
-                tooltip: widget.strings.notes,
-                onPressed: _editNote,
-                icon: Icon(
-                  hasNote ? Icons.sticky_note_2 : Icons.sticky_note_2_outlined,
-                ),
-              ),
+              actions,
             ],
           ),
           const SizedBox(height: 14),
-          SegmentedButton<bool>(
-            emptySelectionAllowed: true,
-            // Taken is the common answer, so it sits on the right.
-            segments: [
-              ButtonSegment(
-                value: false,
-                label: Text(widget.strings.missedLabel),
-              ),
-              ButtonSegment(
-                value: true,
-                label: Text(widget.strings.takenLabel),
-              ),
-            ],
-            selected: {if (_taken != null) _taken!},
-            onSelectionChanged: _onStatusChanged,
-          ),
+          status,
         ],
       ),
     );
-    return sheet;
   }
 }
 
