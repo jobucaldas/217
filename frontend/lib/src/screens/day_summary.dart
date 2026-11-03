@@ -596,42 +596,230 @@ Future<void> showDayNoteCard(
   );
 }
 
-/// A day sheet (editable for the owner, read-only for a partner) that can be
-/// pulled up: at rest it is just [sheet]; open it also lists the day's
-/// predictions and the whole note. Swiping it down past its resting height
-/// dismisses it.
-class ExpandableDaySheet extends StatelessWidget {
+/// A day sheet that can be pulled up. At rest it is the owner's editor
+/// ([sheet]) or, for a partner, a read-only glance at the day; pulled up it
+/// also shows the day in detail, the whole note and what is coming up.
+/// Dragging anywhere on it (or tapping its handle) opens and closes it;
+/// swiping it down past its resting height dismisses it.
+class ExpandableDaySheet extends StatefulWidget {
   const ExpandableDaySheet({
     super.key,
     required this.strings,
     required this.palette,
     required this.day,
+    required this.today,
     required this.notes,
-    required this.cycleKind,
-    required this.sheet,
+    required this.cycle,
+    this.sheet,
+    this.entry,
   });
 
   final Strings strings;
   final AppPalette palette;
   final DateTime day;
+  final DateTime today;
 
   /// The day's note, followed live (the owner can change it from [sheet]).
   final ValueListenable<String> notes;
-  final CycleDayKind cycleKind;
+  final CycleInfo cycle;
 
-  /// The sheet shown at rest.
-  final Widget sheet;
+  /// The owner's editor, shown at rest. Null on a partner's (read-only)
+  /// calendar: the sheet then describes [entry] instead.
+  final Widget? sheet;
 
-  /// Height the resting sheet needs, before text scaling.
-  static const _restingHeight = 190.0;
+  /// What was logged for [day]; read by the partner's glance and cards.
+  final Entry? entry;
+
+  @override
+  State<ExpandableDaySheet> createState() => _ExpandableDaySheetState();
+}
+
+class _ExpandableDaySheetState extends State<ExpandableDaySheet> {
+  final _controller = DraggableScrollableController();
+  final _restingKey = GlobalKey();
+  final _contentKey = GlobalKey();
+
+  /// Measured heights of the part shown at rest and of everything.
+  double? _restingPx;
+  double? _contentPx;
+
+  /// Sheet sizes, as fractions of the room the modal gives it.
+  double _resting = 0.25;
+  double _max = 0.7;
+  bool _open = false;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  /// Fits the resting and open sizes to what was laid out.
+  void _measure() {
+    if (!mounted) return;
+    final resting = _restingKey.currentContext?.size?.height;
+    final content = _contentKey.currentContext?.size?.height;
+    if (resting == null || content == null) return;
+    bool differs(double? a, double b) => a == null || (a - b).abs() > 0.5;
+    if (differs(_restingPx, resting) || differs(_contentPx, content)) {
+      setState(() {
+        _restingPx = resting;
+        _contentPx = content;
+      });
+    }
+  }
+
+  void _toggle() {
+    if (!_controller.isAttached || _max <= _resting) return;
+    _controller.animateTo(
+      _open ? _resting : _max,
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  bool _onExtent(DraggableScrollableNotification n) {
+    final open = n.extent > (_resting + _max) / 2;
+    if (open != _open) setState(() => _open = open);
+    return false;
+  }
 
   @override
   Widget build(BuildContext context) {
+    return ValueListenableBuilder<String>(
+      valueListenable: widget.notes,
+      builder: (context, note, _) {
+        WidgetsBinding.instance.addPostFrameCallback((_) => _measure());
+        return _build(context, note);
+      },
+    );
+  }
+
+  Widget _build(BuildContext context, String note) {
+    final scheme = Theme.of(context).colorScheme;
+    final strings = widget.strings;
+    final readOnly = widget.sheet == null;
+    final more = readOnly ? _partnerCards(context, note) : _ownerMore(context, note);
+    final handle = Semantics(
+      button: true,
+      label: _open ? strings.daySheetLess : strings.daySheetMore,
+      excludeSemantics: true,
+      onTap: _toggle,
+      child: GestureDetector(
+        key: const ValueKey('day-sheet-handle'),
+        behavior: HitTestBehavior.opaque,
+        onTap: _toggle,
+        child: SizedBox(
+          height: 28,
+          child: Align(
+            alignment: const Alignment(0, -0.1),
+            child: Container(
+              width: 32,
+              height: 4,
+              decoration: BoxDecoration(
+                color: scheme.onSurfaceVariant.withValues(alpha: 0.4),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
+    final resting = Column(
+      key: _restingKey,
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        handle,
+        widget.sheet ??
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: _toggle,
+              child: _PartnerDayGlance(
+                strings: strings,
+                palette: widget.palette,
+                day: widget.day,
+                entry: widget.entry,
+                note: note,
+                cycleKind: widget.cycle.kindOf(widget.day),
+                isFuture: widget.day.isAfter(widget.today),
+              ),
+            ),
+        // Keeps the resting sheet clear of the system navigation bar.
+        SizedBox(height: bottomInset),
+      ],
+    );
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final height = constraints.maxHeight;
+        final padding = MediaQuery.paddingOf(context);
+        final scale = MediaQuery.textScalerOf(context).scale(1);
+        // First frame: estimates until the parts are measured.
+        final restingPx = _restingPx ?? 170 * scale + padding.bottom;
+        final contentPx = _contentPx ?? height;
+        final top = ((height - padding.top - 24) / height).clamp(0.3, 1.0);
+        _resting = (restingPx / height).clamp(0.1, top);
+        _max = (contentPx / height).clamp(_resting, top);
+        return NotificationListener<DraggableScrollableNotification>(
+          onNotification: _onExtent,
+          child: DraggableScrollableSheet(
+            controller: _controller,
+            expand: false,
+            snap: true,
+            initialChildSize: _resting,
+            // Below the resting size is only the way out: the modal closes
+            // once the sheet reaches 0.
+            minChildSize: 0,
+            maxChildSize: _max,
+            snapSizes: [_resting],
+            builder: (context, controller) => Material(
+              color: scheme.surfaceContainerLow,
+              clipBehavior: Clip.antiAlias,
+              shape: const RoundedRectangleBorder(
+                borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+              ),
+              child: SingleChildScrollView(
+                key: const ValueKey('expandable-day-sheet'),
+                controller: controller,
+                // Content shorter than the sheet still has to take the drag,
+                // or the sheet could never be pulled up.
+                physics: const AlwaysScrollableScrollPhysics(),
+                child: Column(
+                  key: _contentKey,
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    resting,
+                    Padding(
+                      key: const ValueKey('day-more'),
+                      padding:
+                          EdgeInsets.fromLTRB(20, 0, 20, 20 + bottomInset),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: more,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// The owner's sheet already shows what she logged: pulled up it adds the
+  /// day's predictions, the whole note and what is coming up.
+  List<Widget> _ownerMore(BuildContext context, String note) {
     final scheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
     final brightness = Theme.of(context).brightness;
-    final period = App217Colors.period(brightness, palette);
-    final pms = App217Colors.pms(brightness, palette);
+    final period = App217Colors.period(brightness, widget.palette);
+    final pms = App217Colors.pms(brightness, widget.palette);
+    final cycleKind = widget.cycle.kindOf(widget.day);
 
     Widget row(Key key, String label, Widget mark) => Padding(
           key: key,
@@ -646,20 +834,20 @@ class ExpandableDaySheet extends StatelessWidget {
           ]),
         );
 
-    List<Widget> extraFor(String notes) => <Widget>[
+    return [
       if (cycleKind == CycleDayKind.predictedPeriod)
         row(
           const ValueKey('day-more-predicted-period'),
-          strings.predictedPeriod,
+          widget.strings.predictedPeriod,
           DayMark(color: period, icon: Icons.water_drop_outlined),
         ),
       if (cycleKind == CycleDayKind.pms)
         row(
           const ValueKey('day-more-pms'),
-          strings.expectedPms,
+          widget.strings.expectedPms,
           DayMark(color: pms, dashed: true),
         ),
-      if (notes.isNotEmpty)
+      if (note.isNotEmpty)
         Container(
           key: const ValueKey('day-more-note'),
           margin: const EdgeInsets.only(top: 8),
@@ -673,7 +861,7 @@ class ExpandableDaySheet extends StatelessWidget {
             border: Border.all(color: scheme.outline),
           ),
           child: Text(
-            notes,
+            note,
             style: textTheme.bodyLarge?.copyWith(
               color: scheme.onSurface,
               fontSize: 17,
@@ -681,65 +869,442 @@ class ExpandableDaySheet extends StatelessWidget {
             ),
           ),
         ),
+      const SizedBox(height: 10),
+      _comingUpCard(context, owner: true),
     ];
-
-    return ValueListenableBuilder<String>(
-      valueListenable: notes,
-      builder: (context, note, _) => _build(context, extraFor(note)),
-    );
   }
 
-  Widget _build(BuildContext context, List<Widget> extra) {
+  /// The partner's day, card by card: the pill, sex, the cycle, the note,
+  /// then what is coming up.
+  List<Widget> _partnerCards(BuildContext context, String note) {
+    final strings = widget.strings;
     final scheme = Theme.of(context).colorScheme;
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final scale = MediaQuery.textScalerOf(context).scale(1);
-        final resting = (_restingHeight * scale / constraints.maxHeight)
-            .clamp(0.15, 0.6);
-        // Nothing more to show: it stays the owner's sheet, size and all.
-        final expandable = extra.isNotEmpty;
-        return DraggableScrollableSheet(
-          expand: false,
-          snap: true,
-          initialChildSize: resting,
-          minChildSize: resting,
-          maxChildSize: expandable ? 0.7 : resting,
-          builder: (context, controller) => Material(
-            color: scheme.surfaceContainerLow,
-            clipBehavior: Clip.antiAlias,
-            shape: const RoundedRectangleBorder(
-              borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-            ),
-            child: ListView(
-              key: const ValueKey('expandable-day-sheet'),
-              controller: controller,
-              padding: EdgeInsets.zero,
-              children: [
-                Center(
-                  child: Container(
-                    width: 32,
-                    height: 4,
-                    margin: const EdgeInsets.only(top: 12, bottom: 4),
-                    decoration: BoxDecoration(
-                      color: scheme.onSurfaceVariant.withValues(alpha: 0.4),
-                      borderRadius: BorderRadius.circular(2),
+    final brightness = Theme.of(context).brightness;
+    final facts = _dayFacts(
+      strings: strings,
+      palette: widget.palette,
+      brightness: brightness,
+      scheme: scheme,
+      entry: widget.entry,
+      note: note,
+      cycleKind: widget.cycle.kindOf(widget.day),
+      isFuture: widget.day.isAfter(widget.today),
+    );
+    final small = facts.where((f) => f.detail != null).toList();
+    return [
+      LayoutBuilder(
+        builder: (context, constraints) {
+          // Two to a row; a lone last card takes the whole row.
+          final half = (constraints.maxWidth - 10) / 2;
+          return Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              for (var i = 0; i < small.length; i++)
+                SizedBox(
+                  width: i == small.length - 1 && small.length.isOdd
+                      ? constraints.maxWidth
+                      : half,
+                  child: _InfoCard(
+                    key: ValueKey('day-card-${small[i].id}'),
+                    color: small[i].color,
+                    icon: small[i].icon,
+                    title: small[i].title,
+                    body: Text(
+                      small[i].detail!,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            color: scheme.onSurface,
+                            fontWeight: FontWeight.w600,
+                          ),
                     ),
                   ),
                 ),
-                sheet,
-                if (extra.isNotEmpty)
+            ],
+          );
+        },
+      ),
+      if (note.isNotEmpty) ...[
+        const SizedBox(height: 10),
+        _InfoCard(
+          key: const ValueKey('day-more-note'),
+          color: scheme.primary,
+          icon: Icons.sticky_note_2_outlined,
+          title: strings.notes,
+          body: Text(
+            note,
+            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                  color: scheme.onSurface,
+                  fontSize: 17,
+                  height: 1.35,
+                ),
+          ),
+        ),
+      ],
+      const SizedBox(height: 10),
+      _comingUpCard(context, owner: false),
+    ];
+  }
+
+  /// The next PMS window and period, or why there are none.
+  Widget _comingUpCard(BuildContext context, {required bool owner}) {
+    final strings = widget.strings;
+    final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    final brightness = Theme.of(context).brightness;
+    final dates = strings.dates;
+    final cycle = widget.cycle;
+    final next = cycle.nextWindow(widget.today);
+    final todayKind = cycle.kindOf(widget.today);
+    final pmsMark = DayMark(
+      color: App217Colors.pms(brightness, widget.palette),
+      dashed: true,
+    );
+    final periodMark = DayMark(
+      color: App217Colors.period(brightness, widget.palette),
+      icon: Icons.water_drop_outlined,
+    );
+    // Same lines as the calendar's header, soonest first.
+    final lines = <(Widget, String)>[];
+    if (next != null) {
+      if (todayKind == CycleDayKind.predictedPeriod) {
+        lines.add((periodMark, strings.cyclePeriodNow));
+      } else {
+        if (todayKind == CycleDayKind.pms) {
+          lines.add((pmsMark, strings.cyclePmsLikelyNow));
+        } else if (next.pmsStart.year >= 2) {
+          lines.add((
+            pmsMark,
+            strings.cyclePmsFrom(dates.shortDayMonth(next.pmsStart)),
+          ));
+        }
+        lines.add((
+          periodMark,
+          strings.cycleNextPeriod(dates.shortDayMonth(next.periodStart)),
+        ));
+      }
+    }
+    final stageNote = owner ? strings.cycleStageNote(cycle.note) : '';
+    final empty = stageNote.isNotEmpty
+        ? stageNote
+        : (owner ? strings.cycleHintOwner : strings.cycleNoPredictions);
+    final style = textTheme.bodyLarge?.copyWith(color: scheme.onSurface);
+    return _InfoCard(
+      key: const ValueKey('day-more-coming-up'),
+      color: scheme.primary,
+      icon: Icons.event_outlined,
+      title: strings.comingUp,
+      body: lines.isEmpty
+          ? Text(empty, style: style)
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (final (mark, text) in lines)
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: extra,
-                    ),
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Row(children: [
+                      SizedBox(width: 16, child: Center(child: mark)),
+                      const SizedBox(width: 8),
+                      Expanded(child: Text(text, style: style)),
+                    ]),
                   ),
               ],
             ),
+    );
+  }
+}
+
+/// One thing known about a day, as the partner's chips and cards show it.
+typedef _DayFact = ({
+  String id,
+  // Null: the dashed ring expected PMS days have on the calendar.
+  IconData? icon,
+  Color color,
+  String title,
+  String label,
+  String? detail,
+});
+
+List<_DayFact> _dayFacts({
+  required Strings strings,
+  required AppPalette palette,
+  required Brightness brightness,
+  required ColorScheme scheme,
+  required Entry? entry,
+  required String note,
+  required CycleDayKind cycleKind,
+  required bool isFuture,
+}) {
+  final taken = entry?.taken;
+  final period = App217Colors.period(brightness, palette);
+  final pms = App217Colors.pms(brightness, palette);
+  final heart = App217Colors.intimacy(brightness, palette);
+  final pill = switch (taken) {
+    true => (
+        Icons.check_circle,
+        App217Colors.statusTaken(brightness, palette),
+        strings.taken
+      ),
+    false => (
+        Icons.cancel,
+        App217Colors.statusMissed(brightness, palette),
+        strings.missed
+      ),
+    null => (
+        isFuture ? Icons.schedule : Icons.radio_button_unchecked,
+        scheme.onSurfaceVariant,
+        isFuture ? strings.pillNotDue : strings.pillNotLogged
+      ),
+  };
+  return [
+    (
+      id: 'pill',
+      icon: pill.$1,
+      color: pill.$2,
+      title: strings.pillLabel,
+      label: pill.$3,
+      detail: pill.$3,
+    ),
+    if (entry?.heart ?? false)
+      (
+        id: 'heart',
+        icon: Icons.favorite,
+        color: heart,
+        title: strings.heartLabel,
+        label: strings.heartLabel,
+        detail: strings.dayLogged,
+      ),
+    if (entry?.period ?? false)
+      (
+        id: 'period',
+        icon: Icons.water_drop,
+        color: period,
+        title: strings.periodLabel,
+        label: strings.periodLabel,
+        detail: strings.dayLogged,
+      )
+    else if (cycleKind == CycleDayKind.predictedPeriod)
+      (
+        id: 'predicted-period',
+        icon: Icons.water_drop_outlined,
+        color: period,
+        title: strings.predictedPeriod,
+        label: strings.predictedPeriod,
+        detail: strings.periodExpectedThisDay,
+      ),
+    if (cycleKind == CycleDayKind.pms)
+      (
+        id: 'pms',
+        icon: null,
+        color: pms,
+        title: strings.expectedPms,
+        label: strings.expectedPms,
+        detail: strings.pmsLikelyThisDay,
+      ),
+    // The note gets its own full-width card when the sheet is open.
+    if (note.isNotEmpty)
+      (
+        id: 'note',
+        icon: Icons.sticky_note_2_outlined,
+        color: scheme.primary,
+        title: strings.notes,
+        label: strings.notes,
+        detail: null,
+      ),
+  ];
+}
+
+/// The partner's sheet at rest: the date and a chip for each thing known
+/// about the day. Nothing here looks like a control: the day is hers.
+class _PartnerDayGlance extends StatelessWidget {
+  const _PartnerDayGlance({
+    required this.strings,
+    required this.palette,
+    required this.day,
+    required this.entry,
+    required this.note,
+    required this.cycleKind,
+    required this.isFuture,
+  });
+
+  final Strings strings;
+  final AppPalette palette;
+  final DateTime day;
+  final Entry? entry;
+  final String note;
+  final CycleDayKind cycleKind;
+  final bool isFuture;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final facts = _dayFacts(
+      strings: strings,
+      palette: palette,
+      brightness: theme.brightness,
+      scheme: scheme,
+      entry: entry,
+      note: note,
+      cycleKind: cycleKind,
+      isFuture: isFuture,
+    );
+    return Padding(
+      key: const ValueKey('partner-day-glance'),
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(strings.dates.fullDate(day), style: theme.textTheme.headlineMedium),
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final f in facts)
+                _InfoChip(
+                  key: ValueKey('day-chip-${f.id}'),
+                  icon: f.icon,
+                  color: f.color,
+                  label: f.label,
+                ),
+            ],
           ),
-        );
-      },
+        ],
+      ),
+    );
+  }
+}
+
+/// Read-only chip: a tinted pill with the mark's colour and its label.
+class _InfoChip extends StatelessWidget {
+  const _InfoChip({
+    super.key,
+    required this.icon,
+    required this.color,
+    required this.label,
+  });
+
+  final IconData? icon;
+  final Color color;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      constraints: const BoxConstraints(minHeight: 36),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: Color.alphaBlend(color.withValues(alpha: 0.14), scheme.surface),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: color.withValues(alpha: 0.5)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _FactMark(icon: icon, color: color, size: 18),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context)
+                  .textTheme
+                  .labelLarge
+                  ?.copyWith(color: scheme.onSurface),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Read-only card of the open sheet: a tinted icon, a small title and
+/// [body].
+class _InfoCard extends StatelessWidget {
+  const _InfoCard({
+    super.key,
+    required this.color,
+    required this.icon,
+    required this.title,
+    required this.body,
+  });
+
+  final Color color;
+  final IconData? icon;
+  final String title;
+  final Widget body;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Color.alphaBlend(color.withValues(alpha: 0.10), scheme.surface),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: color.withValues(alpha: 0.4)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.2),
+              shape: BoxShape.circle,
+            ),
+            child: Center(
+              child: _FactMark(icon: icon, color: color, size: 20),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
+                ),
+                const SizedBox(height: 2),
+                body,
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A fact's icon, or the dashed PMS ring when it has none.
+class _FactMark extends StatelessWidget {
+  const _FactMark({required this.icon, required this.color, required this.size});
+
+  final IconData? icon;
+  final Color color;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final icon = this.icon;
+    if (icon != null) return Icon(icon, size: size, color: color);
+    return CustomPaint(
+      size: Size.square(size - 4),
+      painter: DashedRingPainter(
+        color: color,
+        radius: size / 4,
+        strokeWidth: 1.6,
+        dash: 2.5,
+        gap: 2.5,
+      ),
     );
   }
 }

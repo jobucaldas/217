@@ -557,6 +557,32 @@ class Strings {
         'Marque os dias de menstruação para ver a previsão de TPM',
         'Marca los días de regla para ver la previsión de SPM',
       );
+  // Day sheet: the partner's read-only day, and pulling the sheet up
+  String get pillLabel => _t('Pill', 'Pílula', 'Píldora');
+  String get pillNotLogged =>
+      _t('Not logged yet', 'Ainda não registrada', 'Aún sin registrar');
+  String get pillNotDue =>
+      _t('Not due yet', 'Ainda não chegou', 'Todavía no toca');
+  String get dayLogged => _t('Logged', 'Registrado', 'Registrado');
+  String get periodExpectedThisDay => _t(
+        'Expected around this day',
+        'Prevista para por volta deste dia',
+        'Prevista para estos días',
+      );
+  String get pmsLikelyThisDay => _t(
+        'Likely around this day',
+        'Provável por volta deste dia',
+        'Probable por estos días',
+      );
+  String get comingUp => _t('Coming up', 'Próximos dias', 'Próximamente');
+  String get cycleNoPredictions => _t(
+        'No period or PMS predictions for now.',
+        'Sem previsões de menstruação ou TPM por enquanto.',
+        'Sin previsiones de regla ni SPM por ahora.',
+      );
+  String get daySheetMore => _t('Show more', 'Mostrar mais', 'Mostrar más');
+  String get daySheetLess =>
+      _t('Show less', 'Mostrar menos', 'Mostrar menos');
   String cycleStageNote(String code) => switch (code) {
         'pms_suppressed_menopause' => _t(
             '217 counts no PMS because you told 217 you are in menopause.',
