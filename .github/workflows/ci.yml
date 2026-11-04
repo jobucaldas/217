@@ -426,3 +426,41 @@ jobs:
           gh release upload nightly 217-nightly.apk 217-nightly-x86_64.AppImage 217-nightly-setup.exe --clobber
           gh release create "$TAG" --title "$TAG" --target "$GITHUB_SHA" --notes "${NOTES}" --latest \
             "217-${TAG}.apk" "217-${TAG}-x86_64.AppImage" "217-${TAG}-setup.exe"
+
+  # main only: uploads the same signed .aab (same build number as the GitHub release
+  # tag) to Google Play's internal testing track. Runs after `publish`, so the tag
+  # exists first. Skipped, not failed, until PLAY_SERVICE_ACCOUNT_JSON is set.
+  play:
+    name: Publish (Google Play internal testing)
+    if: github.event_name == 'push'
+    needs: [frontend, publish]
+    runs-on: ubuntu-latest
+    env:
+      PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+    steps:
+      - name: Check for the Play service account
+        id: enabled
+        run: |
+          if [ -n "$PLAY_SERVICE_ACCOUNT_JSON" ]; then
+            echo "value=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::PLAY_SERVICE_ACCOUNT_JSON is not set; skipping the Google Play upload."
+            echo "value=false" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.enabled.outputs.value == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: android-app-bundle
+          path: aab
+      - name: Upload to the internal testing track
+        if: steps.enabled.outputs.value == 'true'
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: com.caldasstudios.app217
+          releaseFiles: aab/app-release.aab
+          releaseName: ${{ needs.frontend.outputs.tag }}
+          track: internal
+          # Play only accepts drafts while the app has never been published: promote the
+          # draft by hand in Play Console. Switch to `completed` once the app is live.
+          status: draft
