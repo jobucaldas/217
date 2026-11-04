@@ -109,6 +109,7 @@ class SettingsPage extends StatefulWidget {
   /// Open with the "updated" notice in the Personal section (a suggested
   /// stage was just accepted on the calendar).
   final bool stageUpdated;
+
   /// Signed in: the delete account control shows when [onAccountDeleted] is set.
   final VoidCallback? onAccountDeleting;
   final VoidCallback? onAccountDeleted;
@@ -312,8 +313,7 @@ class _SettingsPageState extends State<SettingsPage> {
               api: widget.api,
               strings: widget.strings,
               user: widget.user!,
-              suggestion:
-                  widget.user!.isOwner ? widget.stageSuggestion : null,
+              suggestion: widget.user!.isOwner ? widget.stageSuggestion : null,
               showUpdated: widget.stageUpdated,
               onStageChanged: widget.onStageChanged,
               onProfileChanged: widget.onProfileChanged,
@@ -529,9 +529,7 @@ class _SettingsPageState extends State<SettingsPage> {
             key: const ValueKey('settings-advanced'),
             contentPadding: const EdgeInsets.symmetric(horizontal: 4),
             title: Text(
-              _advancedOpen
-                  ? widget.strings.showLess
-                  : widget.strings.showMore,
+              _advancedOpen ? widget.strings.showLess : widget.strings.showMore,
               style: text.titleMedium?.copyWith(color: scheme.primary),
             ),
             trailing: Icon(
@@ -547,8 +545,7 @@ class _SettingsPageState extends State<SettingsPage> {
               key: const ValueKey('self-host-guide'),
               contentPadding: const EdgeInsets.symmetric(horizontal: 4),
               title: Text(widget.strings.selfHostGuide),
-              trailing:
-                  Icon(Icons.open_in_new, color: scheme.onSurfaceVariant),
+              trailing: Icon(Icons.open_in_new, color: scheme.onSurfaceVariant),
               onTap: _openGuide,
             ),
             if (widget.onLogout != null && widget.onAccountDeleted != null)
@@ -567,10 +564,16 @@ class _SettingsPageState extends State<SettingsPage> {
             alignment: AlignmentDirectional.centerEnd,
             child: Padding(
               padding: const EdgeInsets.fromLTRB(0, 16, 4, 0),
-              child: Text(
-                key: const ValueKey('app-version'),
-                appVersion.isEmpty ? 'dev' : 'v$appVersion',
-                style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+              child: Semantics(
+                label: widget.strings.appVersionLabel(
+                    appVersion.isEmpty ? 'dev' : 'v$appVersion'),
+                excludeSemantics: true,
+                child: Text(
+                  key: const ValueKey('app-version'),
+                  appVersion.isEmpty ? 'dev' : 'v$appVersion',
+                  style:
+                      text.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+                ),
               ),
             ),
           ),

@@ -2,4 +2,6 @@
 <resources>
     <!-- Matches the background of assets/branding/app-icon.svg -->
     <color name="ic_launcher_background">#000000</color>
+    <!-- Window background until Flutter draws: the app's scaffold colour (theme/palette.dart) -->
+    <color name="app_background">#F5F5F4</color>
 </resources>
