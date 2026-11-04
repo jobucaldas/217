@@ -238,9 +238,7 @@ func (h *Handler) appOrigin() string {
 }
 
 func (h *Handler) sameOriginAllowed(r *http.Request) bool {
-	if h.appOrigin() == "" {
-		return true
-	}
+	// Without a configured app origin nothing can match: fail closed.
 	origin := r.Header.Get("Origin")
 	for _, allowed := range h.browserOrigins() {
 		if origin != "" && origin == allowed {

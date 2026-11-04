@@ -10,8 +10,63 @@ import (
 	"time"
 
 	"217/backend/internal/auth"
+	"217/backend/internal/handler"
 	"217/backend/internal/model"
+	"217/backend/internal/store"
 )
+
+func TestReturnCookieAttributes(t *testing.T) {
+	h, _ := newTestHandler(t)
+	h.SetOAuthProvider(&fakeOAuthProvider{})
+	w := httptest.NewRecorder()
+	h.StartWorkOSOAuth(w, httptest.NewRequest(http.MethodGet, "/api/auth/workos?return="+url.QueryEscape("/app/privacy?lang=pt"), nil))
+	c := returnCookie(w.Result().Cookies())
+	if c == nil {
+		t.Fatal("no return cookie")
+	}
+	if c.Path != auth.BrowserCallbackPath || !c.HttpOnly || c.SameSite != http.SameSiteLaxMode || c.MaxAge != 300 {
+		t.Fatalf("cookie attributes: %+v", c)
+	}
+}
+
+func TestCookieDeleteNeedsSameOrigin(t *testing.T) {
+	h, s := newTestHandler(t)
+	user, _ := s.LinkWorkOSIdentity("csrf-subject", "csrf@example.com", "C", true)
+	cookie := sessionCookie(t, s, user.ID)
+	guarded := h.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) })
+	for origin, want := range map[string]int{"": 403, "http://evil.example": 403, "http://localhost:8080": 204} {
+		req := authedRequest(http.MethodDelete, "/api/account", cookie, nil)
+		req.Header.Del("Origin")
+		if origin != "" {
+			req.Header.Set("Origin", origin)
+		}
+		w := httptest.NewRecorder()
+		guarded(w, req)
+		if w.Code != want {
+			t.Errorf("origin %q: %d, want %d", origin, w.Code, want)
+		}
+	}
+}
+
+func TestCookieRequestsFailClosedWithoutAppOrigin(t *testing.T) {
+	s := store.NewMemoryStore()
+	h := handler.New(s)
+	user, _ := s.LinkWorkOSIdentity("closed-subject", "closed@example.com", "C", true)
+	cookie := sessionCookie(t, s, user.ID)
+	guarded := h.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) })
+	w := httptest.NewRecorder()
+	guarded(w, authedRequest(http.MethodDelete, "/api/account", cookie, nil))
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("cookie without app origin: %d", w.Code)
+	}
+	bearer := httptest.NewRequest(http.MethodDelete, "/api/account", nil)
+	bearer.Header.Set("Authorization", "Bearer "+cookie.Value)
+	w = httptest.NewRecorder()
+	guarded(w, bearer)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("bearer without app origin: %d", w.Code)
+	}
+}
 
 func TestLegacyPrivacyPageRedirectsToApp(t *testing.T) {
 	h, _ := newTestHandler(t)
@@ -56,8 +111,13 @@ func TestSignInReturnsToPrivacyPages(t *testing.T) {
 	}
 	for returnTo, want := range map[string]string{
 		"":                                    "http://localhost:8080/app/",
-		"/app/privacy?lang=pt&confirm=delete": "http://localhost:8080/app/privacy?lang=pt&confirm=delete",
+		"/app/privacy?lang=pt&confirm=delete": "http://localhost:8080/app/privacy?confirm=delete&lang=pt",
+		"/app/privacy?lang=pt&x=1&confirm=ev": "http://localhost:8080/app/privacy?lang=pt",
 		"/app/account/delete?lang=es":         "http://localhost:8080/app/account/delete?lang=es",
+		"/app/privacy/../x":                   "http://localhost:8080/app/",
+		"/app/privacy%2F%2Fx":                 "http://localhost:8080/app/",
+		"/app/privacy#frag":                   "http://localhost:8080/app/",
+		"/app/privacy\\x":                     "http://localhost:8080/app/",
 		"//evil.example/app/privacy":          "http://localhost:8080/app/",
 		"/app/privacy-evil":                   "http://localhost:8080/app/",
 		"/api/privacy":                        "http://localhost:8080/app/",
