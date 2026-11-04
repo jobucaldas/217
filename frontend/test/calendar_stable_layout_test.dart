@@ -46,6 +46,9 @@ Future<Map<int, List<Object>>> _measure(
     ),
     home: CalendarScreen(
       api: _Api(withNotes),
+      // A fixed today (the 15th): the entries sit on the 2nd of each month,
+      // so the selected day never holds the note whatever the date is.
+      clock: () => DateTime(2026, 3, 15, 12),
       user: const User(id: 'u1', email: 'o@example.invalid', name: 'O'),
       strings: const Strings(AppLanguage.en),
       onOpenSettings: () {},

@@ -251,7 +251,7 @@ void main() {
     expect(
       find.descendant(
           of: find.byKey(const ValueKey('day-chip-pill')),
-          matching: find.text('Not logged yet')),
+          matching: find.text('Open')),
       findsOneWidget,
     );
     expect(shown(const ValueKey('day-coming-up-title')), isFalse);

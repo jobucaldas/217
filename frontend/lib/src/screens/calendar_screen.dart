@@ -40,6 +40,7 @@ class CalendarScreen extends StatefulWidget {
     this.onDismissReminderHint,
     this.stageSuggestion,
     this.onStageSuggestionAccepted,
+    this.clock = DateTime.now,
   });
 
   final ApiClient api;
@@ -76,6 +77,9 @@ class CalendarScreen extends StatefulWidget {
 
   /// The suggested stage was saved from the banner.
   final ValueChanged<SessionSnapshot>? onStageSuggestionAccepted;
+
+  /// The current time; only tests replace it.
+  final DateTime Function() clock;
 
   @override
   State<CalendarScreen> createState() => _CalendarScreenState();
@@ -198,9 +202,24 @@ class _CalendarScreenState extends State<CalendarScreen>
   static const _wheelIdleGap = Duration(milliseconds: 140);
 
   DateTime get _today {
-    final now = DateTime.now();
+    final now = widget.clock();
     return DateTime(now.year, now.month, now.day);
   }
+
+  /// The day the screen last knew to be today; a different one means the
+  /// date rolled over while it stayed open.
+  late DateTime _knownToday;
+  Timer? _midnight;
+
+  /// Day the open sheet describes (null when none is open) and what it shows;
+  /// refreshed from [build] whenever the entry, cycle or date moves.
+  String? _sheetKey;
+  final _dayView = ValueNotifier<DayView>(
+    DayView(entry: null, cycle: CycleInfo.empty, today: DateTime(1)),
+  );
+
+  DayView _dayViewFor(String key) =>
+      DayView(entry: _visibleEntry(key), cycle: _cycle, today: _today);
 
   String get _todayKey => DateFormat('yyyy-MM-dd').format(_today);
 
@@ -225,8 +244,10 @@ class _CalendarScreenState extends State<CalendarScreen>
   @override
   void initState() {
     super.initState();
-    final now = DateTime.now();
+    final now = widget.clock();
     _month = DateTime(now.year, now.month);
+    _knownToday = _today;
+    _armMidnight();
     _monthSnap = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 280),
@@ -289,8 +310,39 @@ class _CalendarScreenState extends State<CalendarScreen>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed && mounted) {
       unawaited(widget.api.syncPending());
-      _load();
+      _armMidnight();
+      if (!_checkDayChange()) _load();
     }
+  }
+
+  /// Wakes just after the next midnight (a web tab can stay open for days).
+  void _armMidnight() {
+    _midnight?.cancel();
+    final now = widget.clock();
+    final next = DateTime(now.year, now.month, now.day + 1);
+    _midnight = Timer(
+      next.difference(now) + const Duration(seconds: 1),
+      () {
+        if (!mounted) return;
+        _armMidnight();
+        _checkDayChange();
+      },
+    );
+  }
+
+  /// When the date moved on, drops what was true of the old today and
+  /// reloads. Returns whether it did.
+  bool _checkDayChange() {
+    final today = _today;
+    if (_isSameDay(today, _knownToday)) return false;
+    _knownToday = today;
+    setState(() {
+      if (_selected != null && _isSameDay(_selected!, today)) _selected = null;
+      _todayEntry = _monthCache[_monthKey(today)]?[_todayKey];
+    });
+    _alertSyncKey = null;
+    _load();
+    return true;
   }
 
   @override
@@ -298,6 +350,8 @@ class _CalendarScreenState extends State<CalendarScreen>
     WidgetsBinding.instance.removeObserver(this);
     widget.cycleRefreshSignal?.removeListener(_onCycleRefresh);
     _wheelIdle?.cancel();
+    _midnight?.cancel();
+    _dayView.dispose();
     _loadDebounce?.cancel();
     _tapTimer?.cancel();
     _monthSnap.dispose();
@@ -522,7 +576,7 @@ class _CalendarScreenState extends State<CalendarScreen>
           await _cancelPartnerAlerts();
         }
       } else {
-        final now = DateTime.now();
+        final now = widget.clock();
         final dates = widget.strings.dates;
         final alerts = planPartnerAlerts(
           now: now,
@@ -795,7 +849,11 @@ class _CalendarScreenState extends State<CalendarScreen>
   /// set it, so it is never older than the cached month (a failed extra
   /// read of today's month leaves both as they were).
   Entry? _visibleEntry(String key) {
-    if (key == _todayKey) return _todayEntry;
+    if (key == _todayKey) {
+      // Not the entry of a day that has since passed.
+      final entry = _todayEntry;
+      if (entry != null && entry.date == key) return entry;
+    }
     return _monthCache[_monthKey(DateTime.parse(key))]?[key];
   }
 
@@ -991,7 +1049,7 @@ class _CalendarScreenState extends State<CalendarScreen>
   Future<void> _openDay(DateTime day) async {
     setState(() => _selected = _isSameDay(day, _today) ? null : day);
     if (!widget.share.canEditCalendar) return _viewDay(day);
-    return _showDaySheet(day, readOnly: day.isAfter(_today));
+    return _showDaySheet(day, readOnly: isFutureDay(day, _today));
   }
 
   /// A partner's view of [day]: what was logged, read-only.
@@ -1001,12 +1059,16 @@ class _CalendarScreenState extends State<CalendarScreen>
   /// only reads it (and it closes when calendar access is cleared), as does
   /// the owner on future days. Either can pull it up for what else is known
   /// about the day (predictions, the whole note, what is coming up).
-  Future<void> _showDaySheet(DateTime day, {required bool readOnly}) {
+  Future<void> _showDaySheet(DateTime day, {required bool readOnly}) async {
     final partner = !widget.share.canEditCalendar;
     final key = DateFormat('yyyy-MM-dd').format(day);
+    // An editor that starts before the day's month is known would save what
+    // it does not know (Taken/Missed) as empty.
+    if (!readOnly && !await _ensureMonthKnown(day)) return;
+    if (!mounted) return;
     final existing = _visibleEntry(key);
-    // The pulled-up part follows the note as the owner edits it.
-    final notes = ValueNotifier<String>(existing?.notes.trim() ?? '');
+    _sheetKey = key;
+    _dayView.value = _dayViewFor(key);
     return showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -1017,10 +1079,7 @@ class _CalendarScreenState extends State<CalendarScreen>
               strings: widget.strings,
               palette: widget.palette,
               day: day,
-              today: _today,
-              notes: notes,
-              cycle: _cycle,
-              entry: existing,
+              view: _dayView,
               editor: editor,
               partner: partner,
             );
@@ -1029,6 +1088,7 @@ class _CalendarScreenState extends State<CalendarScreen>
             ? expandable(null)
             : DayEditorSheet(
                 strings: widget.strings,
+                palette: widget.palette,
                 date: key,
                 initialTaken: existing?.taken,
                 initialNotes: existing?.notes ?? '',
@@ -1040,7 +1100,6 @@ class _CalendarScreenState extends State<CalendarScreen>
                 // result (note/heart "save" that only sticks after
                 // Taken/Missed re-tap).
                 onCommit: (result) {
-                  notes.value = result.clear ? '' : result.notes;
                   _persistDay(key, result).catchError((Object err) {
                     if (mounted &&
                         !_handleConsentFailure(err, closeDayEditor: true)) {
@@ -1056,7 +1115,36 @@ class _CalendarScreenState extends State<CalendarScreen>
             ? CloseOnSignal(signal: _accessCleared, child: sheet)
             : sheet;
       },
-    ).whenComplete(notes.dispose);
+    ).whenComplete(() {
+      if (_sheetKey == key) _sheetKey = null;
+    });
+  }
+
+  /// Makes sure [day]'s month is in memory, reading it when it is not (a cold
+  /// start, or a month never shown). False when it could not be read.
+  Future<bool> _ensureMonthKnown(DateTime day) async {
+    final month = _monthKey(day);
+    if (_monthCache.containsKey(month)) return true;
+    try {
+      final list = await widget.api.listEntries(day.year, day.month);
+      if (!mounted) return false;
+      if (!_monthCache.containsKey(month)) {
+        setState(() {
+          _monthCache[month] = {for (final e in list) e.date: e};
+          _showCachedMonths();
+          if (_monthKey(_today) == month) {
+            _todayEntry = _monthCache[month]![_todayKey];
+          }
+        });
+      }
+      return true;
+    } catch (err) {
+      if (!mounted) return false;
+      if (!_handleConsentFailure(err)) {
+        setState(() => _error = friendlyError(widget.strings, err));
+      }
+      return false;
+    }
   }
 
   @override
@@ -1101,6 +1189,16 @@ class _CalendarScreenState extends State<CalendarScreen>
         _fixedChromeHeight +
             _headerAndSummaryHeight * math.max(1.0, textScale) +
             6 * _gridMinCellAspect * cellWidth;
+    // The open day sheet follows the entry, the cycle and the date.
+    final sheetKey = _sheetKey;
+    if (sheetKey != null) {
+      final view = _dayViewFor(sheetKey);
+      if (!view.sameAs(_dayView.value)) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && _sheetKey == sheetKey) _dayView.value = view;
+        });
+      }
+    }
     // The open note card follows this, so it closes if the data is cleared.
     if (_liveNote.value != selectedNotes) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1134,7 +1232,7 @@ class _CalendarScreenState extends State<CalendarScreen>
       cycleLines
           .add((pms: false, now: true, text: widget.strings.cyclePeriodNow));
     } else {
-      if (next.pmsStart.year >= 2) {
+      if (next.hasPms) {
         cycleLines.add((
           pms: true,
           now: false,
@@ -1359,6 +1457,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                                     key: ValueKey(
                                       '${_prevMonth.year}-${_prevMonth.month}',
                                     ),
+                                    strings: widget.strings,
                                     month: _prevMonth,
                                     today: _today,
                                     entries: _prevEntries,
@@ -1378,6 +1477,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                                     key: ValueKey(
                                       '${_month.year}-${_month.month}',
                                     ),
+                                    strings: widget.strings,
                                     month: _month,
                                     today: _today,
                                     entries: _entries,
@@ -1397,6 +1497,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                                     key: ValueKey(
                                       '${_nextMonth.year}-${_nextMonth.month}',
                                     ),
+                                    strings: widget.strings,
                                     month: _nextMonth,
                                     today: _today,
                                     entries: _nextEntries,
@@ -1434,7 +1535,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                     ? null
                     : () => _viewDay(selectedDay),
                 onJumpToToday: _awayFromToday ? _jumpToToday : null,
-                isFuture: selectedDay.isAfter(_today),
+                isFuture: isFutureDay(selectedDay, _today),
                 note: selectedNotes,
                 noteAsTag: noteAsTag,
                 onOpenNote: () => showDayNoteCard(
@@ -1509,6 +1610,7 @@ const double _calendarMaxWidth = 560;
 class _MonthGrid extends StatelessWidget {
   const _MonthGrid({
     super.key,
+    required this.strings,
     required this.month,
     required this.today,
     required this.entries,
@@ -1530,6 +1632,7 @@ class _MonthGrid extends StatelessWidget {
     return ((leading + days) / 7).ceil();
   }
 
+  final Strings strings;
   final DateTime month;
   final DateTime today;
   final Map<String, Entry> entries;
@@ -1557,6 +1660,7 @@ class _MonthGrid extends StatelessWidget {
       final day = index - leading + 1;
       final date = DateTime(month.year, month.month, day);
       return _DayCell(
+        strings: strings,
         day: date,
         today: today,
         todayLabel: todayLabel,
@@ -1660,6 +1764,7 @@ class _MonthGrid extends StatelessWidget {
 
 class _DayCell extends StatelessWidget {
   const _DayCell({
+    required this.strings,
     required this.day,
     required this.today,
     required this.todayLabel,
@@ -1670,6 +1775,7 @@ class _DayCell extends StatelessWidget {
     this.selected = false,
   });
 
+  final Strings strings;
   final DateTime day;
   final DateTime today;
   final bool selected;
@@ -1692,7 +1798,7 @@ class _DayCell extends StatelessWidget {
     final isToday = day.year == today.year &&
         day.month == today.month &&
         day.day == today.day;
-    final isFuture = day.isAfter(today);
+    final isFuture = isFutureDay(day, today);
     final emptyBg = Color.alphaBlend(
       scheme.onSurface.withValues(alpha: isFuture ? 0.05 : 0.08),
       scheme.surface,
@@ -1709,101 +1815,129 @@ class _DayCell extends StatelessWidget {
     final periodColor =
         bg == null ? App217Colors.period(brightness, palette) : onCell;
 
-    return InkWell(
+    final taken = entry?.taken;
+    final label = [
+      strings.dates.fullDate(day),
+      if (isToday) strings.today,
+      if (taken != null)
+        taken ? strings.taken : strings.missed
+      else if (!isFuture)
+        strings.unrecorded,
+      if (loggedPeriod)
+        strings.periodLabel
+      else if (expectedPeriod)
+        strings.expectedPeriod,
+      if (isPms) strings.expectedPms,
+      if (hasHeart) strings.heartLabel,
+      if (hasNote) strings.notes,
+    ].join(', ');
+
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: label,
+      excludeSemantics: true,
       onTap: () => onTap(day),
-      borderRadius: BorderRadius.circular(12),
-      // Expected PMS days: a light, sparsely dashed ring in the gap around
-      // the cell (an estimate, like the outlined expected-period drop), so
-      // it reads on top of Taken/Missed fills and next to the selection ring.
-      child: CustomPaint(
-        key: isPms ? ValueKey('pms-${day.month}-${day.day}') : null,
-        foregroundPainter: isPms
-            ? DashedRingPainter(
-                color: App217Colors.pms(brightness, palette),
-                radius: 14,
-                strokeWidth: 1.5,
-                dash: 3,
-                gap: 4,
-              )
-            : null,
-        child: Container(
-          margin: const EdgeInsets.all(3),
-          decoration: BoxDecoration(
-            color: bg ?? emptyBg,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: selected
-                  ? scheme.onSurface
-                  : scheme.outline.withValues(alpha: 0.55),
-              width: selected ? 2.2 : 1,
+      child: InkWell(
+        onTap: () => onTap(day),
+        borderRadius: BorderRadius.circular(12),
+        // Expected PMS days: a light, sparsely dashed ring in the gap around
+        // the cell (an estimate, like the outlined expected-period drop), so
+        // it reads on top of Taken/Missed fills and next to the selection ring.
+        child: CustomPaint(
+          key: isPms ? ValueKey('pms-${day.month}-${day.day}') : null,
+          foregroundPainter: isPms
+              ? DashedRingPainter(
+                  color: App217Colors.pms(brightness, palette),
+                  radius: 14,
+                  strokeWidth: 1.5,
+                  dash: 3,
+                  gap: 4,
+                )
+              : null,
+          child: Container(
+            margin: const EdgeInsets.all(3),
+            decoration: BoxDecoration(
+              color: bg ?? emptyBg,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: selected
+                    ? scheme.onSurface
+                    : scheme.outline.withValues(alpha: 0.55),
+                width: selected ? 2.2 : 1,
+              ),
             ),
-          ),
-          child: FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    '${day.day}',
-                    style: TextStyle(
-                      color: onCell,
-                      fontWeight: isToday ? FontWeight.w800 : FontWeight.w600,
-                      fontSize: 15,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      '${day.day}',
+                      style: TextStyle(
+                        color: onCell,
+                        fontWeight: isToday ? FontWeight.w800 : FontWeight.w600,
+                        fontSize: 15,
+                      ),
                     ),
-                  ),
-                  // Fixed-height line under every number, so numbers sit at
-                  // the same height whether or not a day has marks. Today's
-                  // label gives way to its marks; the bold number still shows it.
-                  SizedBox(
-                    height: 12,
-                    child: hasNote || hasHeart || loggedPeriod || expectedPeriod
-                        ? Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              if (loggedPeriod)
-                                Icon(
-                                  Icons.water_drop,
-                                  key: ValueKey(
-                                      'period-${day.month}-${day.day}'),
-                                  size: 11,
-                                  color: periodColor,
-                                ),
-                              if (expectedPeriod)
-                                Icon(
-                                  Icons.water_drop_outlined,
-                                  key: ValueKey(
-                                    'expected-period-${day.month}-${day.day}',
+                    // Fixed-height line under every number, so numbers sit at
+                    // the same height whether or not a day has marks. Today's
+                    // label gives way to its marks; the bold number still shows it.
+                    SizedBox(
+                      height: 12,
+                      child: hasNote ||
+                              hasHeart ||
+                              loggedPeriod ||
+                              expectedPeriod
+                          ? Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (loggedPeriod)
+                                  Icon(
+                                    Icons.water_drop,
+                                    key: ValueKey(
+                                        'period-${day.month}-${day.day}'),
+                                    size: 11,
+                                    color: periodColor,
                                   ),
-                                  size: 11,
-                                  color: periodColor,
-                                ),
-                              if ((loggedPeriod || expectedPeriod) &&
-                                  (hasHeart || hasNote))
-                                const SizedBox(width: 2),
-                              if (hasHeart)
-                                Icon(Icons.favorite, size: 11, color: onCell),
-                              if (hasHeart && hasNote) const SizedBox(width: 2),
-                              if (hasNote)
-                                Icon(Icons.sticky_note_2_outlined,
-                                    size: 11, color: onCell),
-                            ],
-                          )
-                        : isToday
-                            ? Text(
-                                todayLabel,
-                                style: TextStyle(
-                                  fontSize: 9,
-                                  height: 1.2,
-                                  fontWeight: FontWeight.w800,
-                                  color: bg == null ? scheme.primary : onCell,
-                                ),
-                              )
-                            : null,
-                  ),
-                ],
+                                if (expectedPeriod)
+                                  Icon(
+                                    Icons.water_drop_outlined,
+                                    key: ValueKey(
+                                      'expected-period-${day.month}-${day.day}',
+                                    ),
+                                    size: 11,
+                                    color: periodColor,
+                                  ),
+                                if ((loggedPeriod || expectedPeriod) &&
+                                    (hasHeart || hasNote))
+                                  const SizedBox(width: 2),
+                                if (hasHeart)
+                                  Icon(Icons.favorite, size: 11, color: onCell),
+                                if (hasHeart && hasNote)
+                                  const SizedBox(width: 2),
+                                if (hasNote)
+                                  Icon(Icons.sticky_note_2_outlined,
+                                      size: 11, color: onCell),
+                              ],
+                            )
+                          : isToday
+                              ? Text(
+                                  todayLabel,
+                                  style: TextStyle(
+                                    fontSize: 9,
+                                    height: 1.2,
+                                    fontWeight: FontWeight.w800,
+                                    color: bg == null ? scheme.primary : onCell,
+                                  ),
+                                )
+                              : null,
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -1843,6 +1977,7 @@ class DayEditorSheet extends StatefulWidget {
     required this.initialTaken,
     required this.initialNotes,
     required this.hadEntry,
+    this.palette = AppPalette.blue,
     this.initialHeart = false,
     this.initialPeriod = false,
     this.onCommit,
@@ -1850,6 +1985,9 @@ class DayEditorSheet extends StatefulWidget {
   });
 
   final Strings strings;
+
+  /// The colours the period and heart buttons share with the calendar.
+  final AppPalette palette;
   final String date;
   final bool? initialTaken;
   final String initialNotes;
@@ -1891,7 +2029,7 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
   /// Heart and period toggles persist at once and keep the sheet open, like
   /// notes.
   void _persistToggle() {
-    final status = _taken ?? widget.initialTaken;
+    final status = _taken;
     final DayEditResult result;
     if (status == null && _notes.trim().isEmpty && !_heart && !_period) {
       if (!_hadEntry) return;
@@ -1950,18 +2088,12 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
     );
   }
 
-  void _commitClear() {
-    _emit(const DayEditResult.clear());
-  }
-
   void _onStatusChanged(Set<bool> value) {
     if (value.isEmpty) {
-      // Unselect — clear existing day mark (and note/heart) immediately.
-      if (_hadEntry) {
-        _commitClear();
-      } else {
-        setState(() => _taken = null);
-      }
+      // Unselect: only the pill status goes; the note, heart and period stay
+      // (the entry is deleted when nothing else is left). The sheet stays.
+      setState(() => _taken = null);
+      _persistToggle();
       return;
     }
     // Taken / Missed commits status + current note/heart and closes.
@@ -1973,14 +2105,21 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
     // Capture before the dialog await — sheet may unmount on web when the
     // nested route settles, and we still must persist note/heart.
     final onCommit = widget.onCommit;
-    final result = await showDialog<String>(
+    String? draft;
+    var result = await showDialog<String>(
       context: context,
       useRootNavigator: true,
       builder: (context) => _NoteDialog(
         strings: widget.strings,
         initialNotes: _notes,
+        onChanged: (text) => draft = text,
       ),
     );
+    // Tapping outside or going back keeps what was typed.
+    final typed = draft?.trim();
+    if (result == null && typed != null && typed != _notes.trim()) {
+      result = typed;
+    }
     if (result == null) return;
     _saveNote(result, onCommit: onCommit);
   }
@@ -1990,14 +2129,9 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
   void _saveNote(String notes, {ValueChanged<DayEditResult>? onCommit}) {
     onCommit ??= widget.onCommit;
     final heart = _heart;
-    final status = _taken ?? widget.initialTaken;
+    final status = _taken;
 
-    if (mounted) {
-      setState(() {
-        _notes = notes;
-        if (status != null) _taken = status;
-      });
-    }
+    if (mounted) setState(() => _notes = notes);
 
     // Empty note + no heart + no status → clear any existing note-only entry.
     // Keep the day sheet open — only the note dialog closed.
@@ -2032,8 +2166,9 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
   Widget build(BuildContext context) {
     final human = widget.strings.dates.fullDate(DateTime.parse(widget.date));
     final hasNote = _notes.trim().isNotEmpty;
-    final periodColor = App217Colors.period(Theme.of(context).brightness);
-    final heartColor = App217Colors.intimacy(Theme.of(context).brightness);
+    final brightness = Theme.of(context).brightness;
+    final periodColor = App217Colors.period(brightness, widget.palette);
+    final heartColor = App217Colors.intimacy(brightness, widget.palette);
     final periodInk =
         ThemeData.estimateBrightnessForColor(periodColor) == Brightness.dark
             ? Colors.white
@@ -2139,10 +2274,17 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
 }
 
 class _NoteDialog extends StatefulWidget {
-  const _NoteDialog({required this.strings, required this.initialNotes});
+  const _NoteDialog({
+    required this.strings,
+    required this.initialNotes,
+    this.onChanged,
+  });
 
   final Strings strings;
   final String initialNotes;
+
+  /// Every edit of the text, so a dismissal can still keep it.
+  final ValueChanged<String>? onChanged;
 
   @override
   State<_NoteDialog> createState() => _NoteDialogState();
@@ -2155,7 +2297,10 @@ class _NoteDialogState extends State<_NoteDialog> {
   @override
   void initState() {
     super.initState();
-    _controller.addListener(() => setState(() {}));
+    _controller.addListener(() {
+      widget.onChanged?.call(_controller.text);
+      setState(() {});
+    });
   }
 
   @override
@@ -2213,7 +2358,7 @@ class _NoteDialogState extends State<_NoteDialog> {
         ),
       ),
       actions: [
-        // No Cancel — barrier / outside tap dismisses without saving.
+        // No Cancel — barrier / outside tap dismisses and keeps what was typed.
         DialogActionRow(
           secondary: hasText
               ? DialogLinkButton(

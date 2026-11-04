@@ -78,8 +78,8 @@ class Strings {
       );
   String get settings => _t('Settings', 'Ajustes', 'Ajustes');
   String get languageLabel => _t('Language', 'Idioma', 'Idioma');
-  String get taken => _t('Taken', 'Tomado', 'Tomada');
-  String get missed => _t('Missed', 'Perdido', 'Olvidada');
+  String get taken => _t('Taken', 'Tomada', 'Tomada');
+  String get missed => _t('Missed', 'Perdida', 'Olvidada');
   String get unrecorded => _t('Open', 'Em aberto', 'Pendiente');
   String get notes => _t('Note', 'Nota', 'Nota');
   String get addNote => _t('Add note', 'Adicionar nota', 'Añadir nota');
@@ -564,21 +564,10 @@ class Strings {
       );
   // Day sheet: the partner's read-only day, and pulling the sheet up
   String get pillLabel => _t('Pill', 'Pílula', 'Píldora');
-  String get pillNotLogged =>
-      _t('Not logged yet', 'Ainda não registrada', 'Aún sin registrar');
+  String get pillNotLogged => unrecorded;
   String get pillNotDue =>
       _t('Not due yet', 'Ainda não chegou', 'Todavía no toca');
   String get dayLogged => _t('Logged', 'Registrado', 'Registrado');
-  String get expectedPeriodThisDay => _t(
-        'Expected period this day',
-        'Menstruação prevista neste dia',
-        'Regla prevista este día',
-      );
-  String get expectedPmsThisDay => _t(
-        'Expected PMS this day',
-        'TPM prevista neste dia',
-        'SPM previsto este día',
-      );
   String get comingUp => _t('Coming up', 'Próximos dias', 'Próximamente');
   String get dayThisDay => _t('This day', 'Neste dia', 'Este día');
   String get dayExpected => _t('Expected', 'Prevista', 'Prevista');
@@ -604,7 +593,7 @@ class Strings {
   String get daySheetMore => _t('Show more', 'Mostrar mais', 'Mostrar más');
   String get daySheetLess => _t('Show less', 'Mostrar menos', 'Mostrar menos');
   String get dayTapToLog =>
-      _t('Tap to log', 'Toque para registrar', 'Toca para registrar');
+      _t('Tap to log', 'Registrar', 'Registrar');
   String get editNote => _t('Edit note', 'Editar nota', 'Editar nota');
   String get daySheetFutureLocked => _t(
         'Future day: nothing to log yet',
