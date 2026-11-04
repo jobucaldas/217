@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Android 13 themed icon layer: one colour on transparent (the launcher tints the alpha),
+     artwork inside the 66/108 safe zone, same geometry as app-icon-foreground.svg. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <g transform="translate(512,512) scale(0.64) translate(-548,-540)" fill="#000">
+    <!-- calendar: outline with a solid header band -->
+    <rect x="192" y="240" width="640" height="580" rx="76" fill="none" stroke="#000" stroke-width="40"/>
+    <path d="M172,310 A90,90 0 0 1 262,220 H762 A90,90 0 0 1 852,310 V380 H172 Z"/>
+    <rect x="337" y="170" width="44" height="120" rx="22"/>
+    <rect x="643" y="170" width="44" height="120" rx="22"/>
+    <!-- pill: outlined capsule, one half solid -->
+    <g transform="translate(512,625) rotate(-28) scale(1.4)">
+      <rect x="-133" y="-35" width="266" height="70" rx="35" fill="none" stroke="#000" stroke-width="14"/>
+      <path d="M0,-42 H98 A42,42 0 0 1 98,42 H0 Z"/>
+    </g>
+    <!-- heart badge on the bottom-right corner -->
+    <g transform="translate(800,790) scale(0.38) translate(-512,-520)">
+      <path d="M512,830 C300,690 170,570 170,410 C170,295 255,215 360,215 C430,215 485,255 512,305 C539,255 594,215 664,215 C769,215 854,295 854,410 C854,570 724,690 512,830 Z"/>
+    </g>
+  </g>
+</svg>

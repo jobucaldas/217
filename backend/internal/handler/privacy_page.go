@@ -88,15 +88,30 @@ func (h *Handler) LegacyPrivacyPage(w http.ResponseWriter, r *http.Request) {
 }
 
 // safeReturnPath keeps only the web app's privacy pages (never another
-// host), so the sign-in callback cannot be turned into an open redirect.
-func safeReturnPath(path string) string {
-	if strings.ContainsAny(path, "\\\r\n#") || strings.Contains(path, "//") {
+// host), so the sign-in callback cannot be turned into an open redirect. The
+// result is rebuilt: the exact page path plus only lang and confirm, each
+// limited to its allowed values.
+func safeReturnPath(raw string) string {
+	if strings.ContainsAny(raw, "\\\r\n#") || strings.Contains(raw, "//") {
 		return ""
 	}
-	for _, page := range []string{privacyAppPath, accountDeleteAppPath} {
-		if path == page || strings.HasPrefix(path, page+"?") {
-			return path
-		}
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "" || u.Host != "" || u.User != nil {
+		return ""
 	}
-	return ""
+	if u.Path != privacyAppPath && u.Path != accountDeleteAppPath {
+		return ""
+	}
+	in := u.Query()
+	q := url.Values{}
+	if lang := pageLanguage(in.Get("lang")); lang != "" {
+		q.Set("lang", lang)
+	}
+	if action := privacyAction(in.Get("confirm")); action != "" {
+		q.Set("confirm", action)
+	}
+	if len(q) == 0 {
+		return u.Path
+	}
+	return u.Path + "?" + q.Encode()
 }

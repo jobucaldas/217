@@ -110,12 +110,15 @@ List<PlannedAlert> planPartnerAlerts({
           pref.pillRepeatMinutes >= 1 &&
           d < pillRepeatHorizonDays) {
         // Never roll into the next day: 23:59 local is the hard cutoff.
-        final endOfDay =
-            DateTime(now.year, now.month, now.day + d, 23, 59);
+        // Repeats are built from the date plus minutes of the day, so they
+        // stay on local wall-clock time across a DST change.
+        final startMinutes = t.hour * 60 + t.minute;
+        final endMinutes = 23 * 60 + 59;
         for (var r = 0; r < maxPillRepeatsPerDay; r++) {
+          final minutes = startMinutes + pref.pillRepeatMinutes * (r + 1);
+          if (minutes > endMinutes) break;
           final repeatWhen =
-              when.add(Duration(minutes: pref.pillRepeatMinutes * (r + 1)));
-          if (repeatWhen.isAfter(endOfDay)) break;
+              DateTime(now.year, now.month, now.day + d, 0, minutes);
           if (!repeatWhen.isAfter(now)) continue;
           out.add(PlannedAlert(
             id: partnerPillRepeatIdBase + d * maxPillRepeatsPerDay + r,
