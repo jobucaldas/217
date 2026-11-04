@@ -1982,8 +1982,13 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
       ),
     );
     if (result == null) return;
+    _saveNote(result, onCommit: onCommit);
+  }
 
-    final notes = result;
+  /// Persists [notes] (the dialog's or the sheet's inline field) and keeps
+  /// the day sheet open.
+  void _saveNote(String notes, {ValueChanged<DayEditResult>? onCommit}) {
+    onCommit ??= widget.onCommit;
     final heart = _heart;
     final status = _taken ?? widget.initialTaken;
 
@@ -2095,6 +2100,7 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
           onToggleHeart: _toggleHeart,
           onTogglePeriod: _togglePeriod,
           onEditNote: _editNote,
+          onSaveNote: (notes) => _saveNote(notes.trim()),
           actions: actions,
           status: status,
         ),

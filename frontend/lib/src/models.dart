@@ -314,6 +314,22 @@ class CycleInfo {
     return null;
   }
 
+  /// The prediction whose PMS days or period [day] falls in.
+  CycleWindow? windowAt(DateTime day) {
+    final d = DateTime(day.year, day.month, day.day);
+    for (final w in predictions) {
+      if (w.pmsStart.year > 1 && _within(d, w.pmsStart, w.pmsEnd)) return w;
+      if (_within(d, w.periodStart, w.periodEnd)) return w;
+    }
+    return null;
+  }
+
+  /// The prediction after [window], if any.
+  CycleWindow? windowAfter(CycleWindow window) {
+    final i = predictions.indexOf(window);
+    return i < 0 || i + 1 >= predictions.length ? null : predictions[i + 1];
+  }
+
   factory CycleInfo.fromJson(Map<String, dynamic> json) => CycleInfo(
         cycleLength: json['cycle_length'] as int? ?? 28,
         periodLength: json['period_length'] as int? ?? 5,
