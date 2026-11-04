@@ -599,15 +599,14 @@ void main() {
     for (final k in [...tiles, ...coming, 'day-coming-up-title']) {
       expect(shown(ValueKey(k)), isTrue, reason: k);
     }
-    // Equal tiles, square or as tall as their content needs.
+    // Equal squares.
     final sizes = [
       for (final k in [...tiles, ...coming])
         tester.getSize(find.byKey(ValueKey(k))),
     ];
     for (final size in sizes) {
-      expect(size.height, greaterThanOrEqualTo(size.width - 0.01));
-      expect(size.height - size.width, lessThan(12));
-      expect(size, sizes.first);
+      expect(size.width, moreOrLessEquals(size.height, epsilon: 0.01));
+      expect(size.width, moreOrLessEquals(sizes.first.width, epsilon: 0.01));
     }
     expect(
       find.descendant(

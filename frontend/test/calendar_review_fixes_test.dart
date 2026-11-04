@@ -200,7 +200,7 @@ void main() {
     expect(find.byKey(const ValueKey('day-card-pms')), findsOneWidget);
   });
 
-  for (final size in const [Size(360, 640), Size(320, 640)]) {
+  for (final size in const [Size(360, 640), Size(320, 640), Size(640, 900)]) {
     for (final partner in [false, true]) {
       testWidgets(
           'open sheet tiles fit in Portuguese at $size, text 1.15'
@@ -227,6 +227,14 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.byKey(const ValueKey('day-coming-period')), findsOneWidget);
         expect(tester.takeException(), isNull);
+        // Every tile is the same exact square.
+        final tiles = find
+            .byWidgetPredicate((w) => w.runtimeType.toString() == '_InfoTile');
+        final first = tester.getSize(tiles.first);
+        expect(first.width, moreOrLessEquals(first.height, epsilon: 0.01));
+        for (final e in tiles.evaluate()) {
+          expect(tester.getSize(find.byWidget(e.widget)), first);
+        }
       });
     }
   }

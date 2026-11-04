@@ -589,7 +589,7 @@ class Strings {
   String get daySheetLess =>
       _t('Show less', 'Mostrar menos', 'Mostrar menos');
   String get dayTapToLog =>
-      _t('Tap to log', 'Toque para registrar', 'Toca para registrar');
+      _t('Tap to log', 'Registrar', 'Registrar');
   String get editNote => _t('Edit note', 'Editar nota', 'Editar nota');
   String get daySheetFutureLocked => _t(
         'Future day: nothing to log yet',

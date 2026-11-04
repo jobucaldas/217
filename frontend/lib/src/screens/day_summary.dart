@@ -1118,12 +1118,12 @@ class _ExpandableDaySheetState extends State<ExpandableDaySheet> {
     // The note is written right in the sheet: it sits above the keyboard.
     return Padding(
       padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
-      child: _sized(context, padding, editor, content, bar),
+      child: _sized(context, padding, editor, content, bar, view, note),
     );
   }
 
   Widget _sized(BuildContext context, EdgeInsets padding, DayEditing? editor,
-      Widget content, Widget? bar) {
+      Widget content, Widget? bar, DayView view, String note) {
     final scheme = Theme.of(context).colorScheme;
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -1320,7 +1320,8 @@ class _ExpandableDaySheetState extends State<ExpandableDaySheet> {
     ];
   }
 
-  bool _viewingToday(DayView view) => DateUtils.isSameDay(widget.day, view.today);
+  bool _viewingToday(DayView view) =>
+      DateUtils.isSameDay(widget.day, view.today);
 
   /// "until ~date": the last day of the PMS days or period [widget.day]
   /// falls in.
@@ -1359,8 +1360,7 @@ class _ExpandableDaySheetState extends State<ExpandableDaySheet> {
         todayKind == CycleDayKind.expectedPeriod) {
       next = cycle.windowAfter(next);
     }
-    final current =
-        next != null && identical(next, cycle.windowAt(view.today));
+    final current = next != null && identical(next, cycle.windowAt(view.today));
     final pmsColor = App217Colors.pms(brightness, widget.palette);
     final periodColor = App217Colors.period(brightness, widget.palette);
     // Same facts as the calendar's header, soonest first.
@@ -1669,10 +1669,9 @@ class _InfoChip extends StatelessWidget {
   }
 }
 
-/// Equal tiles, three to a row (fewer where they would get too narrow).
-/// Tiles are square where their content fits and as tall as it needs
-/// otherwise (narrow phones, large text); they grow to fill the row, so a
-/// wide sheet has no gap on its far side.
+/// Identical square tiles: three to a row where each gets about 100 dp or
+/// more, two otherwise, never larger than [maxSide]. The grid as a whole is
+/// centred in the room it is given.
 class _TileGrid extends StatelessWidget {
   const _TileGrid({required this.children});
 
@@ -1680,53 +1679,36 @@ class _TileGrid extends StatelessWidget {
 
   static const gap = 10.0;
 
-  /// Narrowest a tile gets before the row takes one tile less.
-  static const minWidth = 96.0;
+  /// Smallest side a three-column row may give its tiles.
+  static const minSide = 100.0;
 
-  /// Tallest a square tile grows.
-  static const maxSquare = 140.0;
-
-  /// Height the tile's content needs: padding, the icon row, the title and a
-  /// value of two lines, at the text scale tiles clamp to ([_InfoTile]).
-  static double contentHeight(BuildContext context) {
-    final text = Theme.of(context).textTheme;
-    final scaler = MediaQuery.textScalerOf(context).clamp(
-      maxScaleFactor: _InfoTile.maxTextScale,
-    );
-    double line(TextStyle? style, double height) =>
-        scaler.scale(style?.fontSize ?? 14) * (style?.height ?? height);
-    return 20 + // padding
-        30 + // icon
-        6 + // air between the icon and the text
-        line(text.labelLarge, 1.45) +
-        1 +
-        2 * line(text.titleSmall, 1.15) +
-        2;
-  }
+  /// Largest side a tile gets, however wide the sheet.
+  static const maxSide = 140.0;
 
   @override
   Widget build(BuildContext context) {
-    final floor = contentHeight(context);
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth;
-        var cols = ((width + gap) / (minWidth + gap)).floor().clamp(1, 3);
-        // Only a few tiles on a wide sheet: share the row among them (a
-        // phone keeps the size its three-up row has).
-        if (children.isNotEmpty &&
-            children.length < cols &&
-            width > 3 * maxSquare + 2 * gap) {
-          cols = children.length;
-        }
-        final tileWidth = (width - gap * (cols - 1)) / cols;
-        final tileHeight = math.max(floor, math.min(tileWidth, maxSquare));
-        return Wrap(
-          spacing: gap,
-          runSpacing: gap,
-          children: [
-            for (final c in children)
-              SizedBox(width: tileWidth, height: tileHeight, child: c),
-          ],
+        final three = (width - gap * 2) / 3;
+        final cols = three >= minSide ? 3 : 2;
+        final side = math.min((width - gap * (cols - 1)) / cols, maxSide);
+        // On a sheet wide enough to cap the tiles, centre what is there;
+        // on a phone the tiles fill the row from the start.
+        final capped = (width - gap * (cols - 1)) / cols > maxSide;
+        final used = capped ? math.min(children.length, cols) : cols;
+        return Center(
+          child: SizedBox(
+            width: math.max(1, used) * side + gap * (math.max(1, used) - 1),
+            child: Wrap(
+              spacing: gap,
+              runSpacing: gap,
+              children: [
+                for (final c in children)
+                  SizedBox.square(dimension: side, child: c),
+              ],
+            ),
+          ),
         );
       },
     );
@@ -1736,10 +1718,14 @@ class _TileGrid extends StatelessWidget {
 /// A square tile of the open sheet: icon on top, small title, short value.
 ///
 /// With [onTap] it is one of the owner's controls: a corner mark (+ / check)
-/// and a ripple. Without it, it only reads out the day.
+/// and a ripple. Without it, it only reads out the day. All tiles of a size
+/// share one typography: title and value up to two lines each, ellipsized.
 class _InfoTile extends StatelessWidget {
-  /// Device text scale the tile's content is clamped to.
+  /// Device text scale a roomy tile's content is clamped to.
   static const maxTextScale = 1.15;
+
+  /// Below this side a tile uses the compact sizes (and no extra text scale).
+  static const roomySide = 120.0;
 
   const _InfoTile({
     super.key,
@@ -1778,62 +1764,73 @@ class _InfoTile extends StatelessWidget {
         width: on ? 1.5 : 1,
       ),
     );
-    final content = Padding(
-      padding: const EdgeInsets.all(10),
-      // Big device text must not push the tile out of its square.
-      child: MediaQuery.withClampedTextScaling(
-        maxScaleFactor: maxTextScale,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Row(
+    final content = LayoutBuilder(
+      builder: (context, box) {
+        final roomy = box.maxWidth >= roomySide;
+        final pad = roomy ? 10.0 : 8.0;
+        final badge = roomy ? 30.0 : 24.0;
+        final titleStyle = (roomy ? text.labelLarge : text.labelMedium)
+            ?.copyWith(color: scheme.onSurfaceVariant, height: 1.15);
+        final valueStyle = text.titleSmall?.copyWith(
+          fontSize: roomy ? null : 13,
+          color: muted ? scheme.onSurfaceVariant : scheme.onSurface,
+          fontWeight: muted ? FontWeight.w400 : FontWeight.w600,
+          height: 1.15,
+        );
+        return Padding(
+          padding: EdgeInsets.all(pad),
+          // A fixed square cannot grow with the device's text size.
+          child: MediaQuery.withClampedTextScaling(
+            maxScaleFactor: roomy ? maxTextScale : 1.0,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Container(
-                  width: 30,
-                  height: 30,
-                  decoration: BoxDecoration(
-                    color: color.withValues(alpha: on ? 0.3 : 0.2),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Center(
-                    child: _FactMark(icon: icon, color: color, size: 18),
-                  ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Container(
+                      width: badge,
+                      height: badge,
+                      decoration: BoxDecoration(
+                        color: color.withValues(alpha: on ? 0.3 : 0.2),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Center(
+                        child: _FactMark(
+                          icon: icon,
+                          color: color,
+                          size: roomy ? 18 : 16,
+                        ),
+                      ),
+                    ),
+                    if (onTap != null) _toggleMark(roomy ? 22 : 20),
+                  ],
                 ),
-                if (onTap != null) _toggleMark(),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: titleStyle,
+                    ),
+                    const SizedBox(height: 1),
+                    Text(
+                      value,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: valueStyle,
+                    ),
+                  ],
+                ),
               ],
             ),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                FittedBox(
-                  fit: BoxFit.scaleDown,
-                  alignment: AlignmentDirectional.centerStart,
-                  child: Text(
-                    title,
-                    maxLines: 1,
-                    style: text.labelLarge
-                        ?.copyWith(color: scheme.onSurfaceVariant),
-                  ),
-                ),
-                const SizedBox(height: 1),
-                Text(
-                  value,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: text.titleSmall?.copyWith(
-                    color: muted ? scheme.onSurfaceVariant : scheme.onSurface,
-                    fontWeight: muted ? FontWeight.w400 : FontWeight.w600,
-                    height: 1.15,
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
     if (onTap == null) {
       return Semantics(
@@ -1860,14 +1857,14 @@ class _InfoTile extends StatelessWidget {
     );
   }
 
-  Widget _toggleMark() {
+  Widget _toggleMark(double size) {
     final selected = this.selected ?? false;
     final ink = ThemeData.estimateBrightnessForColor(color) == Brightness.dark
         ? Colors.white
         : const Color(0xFF0B1220);
     return Container(
-      width: 22,
-      height: 22,
+      width: size,
+      height: size,
       decoration: BoxDecoration(
         color: selected ? color : Colors.transparent,
         shape: BoxShape.circle,

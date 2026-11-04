@@ -327,7 +327,7 @@ class CycleInfo {
   CycleWindow? windowAt(DateTime day) {
     final d = DateTime(day.year, day.month, day.day);
     for (final w in predictions) {
-      if (w.pmsStart.year > 1 && _within(d, w.pmsStart, w.pmsEnd)) return w;
+      if (w.hasPms && _within(d, w.pmsStart, w.pmsEnd)) return w;
       if (_within(d, w.periodStart, w.periodEnd)) return w;
     }
     return null;
