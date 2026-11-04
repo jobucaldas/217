@@ -621,6 +621,7 @@ class DayEditing {
     required this.onToggleHeart,
     required this.onTogglePeriod,
     required this.onEditNote,
+    required this.onSaveNote,
     required this.actions,
     required this.status,
   });
@@ -631,6 +632,9 @@ class DayEditing {
   final VoidCallback onToggleHeart;
   final VoidCallback onTogglePeriod;
   final VoidCallback onEditNote;
+
+  /// Saves the note written inline on the open sheet's note card.
+  final ValueChanged<String> onSaveNote;
 
   /// The sex, period and note buttons shown beside the date at rest.
   final Widget actions;
@@ -645,9 +649,9 @@ class DayEditing {
 /// date with the sex, period and note buttons; pulled up those buttons
 /// become cards (still tappable) and the Missed/Taken control stays pinned
 /// to the bottom. Read-only (a partner, or the owner's future days): chips
-/// at rest that turn into cards when pulled up, with an eye (partner) or a
-/// lock (future day) beside the date. Either way it also shows what is
-/// coming up once pulled up.
+/// at rest that turn into cards when pulled up, with a lock beside the date
+/// on the owner's future days. Either way it also shows what is coming up
+/// once pulled up.
 ///
 /// Dragging anywhere on it (or tapping its handle) opens and closes it. A
 /// pull down from open stops at the resting size; only a pull from rest
@@ -681,7 +685,7 @@ class ExpandableDaySheet extends StatefulWidget {
   /// What was logged for [day]; read by the read-only chips and cards.
   final Entry? entry;
 
-  /// Read by a partner (eye) rather than the owner (lock on future days).
+  /// Read by a partner rather than the owner (lock on future days).
   final bool partner;
 
   @override
@@ -881,7 +885,7 @@ class _ExpandableDaySheetState extends State<ExpandableDaySheet> {
       ),
     );
 
-    final Widget trailing;
+    final Widget? trailing;
     if (editor != null) {
       // The buttons give way to their cards as the sheet opens.
       // Its room goes with it, so the open date gets the whole width.
@@ -901,12 +905,10 @@ class _ExpandableDaySheetState extends State<ExpandableDaySheet> {
         ),
       );
     } else {
+      // A partner reads every day: the "Partner Mode" mark on the calendar
+      // already says so.
       trailing = widget.partner
-          ? _SheetBadge(
-              key: const ValueKey('day-sheet-view-only'),
-              icon: Icons.visibility_outlined,
-              label: strings.daySheetViewOnly,
-            )
+          ? null
           : _SheetBadge(
               key: const ValueKey('day-sheet-locked'),
               icon: Icons.lock_outline,
@@ -923,8 +925,10 @@ class _ExpandableDaySheetState extends State<ExpandableDaySheet> {
               style: theme.textTheme.headlineMedium,
             ),
           ),
-          if (editor == null) const SizedBox(width: 8),
-          trailing,
+          if (trailing != null) ...[
+            if (editor == null) const SizedBox(width: 8),
+            trailing,
+          ],
         ],
       ),
     );
@@ -998,6 +1002,7 @@ class _ExpandableDaySheetState extends State<ExpandableDaySheet> {
                 entry: widget.entry,
                 note: note,
                 cycleKind: widget.cycle.kindOf(widget.day),
+                cycleDetail: _cycleDetail(context),
                 isFuture: widget.day.isAfter(widget.today),
               ),
               hint,
@@ -1063,6 +1068,16 @@ class _ExpandableDaySheetState extends State<ExpandableDaySheet> {
             ),
           );
 
+    // The note is written right in the sheet: it sits above the keyboard.
+    return Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+      child: _sized(context, padding, editor, content, bar),
+    );
+  }
+
+  Widget _sized(BuildContext context, EdgeInsets padding, DayEditing? editor,
+      Widget content, Widget? bar) {
+    final scheme = Theme.of(context).colorScheme;
     return LayoutBuilder(
       builder: (context, constraints) {
         final height = constraints.maxHeight;
@@ -1150,9 +1165,8 @@ class _ExpandableDaySheetState extends State<ExpandableDaySheet> {
   /// coming up.
   List<Widget> _ownerCards(BuildContext context, String note, DayEditing e) {
     final strings = widget.strings;
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final brightness = theme.brightness;
+    final brightness = Theme.of(context).brightness;
+    final scheme = Theme.of(context).colorScheme;
     final cycleKind = widget.cycle.kindOf(widget.day);
     return [
       _TileGrid(
@@ -1175,7 +1189,9 @@ class _ExpandableDaySheetState extends State<ExpandableDaySheet> {
             value: e.period
                 ? strings.dayLogged
                 : (cycleKind == CycleDayKind.expectedPeriod
-                    ? strings.dayExpected
+                    ? (_viewingToday
+                        ? '${strings.dayExpected} ${_until(context)}'
+                        : strings.dayExpected)
                     : strings.dayTapToLog),
             muted: !e.period && cycleKind != CycleDayKind.expectedPeriod,
             selected: e.period,
@@ -1187,32 +1203,17 @@ class _ExpandableDaySheetState extends State<ExpandableDaySheet> {
               color: App217Colors.pms(brightness, widget.palette),
               icon: null,
               title: strings.expectedPms,
-              value: strings.dayThisDay,
+              value: _cycleDetail(context),
             ),
         ],
       ),
       const SizedBox(height: 10),
-      _InfoCard(
+      _NoteCard(
         key: const ValueKey('day-more-note'),
+        strings: strings,
         color: scheme.primary,
-        icon: Icons.sticky_note_2_outlined,
-        title: strings.notes,
-        body: note.isEmpty
-            ? Text(
-                strings.addNote,
-                style: theme.textTheme.bodyLarge
-                    ?.copyWith(color: scheme.onSurfaceVariant),
-              )
-            : Text(
-                note,
-                style: theme.textTheme.bodyLarge?.copyWith(
-                  color: scheme.onSurface,
-                  fontSize: 17,
-                  height: 1.35,
-                ),
-              ),
-        onTap: e.onEditNote,
-        semanticsLabel: note.isEmpty ? strings.addNote : strings.editNote,
+        note: note,
+        onSave: e.onSaveNote,
       ),
       const SizedBox(height: 22),
       _comingUp(context, owner: true),
@@ -1233,6 +1234,7 @@ class _ExpandableDaySheetState extends State<ExpandableDaySheet> {
       entry: widget.entry,
       note: note,
       cycleKind: widget.cycle.kindOf(widget.day),
+      cycleDetail: _cycleDetail(context),
       isFuture: widget.day.isAfter(widget.today),
     );
     return [
@@ -1250,19 +1252,11 @@ class _ExpandableDaySheetState extends State<ExpandableDaySheet> {
       ),
       if (note.isNotEmpty) ...[
         const SizedBox(height: 10),
-        _InfoCard(
+        _NoteCard(
           key: const ValueKey('day-more-note'),
+          strings: strings,
           color: scheme.primary,
-          icon: Icons.sticky_note_2_outlined,
-          title: strings.notes,
-          body: Text(
-            note,
-            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                  color: scheme.onSurface,
-                  fontSize: 17,
-                  height: 1.35,
-                ),
-          ),
+          note: note,
         ),
       ],
       const SizedBox(height: 22),
@@ -1270,8 +1264,29 @@ class _ExpandableDaySheetState extends State<ExpandableDaySheet> {
     ];
   }
 
+  bool get _viewingToday => DateUtils.isSameDay(widget.day, widget.today);
+
+  /// "until ~date": the last day of the PMS days or period [widget.day]
+  /// falls in.
+  String _until(BuildContext context) {
+    final w = widget.cycle.windowAt(widget.day);
+    if (w == null) return '';
+    final end = widget.cycle.kindOf(widget.day) == CycleDayKind.pms
+        ? w.pmsEnd
+        : w.periodEnd;
+    return widget.strings
+        .cycleUntilDate(widget.strings.dates.shortDayMonth(end));
+  }
+
+  /// What the day's own PMS / expected period card says: "This day", or
+  /// for today "Today" and until when it lasts.
+  String _cycleDetail(BuildContext context) => _viewingToday
+      ? '${widget.strings.today}\n${_until(context)}'
+      : widget.strings.dayThisDay;
+
   /// The "Coming up" section: a tile for the next PMS window and one for
-  /// the next period, or why there are none.
+  /// the next period, or why there are none. What today's own cards already
+  /// show (viewing today) is left out.
   Widget _comingUp(BuildContext context, {required bool owner}) {
     final strings = widget.strings;
     final scheme = Theme.of(context).colorScheme;
@@ -1279,30 +1294,44 @@ class _ExpandableDaySheetState extends State<ExpandableDaySheet> {
     final brightness = Theme.of(context).brightness;
     final dates = strings.dates;
     final cycle = widget.cycle;
-    final next = cycle.nextWindow(widget.today);
     final todayKind = cycle.kindOf(widget.today);
+    var next = cycle.nextWindow(widget.today);
+    // Viewing today during an expected period: that period is on its card,
+    // so the next one comes up.
+    if (next != null &&
+        _viewingToday &&
+        todayKind == CycleDayKind.expectedPeriod) {
+      next = cycle.windowAfter(next);
+    }
+    final current =
+        next != null && identical(next, cycle.windowAt(widget.today));
     final pmsColor = App217Colors.pms(brightness, widget.palette);
     final periodColor = App217Colors.period(brightness, widget.palette);
     // Same facts as the calendar's header, soonest first.
     final tiles = <Widget>[];
     if (next != null) {
-      if (todayKind == CycleDayKind.expectedPeriod) {
+      String until(DateTime d) =>
+          strings.cycleUntilDate(dates.shortDayMonth(d));
+      if (current && todayKind == CycleDayKind.expectedPeriod) {
         tiles.add(_InfoTile(
           key: const ValueKey('day-coming-period'),
           color: periodColor,
           icon: Icons.water_drop_outlined,
           title: strings.expectedPeriod,
-          value: strings.cycleNow,
+          value: until(next.periodEnd),
         ));
       } else {
-        if (todayKind == CycleDayKind.pms) {
-          tiles.add(_InfoTile(
-            key: const ValueKey('day-coming-pms'),
-            color: pmsColor,
-            icon: null,
-            title: strings.expectedPms,
-            value: strings.cycleNow,
-          ));
+        if (current && todayKind == CycleDayKind.pms) {
+          // Today's own card says it when today is the day viewed.
+          if (!_viewingToday) {
+            tiles.add(_InfoTile(
+              key: const ValueKey('day-coming-pms'),
+              color: pmsColor,
+              icon: null,
+              title: strings.expectedPms,
+              value: until(next.pmsEnd),
+            ));
+          }
         } else if (next.pmsStart.year >= 2) {
           tiles.add(_InfoTile(
             key: const ValueKey('day-coming-pms'),
@@ -1321,6 +1350,8 @@ class _ExpandableDaySheetState extends State<ExpandableDaySheet> {
         ));
       }
     }
+    // Only the period on today's card was predicted: nothing else to say.
+    if (tiles.isEmpty && cycle.hasPredictions) return const SizedBox.shrink();
     final stageNote = owner ? strings.cycleStageNote(cycle.note) : '';
     final empty = stageNote.isNotEmpty
         ? stageNote
@@ -1373,6 +1404,7 @@ List<_DayFact> _dayFacts({
   required Entry? entry,
   required String note,
   required CycleDayKind cycleKind,
+  required String cycleDetail,
   required bool isFuture,
 }) {
   final taken = entry?.taken;
@@ -1430,7 +1462,7 @@ List<_DayFact> _dayFacts({
         color: period,
         title: strings.expectedPeriod,
         label: strings.expectedPeriod,
-        detail: strings.dayThisDay,
+        detail: cycleDetail,
       ),
     if (cycleKind == CycleDayKind.pms)
       (
@@ -1439,7 +1471,7 @@ List<_DayFact> _dayFacts({
         color: pms,
         title: strings.expectedPms,
         label: strings.expectedPms,
-        detail: strings.dayThisDay,
+        detail: cycleDetail,
       ),
     // The note gets its own full-width card when the sheet is open.
     if (note.isNotEmpty)
@@ -1464,6 +1496,7 @@ class _DayChips extends StatelessWidget {
     required this.entry,
     required this.note,
     required this.cycleKind,
+    required this.cycleDetail,
     required this.isFuture,
   });
 
@@ -1472,6 +1505,7 @@ class _DayChips extends StatelessWidget {
   final Entry? entry;
   final String note;
   final CycleDayKind cycleKind;
+  final String cycleDetail;
   final bool isFuture;
 
   @override
@@ -1485,6 +1519,7 @@ class _DayChips extends StatelessWidget {
       entry: entry,
       note: note,
       cycleKind: cycleKind,
+      cycleDetail: cycleDetail,
       isFuture: isFuture,
     );
     return Wrap(
@@ -1760,13 +1795,13 @@ class _InfoTile extends StatelessWidget {
 /// pencil in the corner and a ripple. Without it, it only reads out the day.
 class _InfoCard extends StatelessWidget {
   const _InfoCard({
-    super.key,
     required this.color,
     required this.icon,
     required this.title,
     required this.body,
     this.onTap,
     this.semanticsLabel,
+    this.corner,
   });
 
   final Color color;
@@ -1774,6 +1809,9 @@ class _InfoCard extends StatelessWidget {
   final String title;
   final Widget body;
   final VoidCallback? onTap;
+
+  /// Top-right of the title; a pencil by default when [onTap] is set.
+  final Widget? corner;
 
   /// What a screen reader announces for a tappable card (else [title]).
   final String? semanticsLabel;
@@ -1816,14 +1854,14 @@ class _InfoCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (onTap == null)
+                if (corner == null && onTap == null)
                   titleText
                 else
                   Row(
                     children: [
                       Expanded(child: titleText),
                       const SizedBox(width: 6),
-                      _cornerMark(context),
+                      corner ?? _cornerMark(context),
                     ],
                   ),
                 const SizedBox(height: 2),
@@ -1847,7 +1885,8 @@ class _InfoCard extends StatelessWidget {
     return Semantics(
       button: true,
       label: semanticsLabel ?? title,
-      excludeSemantics: true,
+      // A control in the corner (the note's pencil) stays reachable.
+      excludeSemantics: corner == null,
       onTap: onTap,
       child: Material(
         color: fill,
@@ -1861,6 +1900,248 @@ class _InfoCard extends StatelessWidget {
   /// Top-right mark of a tappable card: what a tap will do.
   Widget _cornerMark(BuildContext context) =>
       Icon(Icons.edit_outlined, size: 18, color: color);
+}
+
+/// The open sheet's note card. A long note shows its first lines and a tap
+/// unfolds the rest. With [onSave] (the owner's editable day) the note is
+/// written right in the card: a tap on a short (or empty) note, or on the
+/// pencil, turns it into a field with Cancel and Save.
+class _NoteCard extends StatefulWidget {
+  const _NoteCard({
+    super.key,
+    required this.strings,
+    required this.color,
+    required this.note,
+    this.onSave,
+  });
+
+  final Strings strings;
+  final Color color;
+  final String note;
+  final ValueChanged<String>? onSave;
+
+  /// Lines a folded note shows.
+  static const foldedLines = 4;
+
+  @override
+  State<_NoteCard> createState() => _NoteCardState();
+}
+
+class _NoteCardState extends State<_NoteCard> {
+  bool _expanded = false;
+  TextEditingController? _field;
+
+  /// The keyboard height the open field was last brought into view for.
+  double? _shownAbove;
+
+  /// Brings the whole card (field, Cancel and Save) into the sheet's view.
+  void _reveal() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _field == null) return;
+      Scrollable.ensureVisible(
+        context,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOutCubic,
+        alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtEnd,
+      );
+    });
+  }
+
+  @override
+  void dispose() {
+    _field?.dispose();
+    super.dispose();
+  }
+
+  void _edit() {
+    setState(() {
+      _field = TextEditingController(text: widget.note)
+        ..selection = TextSelection.collapsed(offset: widget.note.length);
+    });
+  }
+
+  void _close() {
+    final field = _field;
+    _shownAbove = null;
+    setState(() => _field = null);
+    // After the frame: the field still holds it until it is gone.
+    WidgetsBinding.instance.addPostFrameCallback((_) => field?.dispose());
+  }
+
+  void _save() {
+    final text = _field?.text.trim() ?? '';
+    _close();
+    if (text != widget.note) widget.onSave?.call(text);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final strings = widget.strings;
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final noteStyle = theme.textTheme.bodyLarge?.copyWith(
+      color: scheme.onSurface,
+      fontSize: 17,
+      height: 1.35,
+    );
+    final field = _field;
+    if (field != null) {
+      // Once on opening, and again as the keyboard comes up.
+      final inset = MediaQuery.viewInsetsOf(context).bottom;
+      if (_shownAbove != inset) {
+        _shownAbove = inset;
+        _reveal();
+      }
+      return _InfoCard(
+        color: widget.color,
+        icon: Icons.sticky_note_2_outlined,
+        title: strings.notes,
+        body: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const SizedBox(height: 6),
+            TextField(
+              key: const ValueKey('day-note-field'),
+              controller: field,
+              autofocus: true,
+              minLines: 3,
+              maxLines: 8,
+              textCapitalization: TextCapitalization.sentences,
+              style: noteStyle,
+              decoration: InputDecoration(
+                hintText: strings.addNote,
+                isDense: true,
+                filled: true,
+                fillColor: scheme.surface.withValues(alpha: 0.6),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: scheme.outline),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: widget.color, width: 1.6),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            // The theme stretches buttons, so each gets half the row.
+            Row(
+              children: [
+                Expanded(
+                  child: TextButton(
+                    key: const ValueKey('day-note-cancel'),
+                    onPressed: _close,
+                    child: Text(strings.cancel),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: FilledButton(
+                    key: const ValueKey('day-note-save'),
+                    onPressed: _save,
+                    child: Text(strings.save),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      );
+    }
+
+    final note = widget.note;
+    final onSave = widget.onSave;
+    if (note.isEmpty) {
+      return _InfoCard(
+        color: widget.color,
+        icon: Icons.sticky_note_2_outlined,
+        title: strings.notes,
+        body: Text(
+          strings.addNote,
+          style: theme.textTheme.bodyLarge
+              ?.copyWith(color: scheme.onSurfaceVariant),
+        ),
+        onTap: onSave == null ? null : _edit,
+        semanticsLabel: strings.addNote,
+      );
+    }
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // The text's width inside the card: padding, icon and gap.
+        final width = math.max(0.0, constraints.maxWidth - 14 * 2 - 36 - 12);
+        final painter = TextPainter(
+          text: TextSpan(text: note, style: noteStyle),
+          maxLines: _NoteCard.foldedLines,
+          textDirection: Directionality.of(context),
+          textScaler: MediaQuery.textScalerOf(context),
+        )..layout(maxWidth: width);
+        final long = painter.didExceedMaxLines;
+        painter.dispose();
+        final folded = long && !_expanded;
+        final VoidCallback? onTap = long
+            ? () => setState(() => _expanded = !_expanded)
+            : (onSave == null ? null : _edit);
+        final Widget? corner;
+        if (onSave != null) {
+          corner = IconButton(
+            key: const ValueKey('day-note-edit'),
+            tooltip: strings.editNote,
+            visualDensity: VisualDensity.compact,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints.tightFor(width: 32, height: 24),
+            iconSize: 18,
+            color: widget.color,
+            onPressed: _edit,
+            icon: const Icon(Icons.edit_outlined),
+          );
+        } else if (long) {
+          corner = Icon(
+            _expanded ? Icons.expand_less : Icons.expand_more,
+            size: 20,
+            color: widget.color,
+          );
+        } else {
+          corner = null;
+        }
+        return _InfoCard(
+          color: widget.color,
+          icon: Icons.sticky_note_2_outlined,
+          title: strings.notes,
+          corner: corner,
+          body: AnimatedSize(
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOutCubic,
+            alignment: Alignment.topCenter,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  note,
+                  maxLines: folded ? _NoteCard.foldedLines : null,
+                  overflow: folded ? TextOverflow.ellipsis : null,
+                  style: noteStyle,
+                ),
+                if (long)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      _expanded ? strings.daySheetLess : strings.daySheetMore,
+                      style: theme.textTheme.labelLarge
+                          ?.copyWith(color: widget.color),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          onTap: onTap,
+          semanticsLabel: long
+              ? '${strings.notes}: $note. '
+                  '${_expanded ? strings.showLessNote : strings.showMoreNote}'
+              : '${strings.notes}: $note. ${strings.editNote}',
+        );
+      },
+    );
+  }
 }
 
 /// A fact's icon, or the dashed PMS ring when it has none.
