@@ -879,6 +879,18 @@ class ApiClient {
     return _local.monthEntries(userId, year, month);
   }
 
+  /// The device's copy of the last cycle predictions, without asking the
+  /// server; null when none was ever saved. Lets the calendar draw them at
+  /// once, before the fresh answer arrives.
+  Future<CycleInfo?> cachedCycle() async {
+    final userId = _userId;
+    if (userId == null) return null;
+    final body = await _local.readDoc(userId, 'cycle');
+    return body == null
+        ? null
+        : CycleInfo.fromJson(jsonDecode(body) as Map<String, dynamic>);
+  }
+
   /// Saved on the device at once and queued for the server; throws only
   /// when the server refuses the edit.
   Future<Entry> upsertEntry(
