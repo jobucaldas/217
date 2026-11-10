@@ -268,17 +268,24 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     User? user;
     var share = const ShareState(status: 'none');
     SessionSnapshot? session;
+    // Whether [session] came from this start's own server answer (web) —
+    // then the trailing revalidation below would ask the same thing twice.
+    var sessionFromWebServer = false;
     // Prefs, api base and cached session are independent local reads: start
     // them together so cold start waits one storage round trip, not five.
     // Nothing here touches the network; the server is asked afterwards.
+    // Each read falls back to its default on error, so a failing store
+    // never leaves the app stuck on the loading screen.
     final results = await Future.wait([
-      _prefs.load(),
-      _prefs.loadLanguage(),
-      _prefs.reminderHintDismissed(),
-      _prefs.autoUpdateEnabled(),
-      _prefs.messageNotificationsEnabled(),
-      _api.loadPersistedApiBase(),
-      _webPage == null ? _api.cachedSession() : Future.value(null),
+      _prefs
+          .load()
+          .catchError((Object _) => (mode: ThemeMode.system, palette: AppPalette.blue)),
+      _prefs.loadLanguage().catchError((Object _) => null),
+      _prefs.reminderHintDismissed().catchError((Object _) => false),
+      _prefs.autoUpdateEnabled().catchError((Object _) => false),
+      _prefs.messageNotificationsEnabled().catchError((Object _) => true),
+      _api.loadPersistedApiBase().catchError((Object _) {}),
+      _cachedSessionSafe(),
     ]);
     if (!mounted) return;
     final appearance = results[0] as ({ThemeMode mode, AppPalette palette});
@@ -311,9 +318,25 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     if (cached?.user != null) {
       session = cached;
     } else if (!_api.config.needsServerSetup) {
-      unawaited(_loadConfigAndSession()
-          .then<void>((fresh) => _applyBootstrapSession(fresh))
-          .catchError((Object _) {}));
+      if (kIsWeb && _webPage == null) {
+        // Web keeps no offline copy (memory-only store), so a cached
+        // session is always null here and the server's answer decides:
+        // waiting for it (bounded by the request timeout) avoids flashing
+        // the sign-in screen for a signed-in cookie user.
+        try {
+          session = await _loadConfigAndSession();
+          sessionFromWebServer = true;
+        } catch (_) {
+          // Unreachable server: show the signed-out screen.
+        }
+        if (!mounted) return;
+        if (session?.user == null) unawaited(_cancelAllNotifications());
+        if (session != null) _clearRemindersIfConsentRequired(session);
+      } else {
+        unawaited(_loadConfigAndSession()
+            .then<void>((fresh) => _applyBootstrapSession(fresh))
+            .catchError((Object _) {}));
+      }
     }
     if (session != null) {
       user = session.user;
@@ -326,7 +349,9 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
       _setConsent(session);
       _loading = false;
     });
-    if (session != null) {
+    // The web wait above already has the server's answer; only a session
+    // that came from the device's copy is revalidated against the server.
+    if (session != null && !sessionFromWebServer) {
       final epoch = _accountEpoch;
       try {
         // Null: the server was out of reach, the device's copy stands.
@@ -342,6 +367,17 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
       unawaited(_maybeCheckForUpdate());
       unawaited(_checkMessages());
       await _offerPendingInvite();
+    }
+  }
+
+  /// The device's last session, or null on web (no offline copy) or when
+  /// the read fails — never blocks the start.
+  Future<SessionSnapshot?> _cachedSessionSafe() async {
+    if (_webPage != null) return null;
+    try {
+      return await _api.cachedSession();
+    } catch (_) {
+      return null;
     }
   }
 
