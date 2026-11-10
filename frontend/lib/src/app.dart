@@ -265,61 +265,83 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
   }
 
   Future<void> _bootstrap() async {
-    // Local prefs first, so theme and language hold even when offline.
-    try {
-      // Web invite link (`/app/?invite=CODE`): keep the code across sign-in.
-      final linkInvite = Uri.base.queryParameters['invite']?.trim() ?? '';
-      if (linkInvite.isNotEmpty) await _prefs.savePendingInvite(linkInvite);
-      final appearance = await _prefs.load();
-      final language = await _prefs.loadLanguage();
-      final hintGone = await _prefs.reminderHintDismissed();
-      final autoUpdate = await _prefs.autoUpdateEnabled();
-      final messageNotifs = await _prefs.messageNotificationsEnabled();
-      if (!mounted) return;
-      // A privacy page link names its language (`?lang=`), e.g. from the
-      // app or a store listing; it wins without being saved.
-      final pageLanguage = _webPage == null
-          ? null
-          : AppLanguageX.tryFromId(Uri.base.queryParameters['lang']);
-      setState(() {
-        _themeMode = appearance.mode;
-        _palette = appearance.palette;
-        _language = pageLanguage ?? language ?? _deviceLanguage();
-        _reminderHintDismissed = hintGone;
-        _autoUpdate = autoUpdate;
-        _messageNotifs = messageNotifs;
-      });
-      // Re-registers each launch so an updated app runs its own worker.
-      unawaited(syncMessageWorker(enabled: messageNotifs));
-    } catch (_) {
-      // Keep defaults.
-    }
-
     User? user;
     var share = const ShareState(status: 'none');
     SessionSnapshot? session;
-    var fromDevice = false;
-    try {
-      await _api.loadPersistedApiBase();
-      if (!_api.config.needsServerSetup) {
-        // A session kept on the device opens the app at once; the server is
-        // asked in the background (it may be off, and each try waits).
-        final cached = _webPage == null ? await _api.cachedSession() : null;
-        if (cached?.user != null) {
-          session = cached;
-          fromDevice = true;
-        } else {
-          session = await _loadConfigAndSession();
-          _clearRemindersIfConsentRequired(session);
-          if (session.user == null) unawaited(_cancelAllNotifications());
-        }
-        user = session?.user;
-        share = session?.share ?? share;
-      }
-    } catch (_) {
-      // Unreachable server: show the signed-out screen.
-    }
+    // Whether [session] came from this start's own server answer (web) —
+    // then the trailing revalidation below would ask the same thing twice.
+    var sessionFromWebServer = false;
+    // Prefs, api base and cached session are independent local reads: start
+    // them together so cold start waits one storage round trip, not five.
+    // Nothing here touches the network; the server is asked afterwards.
+    // Each read falls back to its default on error, so a failing store
+    // never leaves the app stuck on the loading screen.
+    final results = await Future.wait([
+      _prefs
+          .load()
+          .catchError((Object _) => (mode: ThemeMode.system, palette: AppPalette.blue)),
+      _prefs.loadLanguage().catchError((Object _) => null),
+      _prefs.reminderHintDismissed().catchError((Object _) => false),
+      _prefs.autoUpdateEnabled().catchError((Object _) => false),
+      _prefs.messageNotificationsEnabled().catchError((Object _) => true),
+      _api.loadPersistedApiBase().catchError((Object _) {}),
+      _cachedSessionSafe(),
+    ]);
     if (!mounted) return;
+    final appearance = results[0] as ({ThemeMode mode, AppPalette palette});
+    final language = results[1] as AppLanguage?;
+    final hintGone = results[2] as bool;
+    final autoUpdate = results[3] as bool;
+    final messageNotifs = results[4] as bool;
+    final cached = results[6] as SessionSnapshot?;
+    // A privacy page link names its language (`?lang=`), e.g. from the
+    // app or a store listing; it wins without being saved.
+    final pageLanguage = _webPage == null
+        ? null
+        : AppLanguageX.tryFromId(Uri.base.queryParameters['lang']);
+    setState(() {
+      _themeMode = appearance.mode;
+      _palette = appearance.palette;
+      _language = pageLanguage ?? language ?? _deviceLanguage();
+      _reminderHintDismissed = hintGone;
+      _autoUpdate = autoUpdate;
+      _messageNotifs = messageNotifs;
+    });
+    // Re-registers each launch so an updated app runs its own worker.
+    unawaited(syncMessageWorker(enabled: messageNotifs));
+    // Web invite link (`/app/?invite=CODE`): keep the code across sign-in.
+    final linkInvite = Uri.base.queryParameters['invite']?.trim() ?? '';
+    if (linkInvite.isNotEmpty) unawaited(_prefs.savePendingInvite(linkInvite));
+    // A session kept on the device opens the app at once; the server is
+    // asked in the background (it may be off, and each try waits). No
+    // server configured: nothing to ask.
+    if (cached?.user != null) {
+      session = cached;
+    } else if (!_api.config.needsServerSetup) {
+      if (kIsWeb && _webPage == null) {
+        // Web keeps no offline copy (memory-only store), so a cached
+        // session is always null here and the server's answer decides:
+        // waiting for it (bounded by the request timeout) avoids flashing
+        // the sign-in screen for a signed-in cookie user.
+        try {
+          session = await _loadConfigAndSession();
+          sessionFromWebServer = true;
+        } catch (_) {
+          // Unreachable server: show the signed-out screen.
+        }
+        if (!mounted) return;
+        if (session?.user == null) unawaited(_cancelAllNotifications());
+        if (session != null) _clearRemindersIfConsentRequired(session);
+      } else {
+        unawaited(_loadConfigAndSession()
+            .then<void>((fresh) => _applyBootstrapSession(fresh))
+            .catchError((Object _) {}));
+      }
+    }
+    if (session != null) {
+      user = session.user;
+      share = session.share ?? share;
+    }
     _sessionGeneration++;
     setState(() {
       _user = user;
@@ -327,7 +349,9 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
       _setConsent(session);
       _loading = false;
     });
-    if (fromDevice) {
+    // The web wait above already has the server's answer; only a session
+    // that came from the device's copy is revalidated against the server.
+    if (session != null && !sessionFromWebServer) {
       final epoch = _accountEpoch;
       try {
         // Null: the server was out of reach, the device's copy stands.
@@ -339,6 +363,41 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     // The privacy pages stand alone: no invite offer, reminders or updates.
     if (_webPage != null) return;
     if (user != null && !_consentRequired) {
+      unawaited(_loadRemindersState());
+      unawaited(_maybeCheckForUpdate());
+      unawaited(_checkMessages());
+      await _offerPendingInvite();
+    }
+  }
+
+  /// The device's last session, or null on web (no offline copy) or when
+  /// the read fails — never blocks the start.
+  Future<SessionSnapshot?> _cachedSessionSafe() async {
+    if (_webPage != null) return null;
+    try {
+      return await _api.cachedSession();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// The server answered the cold-start session request (no cached session
+  /// on the device): apply what it decided — signed out, consent pending —
+  /// the same way the cached start does. Never runs when unmounted or when
+  /// the account changed while the request was in flight.
+  Future<void> _applyBootstrapSession(SessionSnapshot session) async {
+    if (!mounted) return;
+    _clearRemindersIfConsentRequired(session);
+    if (session.user == null) unawaited(_cancelAllNotifications());
+    _sessionGeneration++;
+    setState(() {
+      _user = session.user;
+      _share = session.share ?? const ShareState(status: 'none');
+      _setConsent(session);
+    });
+    // The privacy pages stand alone: no invite offer, reminders or updates.
+    if (_webPage != null) return;
+    if (session.user != null && !_consentRequired) {
       unawaited(_loadRemindersState());
       unawaited(_maybeCheckForUpdate());
       unawaited(_checkMessages());

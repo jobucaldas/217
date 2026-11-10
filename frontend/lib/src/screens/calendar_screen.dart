@@ -261,6 +261,7 @@ class _CalendarScreenState extends State<CalendarScreen>
       });
     WidgetsBinding.instance.addObserver(this);
     widget.cycleRefreshSignal?.addListener(_onCycleRefresh);
+    _hydrateFromLocal();
     _load();
   }
 
@@ -803,7 +804,8 @@ class _CalendarScreenState extends State<CalendarScreen>
   }
 
   /// Months in view that were never fetched this session come from the
-  /// device's copy, so a fast swipe lands on days instead of an empty grid.
+  /// device's copy, so a fast swipe (and the cold start) lands on days
+  /// instead of an empty grid; the last cycle predictions join them.
   Future<void> _hydrateFromLocal() async {
     if (_dataBlocked) return;
     // Months shown since are read by their own call; this one stands down.
@@ -812,13 +814,16 @@ class _CalendarScreenState extends State<CalendarScreen>
       for (final month in [_month, _prevMonth, _nextMonth])
         if (!_monthCache.containsKey(_monthKey(month))) month,
     ];
-    final lists = await Future.wait([
+    final results = await Future.wait([
       for (final month in missing)
         widget.api
             .cachedMonth(month.year, month.month)
             .then<List<Entry>?>((list) => list)
             .catchError((Object _) => null),
+      widget.api.cachedCycle().catchError((Object _) => null),
     ]);
+    final lists = results.sublist(0, missing.length).cast<List<Entry>?>();
+    final cycle = results.last as CycleInfo?;
     if (!mounted || epoch != _dataEpoch || _dataBlocked) return;
     setState(() {
       for (var i = 0; i < missing.length; i++) {
@@ -828,6 +833,12 @@ class _CalendarScreenState extends State<CalendarScreen>
         if (list == null || _monthCache.containsKey(key)) continue;
         _monthCache[key] = {for (final e in list) e.date: e};
       }
+      // The server's predictions stand in until a fresh read lands; a
+      // fetch that landed meanwhile is never older.
+      if (cycle != null && _cycle == CycleInfo.empty) _cycle = cycle;
+      // The header status follows today's cached entry until a fetch or an
+      // edit sets it (never older than the cached month).
+      _todayEntry ??= _monthCache[_monthKey(_today)]?[_todayKey];
       _showCachedMonths();
     });
   }
