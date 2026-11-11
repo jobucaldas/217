@@ -157,6 +157,21 @@ class _PrivacyPageState extends State<PrivacyPage> {
     final web = widget.web;
     if (web == null) return;
     setState(() => _error = null);
+    // Without WorkOS the fresh sign-in is a password re-entry here (the
+    // AuthKit redirect would hit a server that cannot start it).
+    if (!widget.api.workos && widget.api.passwordAuth) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (_) => _PasswordReentryDialog(
+          api: widget.api,
+          strings: _s,
+          email: web.user?.email ?? '',
+        ),
+      );
+      if (ok != true || !mounted) return;
+      if (action != null) await _run(action);
+      return;
+    }
     try {
       await web.onSignIn(_pagePath(action));
     } catch (_) {
@@ -635,6 +650,111 @@ class _PrivacyPageState extends State<PrivacyPage> {
         onPressed: _busy ? null : () => _start(PrivacyAction.delete),
       ),
     ];
+  }
+}
+
+/// Password re-entry for the privacy pages on a server without WorkOS: the
+/// fresh sign-in `reauth required` asks for, done right here with a login
+/// call (the same account the page is showing).
+class _PasswordReentryDialog extends StatefulWidget {
+  const _PasswordReentryDialog({
+    required this.api,
+    required this.strings,
+    required this.email,
+  });
+
+  final ApiClient api;
+  final Strings strings;
+  final String email;
+
+  @override
+  State<_PasswordReentryDialog> createState() => _PasswordReentryDialogState();
+}
+
+class _PasswordReentryDialogState extends State<_PasswordReentryDialog> {
+  final _password = TextEditingController();
+  bool _busy = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _password.dispose();
+    super.dispose();
+  }
+
+  Future<void> _confirm() async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await widget.api.signInWithPassword(widget.email, _password.text);
+      if (mounted) Navigator.pop(context, true);
+    } on ApiException catch (err) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = err.statusCode == 401
+            ? widget.strings.invalidEmailOrPassword
+            : err.statusCode == 429
+                ? widget.strings.rateLimited(err.retryAfter ?? 60)
+                : widget.strings.genericError;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = widget.strings.connectionError;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.strings.reauthNeeded),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(widget.email),
+          const SizedBox(height: 12),
+          TextField(
+            key: const ValueKey('reauth-password'),
+            controller: _password,
+            obscureText: true,
+            autofocus: true,
+            textInputAction: TextInputAction.done,
+            onSubmitted: (_) => _confirm(),
+            decoration:
+                InputDecoration(labelText: widget.strings.passwordLabel),
+          ),
+          if (_error != null)
+            Padding(
+              key: const ValueKey('reauth-error'),
+              padding: const EdgeInsets.only(top: 10),
+              child: Text(
+                _error!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ),
+        ],
+      ),
+      actions: [
+        DialogActionRow(
+          secondary: DialogLinkButton(
+            onPressed: () => Navigator.pop(context, false),
+            label: widget.strings.cancel,
+          ),
+          primary: FilledButton(
+            key: const ValueKey('reauth-confirm'),
+            onPressed: _busy ? null : _confirm,
+            child: Text(widget.strings.signInTitle),
+          ),
+        ),
+      ],
+    );
   }
 }
 

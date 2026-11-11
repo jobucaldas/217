@@ -18,6 +18,7 @@ import 'privacy_screens.dart';
 import 'reminder_settings_screen.dart';
 import 'role_screen.dart';
 import 'share_screens.dart';
+import 'sign_in_methods_section.dart';
 
 /// Grouped inset settings (Material 3 / iOS Settings style).
 class SettingsPage extends StatefulWidget {
@@ -318,6 +319,21 @@ class _SettingsPageState extends State<SettingsPage> {
               onStageChanged: widget.onStageChanged,
               onProfileChanged: widget.onProfileChanged,
               group: (children) => _SettingsSection(children: children),
+            ),
+            const SizedBox(height: 20),
+          ],
+          // First-party email+password credential, when the server offers it.
+          if (widget.onLogout != null &&
+              !widget.consentPending &&
+              widget.user != null &&
+              widget.api.passwordAuth) ...[
+            _SectionLabel(widget.strings.signInMethods),
+            SignInMethodsSection(
+              api: widget.api,
+              strings: widget.strings,
+              user: widget.user!,
+              group: (children) => _SettingsSection(children: children),
+              onSessionChanged: widget.onProfileChanged,
             ),
             const SizedBox(height: 20),
           ],
