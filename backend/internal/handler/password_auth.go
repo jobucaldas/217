@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"217/backend/internal/passwordauth"
 )
@@ -32,22 +33,43 @@ func (h *Handler) SignupPassword(w http.ResponseWriter, r *http.Request) {
 	if !h.passwordPolicyOK(w, password) {
 		return
 	}
-	// Existing accounts are never attached to from an unauthenticated request.
-	if h.emailExists(email) {
+	// One transaction creates the user, credential and (mail on) the
+	// verification row under the per-email lock: concurrent signups for
+	// one address produce exactly one account, the rest are 409.
+	hash, err := passwordauth.Hash(password)
+	if err != nil {
+		log.Printf("hashing password: %v", err)
+		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+		return
+	}
+	var code string
+	var expires time.Time
+	if h.mail != nil {
+		code, err = passwordauth.NewVerificationCode()
+		if err != nil {
+			log.Printf("generating verification code: %v", err)
+			http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+			return
+		}
+		expires = time.Now().UTC().Add(24 * time.Hour)
+	}
+	created, err := h.store.CreatePasswordUser(email, hash, code, expires)
+	if h.store.ErrEmailTaken(err) {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "email already registered"})
 		return
 	}
-	user, err := h.store.CreateUser(email, "", "")
 	if err != nil {
 		log.Printf("signup create user: %v", err)
 		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
 		return
 	}
-	if err := h.setCredentialPassword(user.ID, password); err != nil {
-		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
-		return
+	_ = created
+	// Sending the mail may fail; the account stands and the user can resend.
+	if h.mail != nil && code != "" {
+		if err := h.mail.SendVerification(email, code); err != nil {
+			log.Printf("sending verification mail: %v", err)
+		}
 	}
-	h.sendVerificationEmail(user.ID, email)
 	writeJSON(w, http.StatusCreated, map[string]string{"status": "account created"})
 }
 
@@ -91,9 +113,16 @@ func (h *Handler) LoginPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// With mail configured the address must be verified before password
-	// login works; without SMTP there is no verification at all.
+	// login works; without SMTP there is no verification at all. A store
+	// failure must not open the gate, so it fails closed (500).
 	if h.mail != nil {
-		if pending, err := h.store.HasEmailVerification(userID); err == nil && pending {
+		pending, err := h.store.HasEmailVerification(userID)
+		if err != nil {
+			log.Printf("checking email verification: %v", err)
+			http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+			return
+		}
+		if pending {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "verify your email to sign in"})
 			return
 		}
@@ -145,10 +174,11 @@ func (h *Handler) setCredentialPassword(userID, password string) error {
 }
 
 // RemovePasswordCredential drops the password sign-in method, but only when
-// another one remains (the WorkOS identity): a password-only account would
-// otherwise be locked out for good.
+// another one remains: a password-only account would otherwise be locked out
+// for good. The WorkOS identity counts as that other method only while WorkOS
+// sign-in is actually enabled (AUTH_WORKOS_ENABLED=false answers 410 there).
 func (h *Handler) RemovePasswordCredential(w http.ResponseWriter, r *http.Request) {
-	if !h.workosLinked(r) {
+	if h.workosDisabled || !h.workosLinked(r) {
 		writeJSON(w, http.StatusConflict, map[string]string{
 			"error": "set up another sign-in method first",
 		})
@@ -258,8 +288,10 @@ func (h *Handler) ResendVerificationEmail(w http.ResponseWriter, r *http.Request
 		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
 		return
 	}
-	if userID, ok := h.lookupUserIDByEmail(strings.ToLower(strings.TrimSpace(body.Email))); ok {
-		h.sendVerificationEmail(userID, strings.ToLower(strings.TrimSpace(body.Email)))
+	if userID, ok := h.lookupUserIDByEmail(strings.ToLower(strings.TrimSpace(body.Email))); ok && h.mail != nil {
+		if err := h.deliverVerificationEmail(userID, strings.ToLower(strings.TrimSpace(body.Email))); err != nil {
+			log.Printf("resending verification: %v", err)
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "sent"})
 }

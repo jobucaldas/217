@@ -1,6 +1,7 @@
 package handler_test
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,6 +17,13 @@ type fakeMailer struct {
 func (f *fakeMailer) SendVerification(to, code string) error {
 	f.codes = append(f.codes, code)
 	return nil
+}
+
+// failingMailer always fails, simulating an unreachable mail provider.
+type failingMailer struct{}
+
+func (failingMailer) SendVerification(to, code string) error {
+	return errors.New("mail provider down")
 }
 
 func TestPasswordVerifyEmailFlow(t *testing.T) {
@@ -226,5 +234,33 @@ func TestPasswordRemoveCredential(t *testing.T) {
 	h.LoginPassword(w, req)
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("removed credential must not sign in, got %d", w.Code)
+	}
+}
+
+// TestPasswordRemoveCredentialWorkOSDisabled covers item 4: with WorkOS off
+// (AUTH_WORKOS_ENABLED=false) a stored identity is NOT another method.
+func TestPasswordRemoveCredentialWorkOSDisabled(t *testing.T) {
+	h, s := newTestHandler(t)
+	h.SetWorkOSDisabled(true)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/password/signup",
+		strings.NewReader(`{"email":"noworkos@example.com","password":"long-enough-password"}`))
+	w := httptest.NewRecorder()
+	h.SignupPassword(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("signup status %d", w.Code)
+	}
+	userRec, err := s.GetUserByEmail("noworkos@example.com")
+	if err != nil || userRec == nil {
+		t.Fatal("signed-up user not found")
+	}
+	if _, err := s.LinkWorkOSIdentity("subject-noworkos", "noworkos@example.com", "NoWorkOS", true); err != nil {
+		t.Fatal(err)
+	}
+	cookie := sessionCookie(t, s, userRec.ID)
+	req = authedRequest(http.MethodDelete, "/api/account/password", cookie, nil)
+	w = httptest.NewRecorder()
+	h.AuthMiddleware(h.RemovePasswordCredential)(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("WorkOS disabled: identity must not count, expected 409, got %d", w.Code)
 	}
 }

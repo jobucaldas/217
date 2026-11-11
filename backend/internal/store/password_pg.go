@@ -1,6 +1,8 @@
 package store
 
 import (
+	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -22,9 +24,11 @@ func (s *PGStore) SetPasswordCredential(userID string, hash string) error {
 func (s *PGStore) GetPasswordCredential(userID string) (string, error) {
 	var hash string
 	err := s.db.QueryRow(`SELECT hash FROM password_credentials WHERE user_id = $1`, userID).Scan(&hash)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil // a user without a password, not an error
+	}
 	if err != nil {
-		// A missing row is a user without a password, not an error.
-		return "", nil
+		return "", fmt.Errorf("getting password credential: %w", err)
 	}
 	return hash, nil
 }
@@ -62,9 +66,11 @@ func (s *PGStore) CreateEmailVerification(userID, code string, expiresAt time.Ti
 }
 
 func (s *PGStore) HasEmailVerification(userID string) (bool, error) {
+	// A pending verification gates sign-in however old it is: an expired
+	// code still means the address was never verified (resend renews it).
 	var pending bool
 	err := s.db.QueryRow(`SELECT EXISTS (
-		SELECT 1 FROM email_verifications WHERE user_id = $1 AND expires_at > NOW())`, userID).Scan(&pending)
+		SELECT 1 FROM email_verifications WHERE user_id = $1)`, userID).Scan(&pending)
 	if err != nil {
 		return false, fmt.Errorf("checking email verification: %w", err)
 	}
