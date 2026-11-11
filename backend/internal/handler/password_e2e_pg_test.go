@@ -35,14 +35,14 @@ func TestSignupLoginEndToEndPG(t *testing.T) {
 	if dsn == "" {
 		t.Skip("set TEST_DATABASE_URL to a disposable PostgreSQL database")
 	}
-	s, err := store.NewPGStore(dsn, keyringForTest(t))
+	kr := keyringForTest(t) // one keyring: the store and the migrations seal and open the same rows
+	s, err := store.NewPGStore(dsn, kr)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer s.Close()
 	// The store tests migrate a throwaway schema; the handler test needs
 	// the same tables, so run the migrations for this store too.
-	kr := keyringForTest(t) // same keyring must seal and open the rows
 	if err := store.MigrateForTest(s, kr); err != nil {
 		t.Fatal(err)
 	}
