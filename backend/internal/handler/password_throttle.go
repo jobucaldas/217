@@ -1,9 +1,10 @@
 package handler
 
 import (
+	"fmt"
 	"log"
-	"net"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"strings"
 	"time"
@@ -20,12 +21,14 @@ func ipKey(prefix string, r *http.Request) string {
 
 // clientIPKey folds an IPv6 address into its /64; other addresses pass through.
 func clientIPKey(prefix, ip string) string {
-	if parsed := net.ParseIP(strings.TrimSpace(ip)); parsed != nil && parsed.To4() == nil {
-		if v6 := parsed.To16(); v6 != nil {
-			return prefix + v6[:8].String()
-		}
+	addr, err := netip.ParseAddr(strings.TrimSpace(ip))
+	if err != nil {
+		return prefix + ip
 	}
-	return prefix + ip
+	if !addr.Is4() && !addr.Is4In6() {
+		return prefix + netip.PrefixFrom(addr, 64).Masked().String()
+	}
+	return prefix + addr.String()
 }
 
 // passwordAuthEnabled reports the AUTH_PASSWORD_ENABLED flag (default true).
@@ -65,23 +68,20 @@ func (h *Handler) delaySleep(r *http.Request, acctKey string) {
 	}
 }
 
-// sendVerificationEmail sends the address verification code when mail is on.
-// Without SMTP_HOST there is no verification and accounts are accepted at
-// once; the code is stored so a later login can require it.
-func (h *Handler) sendVerificationEmail(userID, email string) {
-	if h.mail == nil {
-		return
-	}
+// deliverVerificationEmail mails a generated code and stores it so a later
+// login can require it. A failure to store the code is an error (the account
+// would be unverifiable); a failure to SEND it is logged only — the user can
+// ask for a resend.
+func (h *Handler) deliverVerificationEmail(userID, email string) error {
 	code, err := passwordauth.NewVerificationCode()
 	if err != nil {
-		log.Printf("generating verification code: %v", err)
-		return
+		return fmt.Errorf("generating verification code: %w", err)
 	}
 	if err := h.store.CreateEmailVerification(userID, code, time.Now().UTC().Add(24*time.Hour)); err != nil {
-		log.Printf("storing verification code: %v", err)
-		return
+		return fmt.Errorf("storing verification code: %w", err)
 	}
 	if err := h.mail.SendVerification(email, code); err != nil {
 		log.Printf("sending verification mail: %v", err)
 	}
+	return nil
 }

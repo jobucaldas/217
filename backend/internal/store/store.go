@@ -86,14 +86,23 @@ type Store interface {
 	// CreateEmailVerification stores a single-use code forcing the user to
 	// verify the address before the next password login (mail configured).
 	CreateEmailVerification(userID, code string, expiresAt time.Time) error
-	// HasEmailVerification reports a pending (unexpired) verification for
-	// userID; it is what blocks a password login until the address is done.
+	// HasEmailVerification reports a pending verification for userID,
+	// however old: it is what blocks a password login until the address
+	// is verified (resend renews it; only a consumed code clears it).
 	HasEmailVerification(userID string) (bool, error)
 	// ConsumeEmailVerification clears a pending code, reporting whether it
 	// matched (single use; the stored value is only a hash of the code).
 	ConsumeEmailVerification(userID, code string) (bool, error)
 	// DeletePasswordCredential removes the password sign-in method.
 	DeletePasswordCredential(userID string) error
+	// ErrEmailTaken reports whether err is the email-already-registered
+	// failure of CreatePasswordUser (the handler answers it with 409).
+	ErrEmailTaken(err error) bool
+	// CreatePasswordUser creates the account with its password hash and
+	// (when code is not empty) the address verification row in one step,
+	// under the same per-email lock as the WorkOS link: concurrent signups
+	// for one email produce exactly one account, the rest get a taken error.
+	CreatePasswordUser(email, passwordHash, verificationCode string, verificationExpires time.Time) (*model.User, error)
 	// SetRole picks owner or partner; switching is refused while a share is live.
 	SetRole(userID, role string) (*model.User, error)
 	SetStage(userID, stage string) (*model.User, error)

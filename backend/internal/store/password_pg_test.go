@@ -65,8 +65,10 @@ func TestPasswordCredentialsPG(t *testing.T) {
 	if err := s.CreateEmailVerification(user.ID, "654321", time.Now().UTC().Add(-time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	if pending, _ := s.HasEmailVerification(user.ID); pending {
-		t.Fatal("expired verification must not be pending")
+	// A pending verification gates sign-in however old it is (resend
+	// renews it); only consuming a valid code clears the gate.
+	if pending, _ := s.HasEmailVerification(user.ID); !pending {
+		t.Fatal("expired verification must still gate sign-in")
 	}
 	if ok, _ := s.ConsumeEmailVerification(user.ID, "654321"); ok {
 		t.Fatal("expired code must not consume")
