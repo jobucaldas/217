@@ -17,7 +17,9 @@ import (
 	"time"
 
 	"217/backend/internal/auth"
+	"217/backend/internal/mailer"
 	"217/backend/internal/model"
+	"217/backend/internal/passwordauth"
 	"217/backend/internal/store"
 )
 
@@ -56,16 +58,32 @@ type Handler struct {
 	inviteLimiter   *ipRateLimiter
 	privacyContact  string
 	reauthWindow    time.Duration
+	// Password sign-in: per-IP lockout, optional mailer, feature flag.
+	lockout         *passwordauth.Lockout
+	accountDelay    *passwordauth.Delay
+	mail            mailer.Mailer
+	passwordEnabled bool
+	// workosDisabled is set when AUTH_WORKOS_ENABLED=false: WorkOS routes
+	// answer 410 even when a provider is configured.
+	workosDisabled bool
+	// signupLimiter and verifyResendLimiter gate open endpoints per IP.
+	signupLimiter       *ipRateLimiter
+	verifyResendLimiter *ipRateLimiter
 }
 
 func New(s store.Store) *Handler {
 	return &Handler{
-		store:           s,
-		sessionCookie:   "217_session",
-		sessionDuration: maxSessionDuration,
-		authLimiter:     newIPRateLimiter(defaultAuthLimit, time.Minute),
-		inviteLimiter:   newIPRateLimiter(inviteAcceptLimit, time.Minute),
-		reauthWindow:    defaultReauthWindow,
+		store:               s,
+		sessionCookie:       "217_session",
+		sessionDuration:     maxSessionDuration,
+		authLimiter:         newIPRateLimiter(defaultAuthLimit, time.Minute),
+		inviteLimiter:       newIPRateLimiter(inviteAcceptLimit, time.Minute),
+		reauthWindow:        defaultReauthWindow,
+		lockout:             passwordauth.NewLockout(),
+		accountDelay:        passwordauth.NewDelay(),
+		passwordEnabled:     true, // AUTH_PASSWORD_ENABLED, default on
+		signupLimiter:       newIPRateLimiter(10, time.Minute),
+		verifyResendLimiter: newIPRateLimiter(3, time.Minute),
 	}
 }
 
@@ -93,6 +111,49 @@ func (h *Handler) SetRateLimit(limit int) {
 	h.authLimiter = newIPRateLimiter(limit, time.Minute)
 }
 func (h *Handler) SetOAuthProvider(p auth.OAuthProvider) { h.oauthProvider = p }
+
+// SetMailer enables email features (verification codes); nil keeps them off.
+func (h *Handler) SetMailer(m mailer.Mailer) { h.mail = m }
+
+// SetWorkOSDisabled turns AUTH_WORKOS_ENABLED=false into 410 on WorkOS
+// routes (the provider itself is left configured for account deletion).
+func (h *Handler) SetWorkOSDisabled(disabled bool) { h.workosDisabled = disabled }
+
+// SetPasswordEnabled flips the AUTH_PASSWORD_ENABLED flag.
+func (h *Handler) SetPasswordEnabled(enabled bool) { h.passwordEnabled = enabled }
+
+// SetDelayTimings overrides the per-account tarpit timings (tests).
+func (h *Handler) SetDelayTimings(step, max, reset time.Duration, queue int) {
+	h.accountDelay = passwordauth.NewDelayWith(step, max, reset, queue)
+}
+
+// issueSession opens a session for a freshly signed-in password user:
+// cookie for browsers, JSON session_token for native clients that posted a
+// device public key (same shape as the WorkOS exchange).
+func (h *Handler) issueSession(w http.ResponseWriter, r *http.Request, user *model.User, devicePublicKey []byte) {
+	var deviceKeyID string
+	var err error
+	if devicePublicKey != nil {
+		if deviceKeyID, err = h.store.CreateDeviceKey(user.ID, devicePublicKey); err != nil {
+			log.Printf("create device key failed: %v", err)
+			http.Error(w, `{"error":"cannot create session"}`, http.StatusInternalServerError)
+			return
+		}
+	}
+	token, err := h.createSessionForUser(w, r, user, deviceKeyID)
+	if err != nil {
+		log.Printf("create session failed: %v", err)
+		http.Error(w, `{"error":"cannot create session"}`, http.StatusInternalServerError)
+		return
+	}
+	payload := h.sessionPayload(user)
+	payload["session_token"] = token
+	if deviceKeyID != "" {
+		payload["device_key_id"] = deviceKeyID
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, payload)
+}
 
 // SetPrivacyContact sets who answers privacy requests for this server
 // (the controller or its data protection officer): an email or a URL.
@@ -141,7 +202,10 @@ func (h *Handler) authkitEnabled() bool { return h.oauthProvider != nil }
 func (h *Handler) AuthConfig(w http.ResponseWriter, r *http.Request) {
 	body := map[string]interface{}{
 		"authkit":  h.authkitEnabled(),
-		"password": false, // password register/login stay disabled for AuthKit deployments
+		"password": h.passwordAuthEnabled(), // first-party email+password sign-in
+		"signup":   h.passwordAuthEnabled(), // open sign-up for new accounts
+		"mail":     h.mail != nil,           // address verification configured
+		"workos":   !h.workosDisabled,
 	}
 	if reporter, ok := h.oauthProvider.(auth.ClientIDReporter); ok {
 		body["workos_client_id"] = reporter.ClientID()
@@ -356,7 +420,22 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+// workosGone answers 410 when this server no longer offers WorkOS sign-in
+// (AUTH_WORKOS_ENABLED=false): clients must update or sign in again.
+func (h *Handler) workosGone(w http.ResponseWriter) bool {
+	if !h.workosDisabled {
+		return false
+	}
+	writeJSON(w, http.StatusGone, map[string]string{
+		"error": "sign-in moved to app passwords; update the app or sign in again",
+	})
+	return true
+}
+
 func (h *Handler) StartWorkOSOAuth(w http.ResponseWriter, r *http.Request) {
+	if h.workosGone(w) {
+		return
+	}
 	// ?return= lands on one of the web app's privacy pages after sign-in
 	// (validated by safeReturnPath); otherwise on the app.
 	authURL, status, msg := h.beginBrowserOAuth(w, r, r.URL.Query().Get("return"))
@@ -468,6 +547,9 @@ func oauthReturnPath(r *http.Request) string {
 }
 
 func (h *Handler) WorkOSOAuthCallback(w http.ResponseWriter, r *http.Request) {
+	if h.workosGone(w) {
+		return
+	}
 	http.SetCookie(w, h.clearOAuthBindingCookie())
 	http.SetCookie(w, h.clearOAuthReturnCookie())
 	if h.oauthProvider == nil {
@@ -528,6 +610,9 @@ func (h *Handler) WorkOSOAuthCallback(w http.ResponseWriter, r *http.Request) {
 // ExchangeWorkOS handles native (Flutter) AuthKit PKCE completion.
 // Native apps open AuthKit with a custom-scheme (Android) or loopback (desktop) redirect, then posts code+verifier here.
 func (h *Handler) ExchangeWorkOS(w http.ResponseWriter, r *http.Request) {
+	if h.workosGone(w) {
+		return
+	}
 	if !h.authLimiter.allow("workos-exchange:" + clientIP(r)) {
 		http.Error(w, `{"error":"rate limited"}`, http.StatusTooManyRequests)
 		return

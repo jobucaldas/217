@@ -75,6 +75,25 @@ type Store interface {
 	RevokeShare(ownerID string) (*model.ShareState, error)
 	AcceptShare(partnerID, inviteCode string) (*model.ShareState, error)
 	CalendarSubjectID(userID string) (string, error)
+	// SetPasswordCredential stores (or replaces) the password hash of userID.
+	SetPasswordCredential(userID string, hash string) error
+	// GetPasswordCredential returns the stored hash for userID, or "" with a
+	// nil error when the user has no password credential.
+	GetPasswordCredential(userID string) (string, error)
+	// LookupPasswordHashByEmail resolves a sign-in email to its credential
+	// hash ("" when the user or credential does not exist).
+	LookupPasswordHashByEmail(email string) (userID string, hash string, err error)
+	// CreateEmailVerification stores a single-use code forcing the user to
+	// verify the address before the next password login (mail configured).
+	CreateEmailVerification(userID, code string, expiresAt time.Time) error
+	// HasEmailVerification reports a pending (unexpired) verification for
+	// userID; it is what blocks a password login until the address is done.
+	HasEmailVerification(userID string) (bool, error)
+	// ConsumeEmailVerification clears a pending code, reporting whether it
+	// matched (single use; the stored value is only a hash of the code).
+	ConsumeEmailVerification(userID, code string) (bool, error)
+	// DeletePasswordCredential removes the password sign-in method.
+	DeletePasswordCredential(userID string) error
 	// SetRole picks owner or partner; switching is refused while a share is live.
 	SetRole(userID, role string) (*model.User, error)
 	SetStage(userID, stage string) (*model.User, error)

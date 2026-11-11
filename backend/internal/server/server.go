@@ -15,6 +15,7 @@ import (
 	"217/backend/internal/auth"
 	"217/backend/internal/fieldcrypt"
 	"217/backend/internal/handler"
+	"217/backend/internal/mailer"
 	"217/backend/internal/reminder"
 	"217/backend/internal/store"
 )
@@ -66,6 +67,12 @@ type Config struct {
 	// TLSCertFile and TLSKeyFile make the API serve HTTPS (e.g. to its proxy).
 	TLSCertFile string
 	TLSKeyFile  string
+	// SMTP sends address-verification mail; Host empty disables mail.
+	SMTP mailer.Config
+	// AuthPasswordEnabled / AuthWorkOSEnabled come from AUTH_PASSWORD_ENABLED
+	// and AUTH_WORKOS_ENABLED (both default true).
+	AuthPasswordEnabled *bool
+	AuthWorkOSEnabled   *bool
 }
 
 // Run starts the API and blocks until it stops.
@@ -92,6 +99,11 @@ func Run(cfg Config) error {
 	push, err := ValidatePushConfig(cfg.Push)
 	if err != nil {
 		return err
+	}
+	workosEnabled := cfg.AuthWorkOSEnabled == nil || *cfg.AuthWorkOSEnabled
+	if !workosEnabled {
+		// Native-only deployments do not need the WorkOS credentials.
+		cfg.WorkOS = WorkOSConfig{}
 	}
 	if (cfg.TLSCertFile == "") != (cfg.TLSKeyFile == "") {
 		return fmt.Errorf("TLS_CERT_FILE and TLS_KEY_FILE must be set together")
@@ -126,6 +138,18 @@ func Run(cfg Config) error {
 	h.SetAppBaseURL(appBaseURL)
 	h.SetAllowedOrigins(allowedOrigins)
 	h.SetPrivacyContact(cfg.PrivacyContact)
+	if cfg.AuthPasswordEnabled != nil {
+		h.SetPasswordEnabled(*cfg.AuthPasswordEnabled)
+	}
+	if !workosEnabled {
+		h.SetWorkOSDisabled(true)
+	}
+	if cfg.SMTP.Enabled() {
+		h.SetMailer(mailer.New(cfg.SMTP))
+		log.Println("password verification mail enabled (SMTP)")
+	} else {
+		log.Println("mail disabled: password accounts are accepted without verification")
+	}
 
 	stopJanitor := make(chan struct{})
 	defer close(stopJanitor)
@@ -133,7 +157,7 @@ func Run(cfg Config) error {
 	if ttl := parseSessionTTL(); ttl > 0 {
 		h.SetSessionDuration(ttl)
 	}
-	if cfg.WorkOS.ClientID != "" && cfg.WorkOS.AppBaseURL != "" {
+	if workosEnabled && cfg.WorkOS.ClientID != "" && cfg.WorkOS.AppBaseURL != "" {
 		provider, providerErr := auth.NewWorkOSOAuth(cfg.WorkOS.APIKey, cfg.WorkOS.ClientID, cfg.WorkOS.AppBaseURL)
 		if providerErr != nil {
 			log.Printf("workos oauth disabled: %v", providerErr)
@@ -177,6 +201,12 @@ func Run(cfg Config) error {
 	mux.HandleFunc("POST /api/auth/logout", h.Logout)
 	mux.HandleFunc("POST /api/auth/register", h.Register)
 	mux.HandleFunc("POST /api/auth/login", h.Login)
+	mux.HandleFunc("POST /api/auth/password/signup", h.SignupPassword)
+	mux.HandleFunc("POST /api/auth/password/login", h.LoginPassword)
+	mux.HandleFunc("POST /api/auth/password/verify", h.VerifyEmail)
+	mux.HandleFunc("POST /api/auth/password/verify/resend", h.ResendVerificationEmail)
+	mux.HandleFunc("PUT /api/account/password", h.AuthMiddleware(h.RecentBrowserSignIn(h.ChangePassword)))
+	mux.HandleFunc("DELETE /api/account/password", h.AuthMiddleware(h.RemovePasswordCredential))
 	mux.HandleFunc("GET /api/auth/workos", h.StartWorkOSOAuth)
 	mux.HandleFunc("GET /api/auth/workos/callback", h.WorkOSOAuthCallback)
 	mux.HandleFunc("POST /api/auth/workos/exchange", h.ExchangeWorkOS)
