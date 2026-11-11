@@ -76,9 +76,13 @@ func (s *PGStore) CreatePasswordUser(email, passwordHash, verificationCode strin
 	if matches > 0 {
 		return nil, errEmailTaken
 	}
-	created, err := s.insertUser(tx, normalized, normalized, passwordHash)
+	created, err := s.insertUser(tx, normalized, normalized, "")
 	if err != nil {
 		return nil, fmt.Errorf("creating user: %w", err)
+	}
+	if _, err := tx.Exec(`INSERT INTO password_credentials (user_id, hash) VALUES ($1, $2)`,
+		created.ID, passwordHash); err != nil {
+		return nil, fmt.Errorf("storing password credential: %w", err)
 	}
 	if verificationCode != "" {
 		if _, err := tx.Exec(`INSERT INTO email_verifications (user_id, code_hash, expires_at) VALUES ($1, $2, $3)`,
