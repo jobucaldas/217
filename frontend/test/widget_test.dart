@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:a217/src/api/client.dart';
 import 'package:a217/src/config.dart';
 import 'package:a217/src/i18n.dart';
 import 'package:a217/src/screens/auth_screen.dart';
@@ -16,6 +18,11 @@ void main() {
           brightness,
           palette: AppPalette.blue,
         );
+        FlutterSecureStorage.setMockInitialValues({});
+        final api = ApiClient(AppConfig.fromEnvironment());
+        // No network in widget tests: turn password sign-in on directly so
+        // the form (and its CTA) renders.
+        api.passwordAuth = true;
         await tester.pumpWidget(
           MaterialApp(
             theme: ThemeData(
@@ -29,8 +36,9 @@ void main() {
             ),
             home: AuthScreen(
               strings: const Strings(AppLanguage.pt),
-              onSignIn: () async {},
-              onOpenSettings: () {},
+              api: api,
+              onSignedIn: (user) async {},
+              onOpenSettings: () => openedServerSettings = true,
               server: '217.caldas-studios.com.br',
               onOpenServerSettings: () => openedServerSettings = true,
             ),
