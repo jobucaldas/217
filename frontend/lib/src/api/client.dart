@@ -39,6 +39,21 @@ class ApiClient {
   /// Whether the server signs people in (AuthKit configured).
   bool authkit = false;
 
+  /// First-party email+password sign-in (`AUTH_PASSWORD_ENABLED`).
+  bool passwordAuth = false;
+
+  /// Open sign-up for new accounts (needs [passwordAuth] too).
+  bool passwordSignup = false;
+
+  /// Address verification configured (SMTP): sign-up waits for a code.
+  bool mailVerification = false;
+
+  /// WorkOS sign-in offered (`AUTH_WORKOS_ENABLED` not false). Defaults to
+  /// true: servers older than the `workos` config key (and a failed config
+  /// fetch) always offered it, so only an explicit `"workos": false` hides
+  /// the button.
+  bool workos = true;
+
   /// Account whose data is kept on the device; set once a session is known.
   String? _userId;
 
@@ -59,6 +74,10 @@ class ApiClient {
     workosUserDeletion = false;
     privacyContact = '';
     authkit = false;
+    passwordAuth = false;
+    passwordSignup = false;
+    mailVerification = false;
+    workos = true;
     try {
       final response =
           await _send('GET', _uri('/api/auth/config'), auth: false);
@@ -67,6 +86,11 @@ class ApiClient {
         if (decoded is Map) {
           workosUserDeletion = decoded['workos_user_deletion'] == true;
           authkit = decoded['authkit'] == true;
+          passwordAuth = decoded['password'] == true;
+          passwordSignup = decoded['signup'] == true;
+          mailVerification = decoded['mail'] == true;
+          // Absent key: an older server, which always offered WorkOS.
+          workos = decoded['workos'] != false;
           final contact = decoded['privacy_contact'];
           privacyContact = contact is String ? contact.trim() : '';
         }
@@ -1074,6 +1098,117 @@ class ApiClient {
       publicKey: (decoded['public_key'] as String?) ?? '',
     );
   }
+
+  /// Signs in with email and password (first-party sign-in). On 403 `verify
+  /// your email to sign in` the caller shows the verification screen; a 429
+  /// carries its Retry-After seconds in [ApiException.retryAfter].
+  Future<User> signInWithPassword(String email, String password) async {
+    // Android: a fresh Keystore key, so this sign-in lasts (see DeviceKey,
+    // the same flow as the WorkOS exchange).
+    final devicePublicKey = await _deviceKey.create();
+    final response = await _sendOnce(
+      'POST',
+      _uri('/api/auth/password/login'),
+      body: {
+        'email': email,
+        'password': password,
+        if (devicePublicKey != null) 'device_public_key': devicePublicKey,
+      },
+      auth: false,
+    );
+    if (response.statusCode != 200) {
+      // The new key is of no use without a session.
+      if (devicePublicKey != null) await _deviceKey.delete();
+      throw ApiException('password sign-in', response);
+    }
+    final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+    final userJson = decoded['user'] as Map<String, dynamic>?;
+    final token = decoded['session_token'] as String?;
+    if (userJson == null || token == null) {
+      if (devicePublicKey != null) await _deviceKey.delete();
+      throw ApiException('password sign-in', response);
+    }
+    // Same session handling as the WorkOS exchange: keep the token and the
+    // key id together so Keystore renewal keeps working.
+    await _dropLocalData();
+    await saveSessionToken(token);
+    final keyId = decoded['device_key_id'];
+    if (keyId is String && keyId.isNotEmpty) {
+      await _storage.write(key: _deviceKeyIdKey, value: keyId);
+    } else {
+      await _storage.delete(key: _deviceKeyIdKey);
+    }
+    await _sessionFrom(response);
+    return User.fromJson(userJson);
+  }
+
+  /// Asks the verification code again for [email] (mail configured).
+  Future<void> resendVerification(String email) async {
+    final response = await _sendOnce(
+      'POST',
+      _uri('/api/auth/password/verify/resend'),
+      body: {'email': email},
+      auth: false,
+    );
+    if (response.statusCode != 200) {
+      throw ApiException('resend verification', response);
+    }
+  }
+
+  /// Confirms the address with the code from the verification mail.
+  Future<void> verifyEmail(String email, String code) async {
+    final response = await _sendOnce(
+      'POST',
+      _uri('/api/auth/password/verify'),
+      body: {'email': email, 'code': code},
+      auth: false,
+    );
+    if (response.statusCode != 200) {
+      throw ApiException('verify email', response);
+    }
+  }
+
+  /// Creates an account with email and password (no session yet; with mail
+  /// configured the address must be verified before the first sign-in).
+  Future<void> signUpWithPassword(String email, String password) async {
+    final response = await _sendOnce(
+      'POST',
+      _uri('/api/auth/password/signup'),
+      body: {'email': email, 'password': password},
+      auth: false,
+    );
+    if (response.statusCode != 201) {
+      throw ApiException('sign up', response);
+    }
+  }
+
+  /// Sets or changes the signed-in account's password. 403 `current password
+  /// is wrong` comes back as a 403 [ApiException].
+  Future<void> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    final response = await _send(
+      'PUT',
+      _uri('/api/account/password'),
+      body: {
+        'current_password': currentPassword,
+        'new_password': newPassword,
+      },
+    );
+    if (response.statusCode != 204) {
+      throw ApiException('change password', response);
+    }
+  }
+
+  /// Removes the account's password credential (another sign-in method must
+  /// remain; the server answers 409 otherwise).
+  Future<void> removePassword() async {
+    final response = await _send('DELETE', _uri('/api/account/password'));
+    if (response.statusCode != 204) {
+      throw ApiException('remove password', response);
+    }
+  }
 }
 
 /// Result of [ApiClient.checkServer].
@@ -1084,12 +1219,21 @@ class ApiException implements Exception {
   ApiException(this.action, http.Response response)
       : statusCode = response.statusCode,
         message = _errorField(response.body),
-        consentVersion = _consentVersionField(response.body);
+        consentVersion = _consentVersionField(response.body),
+        retryAfter = _retryAfter(response.headers['retry-after']);
 
   final String action;
   final int statusCode;
   final String message;
   final int? consentVersion;
+
+  /// Seconds to wait before trying again (429 rate limits).
+  final int? retryAfter;
+
+  static int? _retryAfter(String? value) {
+    if (value == null) return null;
+    return int.tryParse(value.trim());
+  }
 
   static int? _consentVersionField(String body) {
     try {

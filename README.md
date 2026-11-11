@@ -4,7 +4,7 @@ Anticonceptional (birth control) intake tracker with a shared calendar, in Engli
 
 - **Apps:** web, Android, Windows, Linux (Flutter)
 - **Server:** Go API + PostgreSQL, behind Caddy
-- **Sign-in:** WorkOS AuthKit
+- **Sign-in:** WorkOS AuthKit or first-party email+password (see the auth section below)
 
 Your calendar lives on a server you run. You only need Docker; no clone of this repo.
 

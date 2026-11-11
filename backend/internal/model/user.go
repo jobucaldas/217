@@ -12,7 +12,10 @@ type User struct {
 	// (Messages, share screens); empty falls back to Name (WorkOS profile).
 	DisplayName string `json:"display_name"`
 	// BirthDate is the owner's birth month, YYYY-MM (empty = not given).
-	BirthDate    string    `json:"birth_date,omitempty"`
+	BirthDate string `json:"birth_date,omitempty"`
+	// HasPassword reports a first-party email+password credential (set by
+	// the handler when building a session payload; not a stored column).
+	HasPassword  bool      `json:"has_password,omitempty"`
 	PasswordHash string    `json:"-"`
 	APIKey       string    `json:"api_key,omitempty"`
 	CreatedAt    time.Time `json:"created_at"`

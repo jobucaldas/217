@@ -65,6 +65,149 @@ class Strings {
 
   String get brand => '217';
   String get continueWorkOS => _t('Sign in', 'Entrar', 'Iniciar sesión');
+
+  /// WorkOS button label when the password form is shown too (two buttons
+  /// must not carry the same label).
+  String get continueWorkOSOther => _t(
+      'Continue with WorkOS', 'Continuar com a WorkOS', 'Continuar con WorkOS');
+
+  // Email + password sign-in (first-party sign-in)
+  String get signInEmail => _t(
+        'Sign in with email',
+        'Entrar com e-mail',
+        'Iniciar sesión con correo',
+      );
+  String get emailLabel => _t('Email', 'E-mail', 'Correo');
+  String get passwordLabel =>
+      _t('Password', 'Senha', 'Contraseña');
+  String get passwordShow => _t('Show password', 'Mostrar senha', 'Mostrar contraseña');
+  String get passwordHide => _t('Hide password', 'Ocultar senha', 'Ocultar contraseña');
+  String get newPasswordLabel =>
+      _t('New password', 'Nova senha', 'Nueva contraseña');
+  String get currentPasswordLabel => _t(
+        'Current password',
+        'Senha atual',
+        'Contraseña actual',
+      );
+  String get confirmPasswordLabel => _t(
+        'Confirm password',
+        'Confirmar senha',
+        'Confirmar contraseña',
+      );
+  String get passwordPolicyHint => _t(
+        '15-128 characters.',
+        'De 15 a 128 caracteres.',
+        'De 15 a 128 caracteres.',
+      );
+  String get orDivider => _t('or', 'ou', 'o');
+  String get createAccount => _t(
+        'Create account',
+        'Criar conta',
+        'Crear cuenta',
+      );
+  String get signInTitle => _t('Sign in', 'Entrar', 'Iniciar sesión');
+
+  /// The server's minimum password length (backend passwordauth.MinPasswordLen).
+  static const passwordMinChars = 15;
+  String passwordTooShort(int min) => _t(
+        'Use at least $min characters.',
+        'Use pelo menos $min caracteres.',
+        'Usa al menos $min caracteres.',
+      );
+  String get passwordMismatch => _t(
+        "Passwords don't match.",
+        'As senhas não coincidem.',
+        'Las contraseñas no coinciden.',
+      );
+  String get invalidEmailOrPassword => _t(
+        'Wrong email or password.',
+        'E-mail ou senha incorretos.',
+        'Correo o contraseña incorrectos.',
+      );
+  String get emailTaken => _t(
+        'This email already has an account. Sign in instead.',
+        'Este e-mail já tem uma conta. Entre em vez de criar.',
+        'Este correo ya tiene una cuenta. Inicia sesión en su lugar.',
+      );
+  String rateLimited(int seconds) => _t(
+        'Too many attempts. Try again in $seconds s.',
+        'Muitas tentativas. Tente de novo em $seconds s.',
+        'Demasiados intentos. Inténtalo en $seconds s.',
+      );
+  String get verifyEmailTitle => _t(
+        'Check your email',
+        'Confira seu e-mail',
+        'Revisa tu correo',
+      );
+  String verifyEmailBody(String email) => _t(
+        'We sent a code to $email. Enter it to finish.',
+        'Enviamos um código para $email. Digite-o para concluir.',
+        'Enviamos un código a $email. Introdúcelo para terminar.',
+      );
+  String get codeLabel => _t('Code', 'Código', 'Código');
+  String get verify => _t('Verify', 'Verificar', 'Verificar');
+  String get invalidCode => _t(
+        'Invalid or expired code.',
+        'Código inválido ou expirado.',
+        'Código inválido o caducado.',
+      );
+  String get resendCode => _t('Resend code', 'Reenviar código', 'Reenviar código');
+  String resendIn(int seconds) => _t(
+        'Resend in ${seconds}s',
+        'Reenviar em ${seconds}s',
+        'Reenviar en ${seconds}s',
+      );
+  String get passwordSaved => _t(
+        'Password saved.',
+        'Senha salva.',
+        'Contraseña guardada.',
+      );
+  String get passwordRemoved => _t(
+        'Password removed.',
+        'Senha removida.',
+        'Contraseña eliminada.',
+      );
+  String get currentPasswordWrong => _t(
+        'Current password is wrong.',
+        'A senha atual está errada.',
+        'La contraseña actual es incorrecta.',
+      );
+  String get removePasswordTitle => _t(
+        'Remove password?',
+        'Remover a senha?',
+        '¿Eliminar la contraseña?',
+      );
+  String get removePasswordBody => _t(
+        'You will no longer be able to sign in with a password.',
+        'Você não poderá mais entrar com uma senha.',
+        'Ya no podrás iniciar sesión con contraseña.',
+      );
+  String get removePasswordNeedsOther => _t(
+        'Set up another sign-in method before removing the password.',
+        'Configure outro método de login antes de remover a senha.',
+        'Configura otro método de inicio de sesión antes de eliminar la contraseña.',
+      );
+  String get reauthNeeded => _t(
+        'Sign in again to confirm it is you, then try here again.',
+        'Entre de novo para confirmar que é você e tente aqui de novo.',
+        'Inicia sesión de nuevo para confirmar que eres tú y vuelve a intentarlo.',
+      );
+  String get signInMethods => _t(
+        'Sign-in methods',
+        'Métodos de entrada',
+        'Métodos de inicio de sesión',
+      );
+  String get setPassword => _t('Set password', 'Definir senha', 'Definir contraseña');
+  String get changePassword => _t(
+        'Change password',
+        'Mudar senha',
+        'Cambiar contraseña',
+      );
+  String get removePassword => _t(
+        'Remove password',
+        'Remover senha',
+        'Eliminar contraseña',
+      );
   String get signInSubtitle => _t(
         'Medication Calendar',
         'Calendário de Remédios',

@@ -23,6 +23,12 @@ func (h *Handler) sessionPayload(user *model.User) map[string]interface{} {
 		}
 	}
 	user.Role = user.EffectiveRole()
+	// The UI shows "Set password" vs "Change/Remove password" from this.
+	if has, err := h.store.GetPasswordCredential(user.ID); err != nil {
+		log.Printf("password credential lookup: %v", err)
+	} else {
+		user.HasPassword = has != ""
+	}
 	return map[string]interface{}{
 		"user":  user,
 		"share": h.withInviteURL(share),

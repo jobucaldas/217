@@ -7,6 +7,7 @@ class User {
     this.stage = 'cycling',
     this.displayName = '',
     this.birthDate = '',
+    this.hasPassword = false,
   });
 
   final String id;
@@ -20,6 +21,10 @@ class User {
 
   /// Owner's birth month, `YYYY-MM` (empty: not given).
   final String birthDate;
+
+  /// Has a first-party email+password credential (Set/Change/Remove password
+  /// in Settings; absent for WorkOS-only accounts).
+  final bool hasPassword;
 
   /// The name the other side sees: the chosen one, else the sign-in name.
   String get shownName => displayName.trim().isNotEmpty ? displayName : name;
@@ -40,7 +45,8 @@ class User {
       role: next,
       stage: stage,
       displayName: displayName,
-      birthDate: birthDate);
+      birthDate: birthDate,
+      hasPassword: hasPassword);
 
   factory User.fromJson(Map<String, dynamic> json) {
     return User(
@@ -51,6 +57,7 @@ class User {
       stage: (json['stage'] as String?) ?? 'cycling',
       displayName: (json['display_name'] as String?) ?? '',
       birthDate: (json['birth_date'] as String?) ?? '',
+      hasPassword: json['has_password'] == true,
     );
   }
 }
