@@ -11,7 +11,7 @@ import (
 	"217/backend/internal/store"
 )
 
-func TestAuthConfigPasswordAlwaysDisabled(t *testing.T) {
+func TestAuthConfigPasswordEnabledByDefault(t *testing.T) {
 	h := New(store.NewMemoryStore())
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/config", nil)
 	w := httptest.NewRecorder()
@@ -23,8 +23,17 @@ func TestAuthConfigPasswordAlwaysDisabled(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if body["password"] != false {
+	if body["password"] != true {
 		t.Fatalf("password = %#v", body["password"])
+	}
+	if body["signup"] != true {
+		t.Fatalf("signup = %#v", body["signup"])
+	}
+	if body["mail"] != false {
+		t.Fatalf("mail without SMTP = %#v", body["mail"])
+	}
+	if body["workos"] != true {
+		t.Fatalf("workos by default = %#v", body["workos"])
 	}
 	if body["authkit"] != false {
 		t.Fatalf("authkit without provider = %#v", body["authkit"])

@@ -4,11 +4,13 @@ import (
 	"flag"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"217/backend/db"
 	"217/backend/internal/fieldcrypt"
+	"217/backend/internal/mailer"
 	"217/backend/internal/server"
 	"217/backend/internal/store"
 	"217/backend/internal/tlsinit"
@@ -92,7 +94,30 @@ func main() {
 		PrivacyContact: os.Getenv("PRIVACY_CONTACT"),
 		TLSCertFile:    os.Getenv("TLS_CERT_FILE"),
 		TLSKeyFile:     os.Getenv("TLS_KEY_FILE"),
+		SMTP: mailer.Config{
+			Host:     os.Getenv("SMTP_HOST"),
+			Port:     os.Getenv("SMTP_PORT"),
+			User:     os.Getenv("SMTP_USER"),
+			Password: os.Getenv("SMTP_PASS"),
+			From:     os.Getenv("SMTP_FROM"),
+		},
+		AuthPasswordEnabled: flagBool("AUTH_PASSWORD_ENABLED", true),
+		AuthWorkOSEnabled:   flagBool("AUTH_WORKOS_ENABLED", true),
 	}))
+}
+
+// flagBool parses a boolean environment variable; nil when unset or invalid.
+func flagBool(name string, def bool) *bool {
+	raw := os.Getenv(name)
+	if raw == "" {
+		return &def
+	}
+	v, err := strconv.ParseBool(raw)
+	if err != nil {
+		log.Printf("ignoring invalid %s=%q", name, raw)
+		return &def
+	}
+	return &v
 }
 
 func splitList(s string) []string {

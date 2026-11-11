@@ -66,6 +66,7 @@ Offline-first client: `ApiClient` keeps the last session, months, cycle and aler
 ## API Endpoints
 
 ### Auth
+Sign-in is WorkOS AuthKit by default; first-party email+password sign-in also exists (`AUTH_PASSWORD_ENABLED`, default true; `AUTH_WORKOS_ENABLED=false` makes it native-only and WorkOS routes answer 410). Passwords are Argon2id (15-128 chars, checked against an embedded common-password blocklist); sign-up `POST /api/auth/password/signup` refuses existing emails, login `POST /api/auth/password/login` takes the same optional `device_public_key` as the WorkOS exchange, and `PUT /api/account/password` sets/changes the password for the signed-in user (current password required once one exists, recent browser sign-in required). Per-IP lockout after 15 wrong passwords (30 min, then +1h per repeat; in-memory). With SMTP configured (`SMTP_HOST/PORT/USER/PASS/FROM`), sign-up sends a verification code and password login waits for it; without SMTP accounts are accepted unverified.
 - `GET /api/auth/workos` — browser AuthKit start
 - `GET /api/auth/workos/callback` — browser callback; the redirect URI is chosen at login from the request host (`X-Forwarded-Host`/`Host`) if it is in `APP_BASE_URL` + `APP_ALLOWED_ORIGINS`, else `APP_BASE_URL`, and stored with the attempt (sealed) for the exchange and final redirect
 - `POST /api/auth/workos/exchange` — native PKCE exchange; optional `device_public_key` (base64 PKIX P-256) → `device_key_id`
