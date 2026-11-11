@@ -109,6 +109,9 @@ APP_BASE_URL=https://217.example.com   # or http://localhost:8787 to try it
 # APP_ALLOWED_ORIGINS=https://217.example.com,https://217.example.org  # optional: serve sign-in on more hosts
 WORKOS_CLIENT_ID=client_...
 WORKOS_API_KEY=sk_...                  # optional: also deletes the WorkOS sign-in identity during account erasure
+# AUTH_PASSWORD_ENABLED=true           # first-party email+password sign-in (default on)
+# AUTH_WORKOS_ENABLED=true             # set false for password sign-in only (WorkOS routes answer 410)
+# SMTP_HOST=smtp.example.com           # optional: emails verification codes for password sign-up; without it accounts are accepted unverified
 # PRIVACY_CONTACT=privacy@example.com  # who answers privacy requests (shown in the app)
 # SITE_ADDRESS=217.example.com         # see the comment in compose.yaml
 ```
