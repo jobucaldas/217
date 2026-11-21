@@ -120,13 +120,27 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
   Future<void>? _pendingInviteWrite;
 
   /// Preloaded local calendar state from bootstrap so the very first calendar
-  /// frame renders populated with zero layout shift.
-  String? _initialCalendarUserId;
+  /// frame renders populated with zero layout shift. Single-use and bound to
+  /// the exact calendar scope it was read for.
+  String? _initialCalendarScopeKey;
   Map<String, Map<String, Entry>>? _initialCalendarMonths;
   CycleInfo? _initialCalendarCycle;
 
+  static String? _calendarScopeKey(
+    User? user,
+    ShareState share,
+    bool consentRequired,
+  ) {
+    if (user == null || consentRequired || !user.hasRole) return null;
+    if (user.isPartner) {
+      if (!share.isActive) return null;
+      return '${user.id}:partner:${share.status}:${share.ownerEmail}';
+    }
+    return '${user.id}:owner';
+  }
+
   void _clearInitialCalendarCache() {
-    _initialCalendarUserId = null;
+    _initialCalendarScopeKey = null;
     _initialCalendarMonths = null;
     _initialCalendarCycle = null;
   }
@@ -408,15 +422,14 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
   /// first painted frame already shows today's status, note, markers, and
   /// predictions with no layout shift.
   Future<void> _preloadCalendarCache(SessionSnapshot cached) async {
-    final user = cached.user;
-    if (_webPage != null ||
-        user == null ||
-        cached.consentRequired ||
-        !user.hasRole ||
-        (user.isPartner && !(cached.share?.isActive ?? false))) {
+    final share = cached.share ?? const ShareState(status: 'none');
+    final scopeKey =
+        _calendarScopeKey(cached.user, share, cached.consentRequired);
+    if (_webPage != null || scopeKey == null) {
       _clearInitialCalendarCache();
       return;
     }
+    final epoch = _accountEpoch;
     final now = widget.clock();
     final month = DateTime(now.year, now.month);
     final prev = DateTime(now.year, now.month - 1);
@@ -430,7 +443,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
             .catchError((Object _) => null),
       _api.cachedCycle().catchError((Object _) => null),
     ]);
-    if (!mounted) return;
+    if (!mounted || epoch != _accountEpoch) return;
     final preloaded = <String, Map<String, Entry>>{};
     for (var i = 0; i < months.length; i++) {
       final list = results[i] as List<Entry>?;
@@ -439,7 +452,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
         for (final e in list) e.date: e,
       };
     }
-    _initialCalendarUserId = user.id;
+    _initialCalendarScopeKey = scopeKey;
     _initialCalendarMonths = preloaded;
     _initialCalendarCycle = results.last as CycleInfo?;
   }
@@ -464,6 +477,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     int epoch,
   ) async {
     if (!mounted || epoch != _accountEpoch) return;
+    _clearInitialCalendarCache();
     _clearRemindersIfConsentRequired(session);
     if (session.user == null) unawaited(_cancelAllNotifications());
     _sessionGeneration++;
@@ -542,6 +556,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
       .whenComplete(() => _consentRecovery = null);
 
   void _onOwnConsentRequired() {
+    _clearInitialCalendarCache();
     _sessionGeneration++;
     unawaited(_cancelDailyReminder());
     unawaited(_cancelPartnerAlerts());
@@ -582,14 +597,22 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     // Consent withdrawn (e.g. on the privacy page): stop local reminders.
     _clearRemindersIfConsentRequired(session);
     final nextShare = session.share ?? const ShareState(status: 'none');
-    final scopeChanged = _user?.id != session.user?.id ||
+    final prevScopeKey = _calendarScopeKey(_user, _share, _consentRequired);
+    final nextScopeKey =
+        _calendarScopeKey(session.user, nextShare, session.consentRequired);
+    final scopeChanged = prevScopeKey != nextScopeKey ||
+        _user?.id != session.user?.id ||
         _user?.role != session.user?.role ||
         _consentRequired != session.consentRequired ||
-        _share.status != nextShare.status ||
-        _share.ownerEmail != nextShare.ownerEmail;
+        _share.canEditCalendar != nextShare.canEditCalendar;
     final stageChanged = !scopeChanged &&
         session.user != null &&
         _user?.stage != session.user?.stage;
+    if (scopeChanged ||
+        _share.status != nextShare.status ||
+        _share.ownerEmail != nextShare.ownerEmail) {
+      _clearInitialCalendarCache();
+    }
     if (scopeChanged) _sessionGeneration++;
     setState(() {
       _user = session.user;
@@ -606,6 +629,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
   Future<void> _refreshConsentSession() async {
     final session = await _api.currentSession();
     if (!mounted) return;
+    _clearInitialCalendarCache();
     _sessionGeneration++;
     setState(() {
       _user = session.user;
@@ -853,6 +877,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
   /// This account now views someone else's calendar: its role changed, so
   /// reload the session and return to the (partner) calendar.
   Future<void> _onJoinedCalendar(ShareState share) async {
+    _clearInitialCalendarCache();
     setState(() => _share = share);
     _navKey.currentState?.popUntil((route) => route.isFirst);
     _messengerKey.currentState?.showSnackBar(
@@ -863,6 +888,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
   }
 
   void _applySession(SessionSnapshot session) {
+    _clearInitialCalendarCache();
     _cancelOwnerReminderIfSessionLeavesOwner(session);
     _cancelPartnerAlertsIfSessionLeavesPartner(session);
     _sessionGeneration++;
@@ -1192,7 +1218,10 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
       palette: _palette,
       onOpenSettings: _openSettings,
       cycleRefreshSignal: _stageChanges,
-      onShareChanged: (share) => setState(() => _share = share),
+      onShareChanged: (share) {
+        _clearInitialCalendarCache();
+        setState(() => _share = share);
+      },
       onInboxSynced: (messages) {
         unawaited(_askMessagePermissionOnce());
         _onMessagesSynced(_user!.id, messages);
@@ -1214,11 +1243,17 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
       stageSuggestion: _stageSuggestion,
       onStageSuggestionAccepted: _onStageSuggestionAccepted,
       clock: widget.clock,
-      initialMonths: _initialCalendarUserId == _user!.id
+      initialMonths: _initialCalendarScopeKey != null &&
+              _initialCalendarScopeKey ==
+                  _calendarScopeKey(_user, _share, _consentRequired)
           ? _initialCalendarMonths
           : null,
-      initialCycle:
-          _initialCalendarUserId == _user!.id ? _initialCalendarCycle : null,
+      initialCycle: _initialCalendarScopeKey != null &&
+              _initialCalendarScopeKey ==
+                  _calendarScopeKey(_user, _share, _consentRequired)
+          ? _initialCalendarCycle
+          : null,
+      onInitialCacheConsumed: _clearInitialCalendarCache,
     );
   }
 
@@ -1241,6 +1276,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
           await beginWorkOSSignIn(_api, returnTo: returnTo);
         },
         onSessionChanged: (session) {
+          _clearInitialCalendarCache();
           _sessionGeneration++;
           setState(() {
             _user = session.user;

@@ -43,6 +43,7 @@ class CalendarScreen extends StatefulWidget {
     this.clock = DateTime.now,
     this.initialMonths,
     this.initialCycle,
+    this.onInitialCacheConsumed,
   });
 
   final ApiClient api;
@@ -89,6 +90,10 @@ class CalendarScreen extends StatefulWidget {
 
   /// Last cycle predictions read from the device's store during bootstrap.
   final CycleInfo? initialCycle;
+
+  /// Called once [initialMonths] and [initialCycle] have been applied so the
+  /// parent discards the startup snapshot immediately after first use.
+  final VoidCallback? onInitialCacheConsumed;
 
   @override
   State<CalendarScreen> createState() => _CalendarScreenState();
@@ -279,6 +284,9 @@ class _CalendarScreenState extends State<CalendarScreen>
     }
     if (widget.initialCycle != null) {
       _cycle = widget.initialCycle!;
+    }
+    if (widget.initialMonths != null || widget.initialCycle != null) {
+      widget.onInitialCacheConsumed?.call();
     }
     final needsLocal = widget.initialCycle == null ||
         [_month, _prevMonth, _nextMonth]
