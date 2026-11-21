@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_secure_storage_platform_interface/flutter_secure_storage_platform_interface.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -727,6 +728,491 @@ void main() {
     expect(api.workosUserDeletion, isTrue);
     expect(api.privacyContact, 'privacy@example.com');
   });
+
+  test(
+      'loadPersistedApiBase started during setApiBaseUrl cleanup cannot '
+      'restore the old server URL in memory', () async {
+    final cleanupReached = Completer<void>();
+    final cleanupGate = Completer<void>();
+    final storage = _GatedStorage(
+      {
+        'api_base_url': 'https://old.example',
+        'session_token': 'old-token',
+      },
+      onDelete: (key) {
+        if (key == 'session_token' && !cleanupReached.isCompleted) {
+          cleanupReached.complete();
+          return cleanupGate.future;
+        }
+        return null;
+      },
+    );
+    FlutterSecureStoragePlatform.instance = storage;
+
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://old.example',
+        workosClientId: '',
+        redirectUri: androidRedirectUri,
+      ),
+      httpClient: MockClient((_) async => http.Response('{}', 200)),
+      localStore: MemoryLocalStore(),
+    );
+
+    final switchFuture = api.setApiBaseUrl('https://new.example');
+    await cleanupReached.future;
+    expect(api.apiBaseResolved, isFalse);
+
+    // Sign-in retry path sees apiBaseResolved == false during cleanup and calls
+    // loadPersistedApiBase() concurrently.
+    final reloadFuture = api.loadPersistedApiBase();
+
+    cleanupGate.complete();
+    expect(await switchFuture, isTrue);
+    expect(await reloadFuture, isTrue);
+
+    expect(api.config.apiBaseUrl, 'https://new.example');
+    expect(api.apiBaseResolved, isTrue);
+    expect(storage.values['api_base_url'], 'https://new.example');
+  });
+
+  testWidgets(
+      'partner relinked active-to-active to another owner disposes the former '
+      'owner calendar immediately on revalidation', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(412, 915);
+    addTearDown(tester.view.reset);
+
+    final fixedNow = DateTime(2026, 11, 21, 10, 0);
+    final local = MemoryLocalStore();
+    await local.writeDoc(localGlobalUser, 'last_user', 'u-partner');
+    await local.writeDoc(
+      'u-partner',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-partner',
+          'email': 'partner@example.com',
+          'name': 'Partner',
+          'role': 'partner',
+        },
+        'share': {
+          'status': 'active',
+          'owner_email': 'owner-a@example.com',
+          'can_edit_calendar': false,
+        },
+      }),
+    );
+    await local.writeDoc(
+      'u-partner',
+      'calendar',
+      'partner:active:owner-a@example.com',
+    );
+    await local.replaceMonth('u-partner', 2026, 11, const [
+      Entry(date: '2026-11-21', taken: true, notes: 'owner-a private note'),
+    ]);
+    await local.replaceMonth('u-partner', 2026, 10, const []);
+    await local.replaceMonth('u-partner', 2026, 12, const []);
+    await local.writeDoc(
+      'u-partner',
+      'cycle',
+      jsonEncode({
+        'cycle_length': 28,
+        'period_length': 5,
+        'period_starts': ['2026-10-30'],
+        'predictions': [
+          {
+            'period_start': '2026-11-27',
+            'period_end': '2026-12-01',
+            'pms_start': '2026-11-20',
+            'pms_end': '2026-11-27',
+          },
+        ],
+      }),
+    );
+
+    final sessionGate = Completer<void>();
+    final ownerBEntriesGate = Completer<void>();
+    final ownerBCycleGate = Completer<void>();
+    var revalidated = false;
+
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://test.example',
+        workosClientId: '',
+        redirectUri: androidRedirectUri,
+      ),
+      httpClient: MockClient((request) async {
+        switch (request.url.path) {
+          case '/api/auth/config':
+            return http.Response(jsonEncode({'authkit': true}), 200);
+          case '/api/auth/session':
+            await sessionGate.future;
+            revalidated = true;
+            return http.Response(
+              jsonEncode({
+                'user': {
+                  'id': 'u-partner',
+                  'email': 'partner@example.com',
+                  'name': 'Partner',
+                  'role': 'partner',
+                },
+                // Relinked directly to Owner B on another device without ever
+                // observing a revoked state on this device.
+                'share': {
+                  'status': 'active',
+                  'owner_email': 'owner-b@example.com',
+                  'can_edit_calendar': false,
+                },
+                'consent': {'version': 1, 'required': false},
+              }),
+              200,
+            );
+          case '/api/entries':
+            await ownerBEntriesGate.future;
+            if (revalidated &&
+                request.url.queryParameters['year'] == '2026' &&
+                request.url.queryParameters['month'] == '11') {
+              return http.Response(
+                jsonEncode({
+                  'entries': [
+                    {
+                      'date': '2026-11-21',
+                      'taken': false,
+                      'notes': 'owner-b note',
+                      'period': false,
+                    },
+                  ],
+                }),
+                200,
+              );
+            }
+            return http.Response(jsonEncode({'entries': []}), 200);
+          case '/api/cycle':
+            await ownerBCycleGate.future;
+            return http.Response(
+              jsonEncode({
+                'cycle_length': 0,
+                'period_length': 0,
+                'period_starts': [],
+                'predictions': [],
+              }),
+              200,
+            );
+          default:
+            return http.Response('{}', 200);
+        }
+      }),
+      localStore: local,
+    );
+
+    await tester.pumpWidget(
+      App217(config: api.config, api: api, clock: () => fixedNow),
+    );
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    // Cached Owner A calendar appears before network reply.
+    expect(find.byType(CalendarScreen), findsOneWidget);
+    expect(find.text('owner-a private note'), findsOneWidget);
+    expect(find.text('Taken'), findsOneWidget);
+
+    // Revalidation reveals active share for Owner B while Owner B's network
+    // calendar data is still pending.
+    sessionGate.complete();
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    // Owner A's private calendar state must already be disposed.
+    expect(find.byType(CalendarScreen), findsOneWidget);
+    expect(find.text('owner-a private note'), findsNothing);
+    expect(find.text('Taken'), findsNothing);
+    expect(find.textContaining('Nov 27'), findsNothing);
+
+    // Once Owner B's data arrives, Owner B's entry renders cleanly.
+    ownerBEntriesGate.complete();
+    ownerBCycleGate.complete();
+    await tester.pumpAndSettle();
+    expect(find.text('owner-b note'), findsOneWidget);
+    expect(find.text('owner-a private note'), findsNothing);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 30));
+  });
+
+  testWidgets(
+      'release build with empty defaultApiBaseUrl and saved custom server '
+      'opens straight to cached calendar offline-first', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(412, 915);
+    addTearDown(tester.view.reset);
+
+    FlutterSecureStorage.setMockInitialValues({
+      'api_base_url': 'https://custom.example',
+      'session_token': 'custom-tok',
+    });
+
+    final fixedNow = DateTime(2026, 11, 21, 10, 0);
+    final local = MemoryLocalStore();
+    await local.writeDoc(localGlobalUser, 'last_user', 'u-custom');
+    await local.writeDoc(
+      'u-custom',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-custom',
+          'email': 'owner@custom.example',
+          'name': 'Custom Owner',
+          'role': 'owner',
+        },
+        'share': {'status': 'none'},
+      }),
+    );
+    await local.replaceMonth('u-custom', 2026, 11, const [
+      Entry(date: '2026-11-21', taken: true, notes: 'custom server note'),
+    ]);
+    await local.replaceMonth('u-custom', 2026, 10, const []);
+    await local.replaceMonth('u-custom', 2026, 12, const []);
+    await local.writeDoc(
+      'u-custom',
+      'cycle',
+      jsonEncode({
+        'cycle_length': 28,
+        'period_length': 5,
+        'period_starts': ['2026-10-30'],
+        'predictions': [
+          {
+            'period_start': '2026-11-27',
+            'period_end': '2026-12-01',
+            'pms_start': '2026-11-20',
+            'pms_end': '2026-11-27',
+          },
+        ],
+      }),
+    );
+
+    final networkGate = Completer<void>();
+    final hosts = <String>[];
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: '',
+        workosClientId: '',
+        redirectUri: androidRedirectUri,
+      ),
+      httpClient: MockClient((request) async {
+        hosts.add(request.url.host);
+        await networkGate.future;
+        return http.Response('unavailable', 503);
+      }),
+      localStore: local,
+    );
+
+    await tester.pumpWidget(
+      App217(config: api.config, api: api, clock: () => fixedNow),
+    );
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    // Populated cached calendar appears immediately before any network reply.
+    expect(api.config.apiBaseUrl, 'https://custom.example');
+    expect(find.byType(CalendarScreen), findsOneWidget);
+    expect(find.text('Taken'), findsOneWidget);
+    expect(find.text('custom server note'), findsOneWidget);
+    expect(find.textContaining('Nov 27'), findsOneWidget);
+    expect(hosts, isNotEmpty);
+    expect(hosts.every((h) => h == 'custom.example'), isTrue);
+
+    networkGate.complete();
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 30));
+  });
+
+  test(
+      'concurrent currentSession started during signInWithWorkOS commit cannot '
+      'read empty credentials and wipe the new session', () async {
+    const channel = MethodChannel('flutter_web_auth_2');
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'authenticate') {
+        final args = call.arguments as Map<Object?, Object?>;
+        final authUri = Uri.parse(args['url'] as String);
+        final state = authUri.queryParameters['state'];
+        return '$androidRedirectUri?code=auth-code-1&state=$state';
+      }
+      return null;
+    });
+    addTearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null);
+    });
+
+    final tokenWriteReached = Completer<void>();
+    final tokenWriteGate = Completer<void>();
+    final storage = _GatedStorage(
+      {},
+      onWrite: (key, value) {
+        if (key == 'session_token' && !tokenWriteReached.isCompleted) {
+          tokenWriteReached.complete();
+          return tokenWriteGate.future;
+        }
+        return null;
+      },
+    );
+    FlutterSecureStoragePlatform.instance = storage;
+
+    final local = MemoryLocalStore();
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://test.example',
+        workosClientId: 'client_123',
+        redirectUri: androidRedirectUri,
+      ),
+      httpClient: MockClient((request) async {
+        if (request.url.path == '/api/auth/config') {
+          return http.Response(
+            jsonEncode({'authkit': true, 'workos_client_id': 'client_123'}),
+            200,
+          );
+        }
+        if (request.url.path == '/api/auth/workos/exchange') {
+          return http.Response(
+            jsonEncode({
+              'session_token': 'new-sign-in-token',
+              'user': {
+                'id': 'u-signed-in',
+                'email': 'signedin@example.com',
+                'role': 'owner',
+              },
+            }),
+            200,
+          );
+        }
+        if (request.url.path == '/api/auth/session') {
+          if (request.headers['Authorization'] != 'Bearer new-sign-in-token') {
+            return http.Response(jsonEncode({'user': null}), 200);
+          }
+          return http.Response(
+            jsonEncode({
+              'user': {
+                'id': 'u-signed-in',
+                'email': 'signedin@example.com',
+                'role': 'owner',
+              },
+            }),
+            200,
+          );
+        }
+        return http.Response('{}', 404);
+      }),
+      localStore: local,
+      deviceKey: _RecordingDeviceKey(),
+    );
+
+    final signInFuture = api.signInWithWorkOS();
+    await tokenWriteReached.future;
+
+    // A probe starting mid-commit must not capture the post-commit scope and
+    // later wipe the newly saved token.
+    final concurrentProbe = api.currentSession();
+    final probeExpect =
+        expectLater(concurrentProbe, throwsA(isA<StaleAuthScopeException>()));
+
+    tokenWriteGate.complete();
+    final user = await signInFuture;
+    expect(user.id, 'u-signed-in');
+    await probeExpect;
+
+    expect(await api.readSessionToken(), 'new-sign-in-token');
+    expect((await api.cachedSession())?.user?.id, 'u-signed-in');
+  });
+
+  test(
+      'stale session and share mutation responses arriving after a server '
+      'switch throw StaleAuthScopeException and preserve the new account',
+      () async {
+    FlutterSecureStorage.setMockInitialValues({'session_token': 'old-tok'});
+    final gate = Completer<void>();
+    var reachedCount = 0;
+    final allReached = Completer<void>();
+
+    final local = MemoryLocalStore();
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://old.example',
+        workosClientId: '',
+        redirectUri: androidRedirectUri,
+      ),
+      httpClient: MockClient((request) async {
+        if (request.url.host == 'old.example') {
+          reachedCount++;
+          if (reachedCount == 4 && !allReached.isCompleted) {
+            allReached.complete();
+          }
+          await gate.future;
+          if (request.url.path == '/api/share/accept') {
+            return http.Response(
+              jsonEncode({
+                'status': 'active',
+                'owner_email': 'old-owner@example.com',
+              }),
+              200,
+            );
+          }
+          return http.Response(
+            jsonEncode({
+              'user': {
+                'id': 'u-old',
+                'email': 'old@example.com',
+                'role': 'owner',
+              },
+            }),
+            200,
+          );
+        }
+        if (request.url.host == 'new.example' &&
+            request.url.path == '/api/auth/session') {
+          return http.Response(
+            jsonEncode({
+              'user': {
+                'id': 'u-new',
+                'email': 'new@example.com',
+                'role': 'owner',
+              },
+            }),
+            200,
+          );
+        }
+        return http.Response('{}', 404);
+      }),
+      localStore: local,
+    );
+
+    final fProfile = api.updateProfile(displayName: 'Old');
+    final fRole = api.setRole('owner');
+    final fConsent = api.acceptConsent(1);
+    final fAccept = api.acceptShare('OLDCODE');
+    final expects = [
+      expectLater(fProfile, throwsA(isA<StaleAuthScopeException>())),
+      expectLater(fRole, throwsA(isA<StaleAuthScopeException>())),
+      expectLater(fConsent, throwsA(isA<StaleAuthScopeException>())),
+      expectLater(fAccept, throwsA(isA<StaleAuthScopeException>())),
+    ];
+    await allReached.future;
+
+    // Switch servers and sign in as a new account before the old calls reply.
+    expect(await api.setApiBaseUrl('https://new.example'), isTrue);
+    await api.saveSessionToken('new-tok');
+    expect((await api.currentSession()).user?.id, 'u-new');
+
+    gate.complete();
+    await Future.wait(expects);
+
+    expect(await api.readSessionToken(), 'new-tok');
+    expect((await api.cachedSession())?.user?.id, 'u-new');
+  });
 }
 
 class _RecordingDeviceKey extends DeviceKey {
@@ -957,4 +1443,62 @@ class _ThrowingLocalStore implements LocalStore {
   @override
   dynamic noSuchMethod(Invocation invocation) =>
       throw StateError('store broken');
+}
+
+class _GatedStorage extends FlutterSecureStoragePlatform {
+  _GatedStorage(
+    Map<String, String> initial, {
+    this.onWrite,
+    this.onDelete,
+  }) : values = Map.of(initial);
+
+  final Map<String, String> values;
+  final Future<void>? Function(String key, String value)? onWrite;
+  final Future<void>? Function(String key)? onDelete;
+
+  @override
+  Future<String?> read({
+    required String key,
+    required Map<String, String> options,
+  }) async =>
+      values[key];
+
+  @override
+  Future<void> write({
+    required String key,
+    required String value,
+    required Map<String, String> options,
+  }) async {
+    final gate = onWrite?.call(key, value);
+    if (gate != null) await gate;
+    values[key] = value;
+  }
+
+  @override
+  Future<bool> containsKey({
+    required String key,
+    required Map<String, String> options,
+  }) async =>
+      values.containsKey(key);
+
+  @override
+  Future<void> delete({
+    required String key,
+    required Map<String, String> options,
+  }) async {
+    final gate = onDelete?.call(key);
+    if (gate != null) await gate;
+    values.remove(key);
+  }
+
+  @override
+  Future<Map<String, String>> readAll({
+    required Map<String, String> options,
+  }) async =>
+      Map.of(values);
+
+  @override
+  Future<void> deleteAll({required Map<String, String> options}) async {
+    values.clear();
+  }
 }

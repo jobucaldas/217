@@ -143,21 +143,25 @@ class ApiClient {
 
   /// Loads the persisted server URL override, if any. Returns false when
   /// reading storage failed (distinct from "no override saved") and blocks
-  /// authenticated requests until resolved.
-  Future<bool> loadPersistedApiBase() async {
+  /// authenticated requests until resolved. Serialized with [setApiBaseUrl]
+  /// so a reload cannot restore an older URL over a completed server switch.
+  Future<bool> loadPersistedApiBase() {
     final serverEpoch = _serverEpoch;
-    try {
-      final saved =
-          normalizeApiBase(await _storage.read(key: _apiBaseKey) ?? '');
+    return _serializeAuth(() async {
       if (serverEpoch != _serverEpoch) return !_apiBaseUnresolved;
-      config.apiBaseUrl = saved.isEmpty ? config.defaultApiBaseUrl : saved;
-      _apiBaseUnresolved = false;
-      return true;
-    } catch (_) {
-      if (serverEpoch != _serverEpoch) return !_apiBaseUnresolved;
-      _apiBaseUnresolved = true;
-      return false;
-    }
+      try {
+        final saved =
+            normalizeApiBase(await _storage.read(key: _apiBaseKey) ?? '');
+        config.apiBaseUrl = saved.isEmpty ? config.defaultApiBaseUrl : saved;
+        _apiBaseUnresolved = false;
+        return true;
+      } catch (_) {
+        _apiBaseUnresolved = true;
+        _userId = null;
+        _role = null;
+        return false;
+      }
+    });
   }
 
   /// The server in use and its session token as saved on this device, read
@@ -238,6 +242,10 @@ class ApiClient {
       }
       config.apiBaseUrl = next;
       _apiBaseUnresolved = false;
+      // Bump again on completion so any loadPersistedApiBase() or probe queued
+      // during cleanup cannot overwrite the newly published server state.
+      _serverEpoch++;
+      invalidatePendingAuth();
       return true;
     });
   }
@@ -251,6 +259,7 @@ class ApiClient {
   Future<void> clearSession() => _serializeAuth(() async {
         invalidatePendingAuth();
         await _clearSessionLocked();
+        invalidatePendingAuth();
       });
 
   Future<void> _clearSessionInScope(int expectedScope, String expectedBase) =>
@@ -260,6 +269,7 @@ class ApiClient {
         }
         invalidatePendingAuth();
         await _clearSessionLocked();
+        invalidatePendingAuth();
       });
 
   Future<void> _clearSessionLocked() async {
@@ -350,12 +360,23 @@ class ApiClient {
     await _local.writeDoc(userId, 'calendar', calendar);
   }
 
-  Future<ShareState> _shareChanged(ShareState share) async {
-    final userId = _userId;
-    final role = _role;
-    if (userId != null && role != null) {
-      await _calendarIs(userId, role, share);
-    }
+  Future<ShareState> _shareChanged(
+    ShareState share, {
+    required int expectedScope,
+    required String expectedBase,
+    String? newRole,
+  }) async {
+    await _serializeAuth(() async {
+      if (_scopeChanged(expectedScope, expectedBase)) {
+        throw const StaleAuthScopeException();
+      }
+      if (newRole != null) _role = newRole;
+      final userId = _userId;
+      final role = _role;
+      if (userId != null && role != null) {
+        await _calendarIs(userId, role, share);
+      }
+    });
     return share;
   }
 
@@ -363,10 +384,10 @@ class ApiClient {
   /// talk to the server (token or device key).
   Future<SessionSnapshot?> cachedSession() async {
     final scope = _scopeEpoch;
-    final base = config.apiBaseUrl;
+    final serverEpoch = _serverEpoch;
     return _adoptCachedSession(
       expectedScope: scope,
-      expectedBase: base,
+      expectedServerEpoch: serverEpoch,
       throwOnStale: false,
     );
   }
@@ -399,12 +420,19 @@ class ApiClient {
 
   Future<SessionSnapshot?> _adoptCachedSession({
     required int expectedScope,
-    required String expectedBase,
+    int? expectedServerEpoch,
+    String? expectedBase,
     required bool throwOnStale,
   }) async {
     final cached = await _readCachedSession();
     return _serializeAuth(() async {
-      if (_scopeChanged(expectedScope, expectedBase)) {
+      final stale = expectedBase != null
+          ? _scopeChanged(expectedScope, expectedBase)
+          : expectedScope != _scopeEpoch ||
+              (expectedServerEpoch != null &&
+                  expectedServerEpoch != _serverEpoch) ||
+              _apiBaseUnresolved;
+      if (stale) {
         if (throwOnStale) throw const StaleAuthScopeException();
         return null;
       }
@@ -478,7 +506,10 @@ class ApiClient {
       });
 
   Future<bool> _doRenew(int scope, String base) async {
-    final keyId = await _storage.read(key: _deviceKeyIdKey);
+    final keyId = await _serializeAuth(() async {
+      if (_scopeChanged(scope, base)) return null;
+      return _storage.read(key: _deviceKeyIdKey);
+    });
     if (_scopeChanged(scope, base) || keyId == null || keyId.isEmpty) {
       return false;
     }
@@ -617,13 +648,15 @@ class ApiClient {
         : _serverChanged(serverEpoch, base);
     final headers = <String, String>{'Content-Type': 'application/json'};
     if (auth) {
-      if (_apiBaseUnresolved) {
-        throw StateError('server URL could not be read from storage');
-      }
-      final token = await readSessionToken();
-      if (_apiBaseUnresolved || isStale()) {
-        throw const StaleAuthScopeException();
-      }
+      final token = await _serializeAuth(() async {
+        if (_apiBaseUnresolved) {
+          throw StateError('server URL could not be read from storage');
+        }
+        if (isStale()) {
+          throw const StaleAuthScopeException();
+        }
+        return readSessionToken();
+      });
       if (token != null && token.isNotEmpty) {
         headers['Authorization'] = 'Bearer $token';
       }
@@ -854,8 +887,9 @@ class ApiClient {
         }
         throw const StaleAuthScopeException();
       }
-      // Invalidate any probe that started while sign-in was in progress before
-      // persisting the new credentials and session cache.
+      // Invalidate probes started before commit and bump again once credentials
+      // and local session cache are written so probes started during commit
+      // cannot observe old storage under the post-commit scope.
       invalidatePendingAuth();
       // Another account may have used this device: its data goes.
       await _dropLocalDataLocked();
@@ -871,6 +905,7 @@ class ApiClient {
         }
       }
       shouldSync = await _applySessionLocked(decoded, snapshot);
+      invalidatePendingAuth();
     });
     if (shouldSync) unawaited(syncPending());
     return User.fromJson(userJson);
@@ -887,18 +922,39 @@ class ApiClient {
     }
   }
 
-  /// Records agreement to privacy notice [version] (LGPD art. 11).
-  Future<SessionSnapshot> acceptConsent(int version) async {
+  Future<SessionSnapshot> _sendSession(
+    String method,
+    String path, {
+    Object? body,
+    required String errorContext,
+  }) async {
+    final scope = _scopeEpoch;
+    final base = config.apiBaseUrl;
     final response = await _send(
-      'PUT',
-      _uri('/api/account/consent'),
-      body: {'version': version},
+      method,
+      _uriFor(base, path),
+      body: body,
+      expectedScope: scope,
+      expectedBase: base,
     );
+    if (_scopeChanged(scope, base)) throw const StaleAuthScopeException();
     if (response.statusCode != 200) {
-      throw ApiException('consent', response);
+      throw ApiException(errorContext, response);
     }
-    return _sessionFrom(response);
+    return _sessionFrom(
+      response,
+      expectedScope: scope,
+      expectedBase: base,
+    );
   }
+
+  /// Records agreement to privacy notice [version] (LGPD art. 11).
+  Future<SessionSnapshot> acceptConsent(int version) => _sendSession(
+        'PUT',
+        '/api/account/consent',
+        body: {'version': version},
+        errorContext: 'consent',
+      );
 
   /// The web app's privacy notice in [language] (`en`, `pt`, `es`) on this
   /// server, where people download or delete their data and withdraw
@@ -913,13 +969,11 @@ class ApiClient {
 
   /// Withdraws consent: the data stays, but the server stops processing it
   /// until the notice is agreed to again.
-  Future<SessionSnapshot> withdrawConsent() async {
-    final response = await _send('DELETE', _uri('/api/account/consent'));
-    if (response.statusCode != 200) {
-      throw ApiException('withdraw consent', response);
-    }
-    return _sessionFrom(response);
-  }
+  Future<SessionSnapshot> withdrawConsent() => _sendSession(
+        'DELETE',
+        '/api/account/consent',
+        errorContext: 'withdraw consent',
+      );
 
   /// Everything the server holds about the caller: the file name the server
   /// suggests and the JSON bytes.
@@ -964,27 +1018,47 @@ class ApiClient {
   }
 
   Future<ShareState> revokeShare() async {
-    final response = await _send('POST', _uri('/api/share/revoke'), body: {});
+    final scope = _scopeEpoch;
+    final base = config.apiBaseUrl;
+    final response = await _send(
+      'POST',
+      _uriFor(base, '/api/share/revoke'),
+      body: {},
+      expectedScope: scope,
+      expectedBase: base,
+    );
+    if (_scopeChanged(scope, base)) throw const StaleAuthScopeException();
     if (response.statusCode != 200) {
       throw ApiException('revoke share', response);
     }
-    return _shareChanged(ShareState.fromJson(
-        jsonDecode(response.body) as Map<String, dynamic>));
+    return _shareChanged(
+      ShareState.fromJson(jsonDecode(response.body) as Map<String, dynamic>),
+      expectedScope: scope,
+      expectedBase: base,
+    );
   }
 
   Future<ShareState> acceptShare(String code) async {
+    final scope = _scopeEpoch;
+    final base = config.apiBaseUrl;
     final response = await _send(
       'POST',
-      _uri('/api/share/accept'),
+      _uriFor(base, '/api/share/accept'),
       body: {'code': code},
+      expectedScope: scope,
+      expectedBase: base,
     );
+    if (_scopeChanged(scope, base)) throw const StaleAuthScopeException();
     if (response.statusCode != 200) {
       throw ApiException('accept share', response);
     }
     // Accepting makes this account a partner of that owner.
-    _role = 'partner';
-    return _shareChanged(ShareState.fromJson(
-        jsonDecode(response.body) as Map<String, dynamic>));
+    return _shareChanged(
+      ShareState.fromJson(jsonDecode(response.body) as Map<String, dynamic>),
+      expectedScope: scope,
+      expectedBase: base,
+      newRole: 'partner',
+    );
   }
 
   /// Messages the user sent or received, newest first.
@@ -1022,39 +1096,33 @@ class ApiClient {
 
   /// Owner (takes the pill) or partner (follows her calendar). Returns the
   /// refreshed session.
-  Future<SessionSnapshot> setRole(String role) async {
-    final response = await _send(
-      'PUT',
-      _uri('/api/account/role'),
-      body: {'role': role},
-    );
-    if (response.statusCode != 200) {
-      throw ApiException('set role', response);
-    }
-    return _sessionFrom(response);
-  }
+  Future<SessionSnapshot> setRole(String role) => _sendSession(
+        'PUT',
+        '/api/account/role',
+        body: {'role': role},
+        errorContext: 'set role',
+      );
 
-  Future<SessionSnapshot> setStage(String stage) async {
-    final response =
-        await _send('PUT', _uri('/api/account/stage'), body: {'stage': stage});
-    if (response.statusCode != 200) throw ApiException('set stage', response);
-    return _sessionFrom(response);
-  }
+  Future<SessionSnapshot> setStage(String stage) => _sendSession(
+        'PUT',
+        '/api/account/stage',
+        body: {'stage': stage},
+        errorContext: 'set stage',
+      );
 
   /// Sets the display name and/or birth month (`YYYY-MM`); a null field is
   /// left as is, an empty one cleared.
   Future<SessionSnapshot> updateProfile(
-      {String? displayName, String? birthDate}) async {
-    final response =
-        await _send('PUT', _uri('/api/account/profile'), body: {
-      if (displayName != null) 'display_name': displayName,
-      if (birthDate != null) 'birth_date': birthDate,
-    });
-    if (response.statusCode != 200) {
-      throw ApiException('update profile', response);
-    }
-    return _sessionFrom(response);
-  }
+          {String? displayName, String? birthDate}) =>
+      _sendSession(
+        'PUT',
+        '/api/account/profile',
+        body: {
+          if (displayName != null) 'display_name': displayName,
+          if (birthDate != null) 'birth_date': birthDate,
+        },
+        errorContext: 'update profile',
+      );
 
   /// Period history and predictions for the visible calendar. [today] is the
   /// device's local date (YYYY-MM-DD).

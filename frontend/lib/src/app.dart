@@ -356,7 +356,9 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     // asked in the background (it may be off, and each try waits). No
     // server configured, or server override failed to read: never send
     // authenticated requests to an unverified default host.
-    if (cached?.user != null) {
+    if (apiBaseResolved &&
+        !_api.config.needsServerSetup &&
+        cached?.user != null) {
       session = cached;
       await _preloadCalendarCache(cached!);
       if (!mounted) return;
@@ -1210,7 +1212,12 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
         onSwitchToOwner: _switchToOwner,
       );
     }
+    final calendarScopeKey =
+        _calendarScopeKey(_user, _share, _consentRequired);
+    final initialMatches = _initialCalendarScopeKey != null &&
+        _initialCalendarScopeKey == calendarScopeKey;
     return CalendarScreen(
+      key: calendarScopeKey == null ? null : ValueKey(calendarScopeKey),
       api: _api,
       user: _user!,
       share: _share,
@@ -1243,16 +1250,8 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
       stageSuggestion: _stageSuggestion,
       onStageSuggestionAccepted: _onStageSuggestionAccepted,
       clock: widget.clock,
-      initialMonths: _initialCalendarScopeKey != null &&
-              _initialCalendarScopeKey ==
-                  _calendarScopeKey(_user, _share, _consentRequired)
-          ? _initialCalendarMonths
-          : null,
-      initialCycle: _initialCalendarScopeKey != null &&
-              _initialCalendarScopeKey ==
-                  _calendarScopeKey(_user, _share, _consentRequired)
-          ? _initialCalendarCycle
-          : null,
+      initialMonths: initialMatches ? _initialCalendarMonths : null,
+      initialCycle: initialMatches ? _initialCalendarCycle : null,
       onInitialCacheConsumed: _clearInitialCalendarCache,
     );
   }
