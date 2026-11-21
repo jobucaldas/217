@@ -149,6 +149,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
   /// here to pick up theme, language and session changes made from them.
   final _changes = _ChangeTicker();
   final ValueNotifier<int> _stageChanges = ValueNotifier(0);
+  final ValueNotifier<int> _calendarScopeReset = ValueNotifier(0);
   late final StageSuggestion _stageSuggestion = StageSuggestion(prefs: _prefs);
   late final DailyReminderSyncQueue _dailyReminderSyncQueue =
       DailyReminderSyncQueue(
@@ -293,6 +294,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     _messagePoll?.cancel();
     _changes.dispose();
     _stageChanges.dispose();
+    _calendarScopeReset.dispose();
     _stageSuggestion.dispose();
     if (widget.updateClient == null) _updateHttp.close();
     super.dispose();
@@ -586,7 +588,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     final epoch = _accountEpoch;
     final session = await _loadConfigAndSession();
     if (!mounted || epoch != _accountEpoch) return null;
-    if (keepWhenOffline && _api.offline.value) return null;
+    if (keepWhenOffline && session.fromCache) return null;
     _cancelOwnerReminderIfSessionLeavesOwner(session);
     _cancelPartnerAlertsIfSessionLeavesPartner(session);
     if (session.user == null) unawaited(_cancelAllNotifications());
@@ -616,15 +618,16 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
       _clearInitialCalendarCache();
     }
     if (scopeChanged) _sessionGeneration++;
+    if (scopeChanged || session.consentRequired || session.user == null) {
+      _calendarScopeReset.value++;
+      _navKey.currentState?.popUntil((route) => route.isFirst);
+    }
     setState(() {
       _user = session.user;
       _share = nextShare;
       _setConsent(session);
     });
     if (stageChanged) _stageChanges.value++;
-    if (session.consentRequired || session.user == null) {
-      _navKey.currentState?.popUntil((route) => route.isFirst);
-    }
     return session;
   }
 
@@ -1225,7 +1228,13 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
       palette: _palette,
       onOpenSettings: _openSettings,
       cycleRefreshSignal: _stageChanges,
+      scopeResetSignal: _calendarScopeReset,
       onShareChanged: (share) {
+        final nextKey = _calendarScopeKey(_user, share, _consentRequired);
+        if (nextKey != calendarScopeKey) {
+          _calendarScopeReset.value++;
+          _navKey.currentState?.popUntil((route) => route.isFirst);
+        }
         _clearInitialCalendarCache();
         setState(() => _share = share);
       },

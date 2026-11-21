@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -44,6 +45,7 @@ class CalendarScreen extends StatefulWidget {
     this.initialMonths,
     this.initialCycle,
     this.onInitialCacheConsumed,
+    this.scopeResetSignal,
   });
 
   final ApiClient api;
@@ -94,6 +96,10 @@ class CalendarScreen extends StatefulWidget {
   /// Called once [initialMonths] and [initialCycle] have been applied so the
   /// parent discards the startup snapshot immediately after first use.
   final VoidCallback? onInitialCacheConsumed;
+
+  /// Fired by the parent when the active calendar scope changes (e.g. partner
+  /// relinked to another owner) so pushed day sheets and note dialogs dismiss.
+  final Listenable? scopeResetSignal;
 
   @override
   State<CalendarScreen> createState() => _CalendarScreenState();
@@ -186,9 +192,28 @@ class _CalendarScreenState extends State<CalendarScreen>
 
   final _liveNote = ValueNotifier<String>('');
 
-  /// Bumped whenever calendar access is cleared; the read-only day card
-  /// closes on it so it never keeps showing private data.
+  /// Bumped whenever calendar access is cleared or the calendar scope changes;
+  /// pushed day sheets and note dialogs close on it so they never outlive the
+  /// calendar they belong to.
   final _accessCleared = ValueNotifier<int>(0);
+  int _openOverlayCount = 0;
+  bool _disposed = false;
+  bool _notifiersDisposed = false;
+
+  void _dismissOverlays() {
+    if (_notifiersDisposed) return;
+    _liveNote.value = '';
+    _accessCleared.value++;
+  }
+
+  void _disposeLiveNotifiersIfIdle() {
+    if (_disposed && _openOverlayCount == 0 && !_notifiersDisposed) {
+      _notifiersDisposed = true;
+      _dayView.dispose();
+      _liveNote.dispose();
+      _accessCleared.dispose();
+    }
+  }
 
   /// Body height from which the note is drawn above the day tags.
   static const _inlineNoteMinBodyHeight = 640.0;
@@ -275,6 +300,7 @@ class _CalendarScreenState extends State<CalendarScreen>
       });
     WidgetsBinding.instance.addObserver(this);
     widget.cycleRefreshSignal?.addListener(_onCycleRefresh);
+    widget.scopeResetSignal?.addListener(_dismissOverlays);
     if (widget.initialMonths != null) {
       for (final entry in widget.initialMonths!.entries) {
         _monthCache[entry.key] = Map<String, Entry>.of(entry.value);
@@ -302,9 +328,13 @@ class _CalendarScreenState extends State<CalendarScreen>
       oldWidget.cycleRefreshSignal?.removeListener(_onCycleRefresh);
       widget.cycleRefreshSignal?.addListener(_onCycleRefresh);
     }
+    if (oldWidget.scopeResetSignal != widget.scopeResetSignal) {
+      oldWidget.scopeResetSignal?.removeListener(_dismissOverlays);
+      widget.scopeResetSignal?.addListener(_dismissOverlays);
+    }
     // Share revoked (or otherwise inactive): the day card must go.
     if (oldWidget.share.isActive && !widget.share.isActive) {
-      _accessCleared.value++;
+      _dismissOverlays();
     }
   }
 
@@ -378,16 +408,17 @@ class _CalendarScreenState extends State<CalendarScreen>
 
   @override
   void dispose() {
+    _disposed = true;
     WidgetsBinding.instance.removeObserver(this);
     widget.cycleRefreshSignal?.removeListener(_onCycleRefresh);
+    widget.scopeResetSignal?.removeListener(_dismissOverlays);
     _wheelIdle?.cancel();
     _midnight?.cancel();
-    _dayView.dispose();
     _loadDebounce?.cancel();
     _tapTimer?.cancel();
     _monthSnap.dispose();
-    _liveNote.dispose();
-    _accessCleared.dispose();
+    if (_openOverlayCount > 0) _dismissOverlays();
+    _disposeLiveNotifiersIfIdle();
     super.dispose();
   }
 
@@ -1110,6 +1141,7 @@ class _CalendarScreenState extends State<CalendarScreen>
     final existing = _visibleEntry(key);
     _sheetKey = key;
     _dayView.value = _dayViewFor(key);
+    _openOverlayCount++;
     return showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -1136,6 +1168,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                 initialHeart: existing?.heart ?? false,
                 initialPeriod: existing?.period ?? false,
                 hadEntry: existing != null,
+                closeSignal: _accessCleared,
                 // Persist via onCommit — not the sheet's pop value. Nested
                 // note dialog → sheet pop races on web and can drop the
                 // result (note/heart "save" that only sticks after
@@ -1151,13 +1184,13 @@ class _CalendarScreenState extends State<CalendarScreen>
                 },
                 builder: (context, editing) => expandable(editing),
               );
-        // A partner's sheet closes when calendar access is cleared.
-        return partner
-            ? CloseOnSignal(signal: _accessCleared, child: sheet)
-            : sheet;
+        // Closes when calendar access is cleared or the calendar scope changes.
+        return CloseOnSignal(signal: _accessCleared, child: sheet);
       },
     ).whenComplete(() {
       if (_sheetKey == key) _sheetKey = null;
+      _openOverlayCount--;
+      _disposeLiveNotifiersIfIdle();
     });
   }
 
@@ -1579,11 +1612,20 @@ class _CalendarScreenState extends State<CalendarScreen>
                 isFuture: isFutureDay(selectedDay, _today),
                 note: selectedNotes,
                 noteAsTag: noteAsTag,
-                onOpenNote: () => showDayNoteCard(
-                  context,
-                  title: widget.strings.notes,
-                  notes: _liveNote,
-                ),
+                onOpenNote: () {
+                  _openOverlayCount++;
+                  unawaited(
+                    showDayNoteCard(
+                      context,
+                      title: widget.strings.notes,
+                      notes: _liveNote,
+                      closeSignal: _accessCleared,
+                    ).whenComplete(() {
+                      _openOverlayCount--;
+                      _disposeLiveNotifiersIfIdle();
+                    }),
+                  );
+                },
               ),
             ],
           ),
@@ -2023,6 +2065,7 @@ class DayEditorSheet extends StatefulWidget {
     this.initialPeriod = false,
     this.onCommit,
     this.builder,
+    this.closeSignal,
   });
 
   final Strings strings;
@@ -2043,6 +2086,9 @@ class DayEditorSheet extends StatefulWidget {
   /// Lays the editor out somewhere else (the calendar's expandable sheet)
   /// from its state and controls; without it, the plain editor is shown.
   final Widget Function(BuildContext context, DayEditing editing)? builder;
+
+  /// Closes the nested note dialog when calendar scope or access changes.
+  final ValueListenable<int>? closeSignal;
 
   @override
   State<DayEditorSheet> createState() => _DayEditorSheetState();
@@ -2146,16 +2192,24 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
     // Capture before the dialog await — sheet may unmount on web when the
     // nested route settles, and we still must persist note/heart.
     final onCommit = widget.onCommit;
+    final closeSignal = widget.closeSignal;
+    final signalBefore = closeSignal?.value;
     String? draft;
     var result = await showDialog<String>(
       context: context,
       useRootNavigator: true,
-      builder: (context) => _NoteDialog(
-        strings: widget.strings,
-        initialNotes: _notes,
-        onChanged: (text) => draft = text,
-      ),
+      builder: (context) {
+        final dialog = _NoteDialog(
+          strings: widget.strings,
+          initialNotes: _notes,
+          onChanged: (text) => draft = text,
+        );
+        return closeSignal == null
+            ? dialog
+            : CloseOnSignal(signal: closeSignal, child: dialog);
+      },
     );
+    if (closeSignal != null && closeSignal.value != signalBefore) return;
     // Tapping outside or going back keeps what was typed.
     final typed = draft?.trim();
     if (result == null && typed != null && typed != _notes.trim()) {

@@ -123,6 +123,7 @@ class SessionSnapshot {
     this.consentRequired = false,
     this.consentVersion = 0,
     this.recentSignIn = false,
+    this.fromCache = false,
   });
 
   final User? user;
@@ -138,6 +139,10 @@ class SessionSnapshot {
   /// Signed in within the last few minutes: the privacy pages export,
   /// withdraw or delete only then (otherwise they ask to sign in again).
   final bool recentSignIn;
+
+  /// True when this snapshot came from the device's local cache or an offline
+  /// fallback rather than a confirmed server reply.
+  final bool fromCache;
 
   factory SessionSnapshot.fromJson(Map<String, dynamic> json) {
     final userJson = json['user'];

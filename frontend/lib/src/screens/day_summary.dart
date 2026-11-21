@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 
 import '../i18n.dart';
 import '../models.dart';
@@ -573,6 +574,7 @@ Future<void> showDayNoteCard(
   BuildContext context, {
   required String title,
   required ValueListenable<String> notes,
+  ValueListenable<int>? closeSignal,
 }) {
   // One close per card, however often the empty note rebuilds.
   var closing = false;
@@ -586,7 +588,7 @@ Future<void> showDayNoteCard(
         scheme.onSurface.withValues(alpha: 0.06),
         scheme.surface,
       );
-      return ValueListenableBuilder<String>(
+      final card = ValueListenableBuilder<String>(
         valueListenable: notes,
         builder: (_, value, __) {
           if (value.isEmpty) {
@@ -627,6 +629,9 @@ Future<void> showDayNoteCard(
           );
         },
       );
+      return closeSignal == null
+          ? card
+          : CloseOnSignal(signal: closeSignal, child: card);
     },
   );
 }
@@ -2286,6 +2291,7 @@ class CloseOnSignal extends StatefulWidget {
 
 class CloseOnSignalState extends State<CloseOnSignal> {
   late int _opened;
+  bool _closed = false;
 
   @override
   void initState() {
@@ -2311,9 +2317,22 @@ class CloseOnSignalState extends State<CloseOnSignal> {
   }
 
   void _check() {
-    if (widget.signal.value != _opened && mounted) closeOwnRoute(context);
+    if (widget.signal.value == _opened || !mounted || _closed) return;
+    _closed = true;
+    if (SchedulerBinding.instance.schedulerPhase ==
+        SchedulerPhase.persistentCallbacks) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        setState(() {});
+        closeOwnRoute(context);
+      });
+    } else {
+      setState(() {});
+      closeOwnRoute(context);
+    }
   }
 
   @override
-  Widget build(BuildContext context) => widget.child;
+  Widget build(BuildContext context) =>
+      _closed ? const SizedBox.shrink() : widget.child;
 }

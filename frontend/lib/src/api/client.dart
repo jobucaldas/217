@@ -414,6 +414,7 @@ class ApiClient {
         share: snapshot.share,
         consentRequired: snapshot.consentRequired,
         consentVersion: snapshot.consentVersion,
+        fromCache: true,
       ),
     );
   }
@@ -778,7 +779,7 @@ class ApiClient {
             expectedBase: base,
             throwOnStale: true,
           ) ??
-          const SessionSnapshot();
+          const SessionSnapshot(fromCache: true);
     }
     if (response.statusCode != 200) {
       return const SessionSnapshot();
@@ -1158,11 +1159,13 @@ class ApiClient {
       scope.calendar == _calendarGeneration;
 
   /// Saves a server answer, if it is still for the account and calendar on
-  /// the device.
+  /// the device. Serialized with auth/calendar invalidation so a relink or
+  /// logout cannot clear the cache between the check and the write.
   Future<void> _keepDoc(
-      ({String? userId, int calendar}) scope, String key, String body) async {
-    if (_isCurrent(scope)) await _local.writeDoc(scope.userId!, key, body);
-  }
+          ({String? userId, int calendar}) scope, String key, String body) =>
+      _serializeAuth(() async {
+        if (_isCurrent(scope)) await _local.writeDoc(scope.userId!, key, body);
+      });
 
   Future<PartnerAlertPreference> getPartnerAlerts() => _orCached(
         () async {
@@ -1224,27 +1227,30 @@ class ApiClient {
           final entries = (decoded['entries'] as List<dynamic>? ?? const [])
               .map((e) => Entry.fromJson(e as Map<String, dynamic>))
               .toList();
-          if (userId == null || !_isCurrent(scope)) return entries;
-          if (writes != _queueChanges) {
-            // An edit was queued or sent meanwhile: this answer may predate
-            // it. The device's copy has every edit; the next load refreshes.
-            final local = await _local.monthEntries(userId, year, month);
-            if (local != null) return local;
-          }
-          final days = {for (final e in entries) e.date: e};
-          final prefix = monthPrefix(year, month);
-          for (final w in await _local.pendingWrites(userId)) {
-            if (!w.date.startsWith(prefix)) continue;
-            if (w.entry == null) {
-              days.remove(w.date);
-            } else {
-              days[w.date] = w.entry!;
+          if (userId == null) return entries;
+          return _serializeAuth(() async {
+            if (!_isCurrent(scope)) return entries;
+            if (writes != _queueChanges) {
+              // An edit was queued or sent meanwhile: this answer may predate
+              // it. The device's copy has every edit; the next load refreshes.
+              final local = await _local.monthEntries(userId, year, month);
+              if (local != null) return local;
             }
-          }
-          final merged = days.values.toList()
-            ..sort((a, b) => a.date.compareTo(b.date));
-          await _local.replaceMonth(userId, year, month, merged);
-          return merged;
+            final days = {for (final e in entries) e.date: e};
+            final prefix = monthPrefix(year, month);
+            for (final w in await _local.pendingWrites(userId)) {
+              if (!w.date.startsWith(prefix)) continue;
+              if (w.entry == null) {
+                days.remove(w.date);
+              } else {
+                days[w.date] = w.entry!;
+              }
+            }
+            final merged = days.values.toList()
+              ..sort((a, b) => a.date.compareTo(b.date));
+            await _local.replaceMonth(userId, year, month, merged);
+            return merged;
+          });
         },
         (userId) => _local.monthEntries(userId, year, month),
       );

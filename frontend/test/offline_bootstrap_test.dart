@@ -19,6 +19,7 @@ import 'package:a217/src/offline/local_store.dart';
 import 'package:a217/src/offline/local_store_memory.dart';
 import 'package:a217/src/screens/auth_screen.dart';
 import 'package:a217/src/screens/calendar_screen.dart';
+import 'package:a217/src/screens/day_summary.dart';
 import 'package:a217/src/screens/share_screens.dart';
 
 void main() {
@@ -918,6 +919,12 @@ void main() {
     expect(find.text('owner-a private note'), findsOneWidget);
     expect(find.text('Taken'), findsOneWidget);
 
+    // Open Owner A's read-only day sheet while revalidation is still pending.
+    await tester.tap(find.byKey(const ValueKey('view-day-button')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byType(ExpandableDaySheet), findsOneWidget);
+
     // Revalidation reveals active share for Owner B while Owner B's network
     // calendar data is still pending.
     sessionGate.complete();
@@ -925,8 +932,9 @@ void main() {
     await tester.pump();
     await tester.pump();
 
-    // Owner A's private calendar state must already be disposed.
+    // Owner A's private calendar AND open day sheet must already be dismissed.
     expect(find.byType(CalendarScreen), findsOneWidget);
+    expect(find.byType(ExpandableDaySheet), findsNothing);
     expect(find.text('owner-a private note'), findsNothing);
     expect(find.text('Taken'), findsNothing);
     expect(find.textContaining('Nov 27'), findsNothing);
@@ -935,6 +943,7 @@ void main() {
     ownerBEntriesGate.complete();
     ownerBCycleGate.complete();
     await tester.pumpAndSettle();
+    expect(find.byType(ExpandableDaySheet), findsNothing);
     expect(find.text('owner-b note'), findsOneWidget);
     expect(find.text('owner-a private note'), findsNothing);
 
@@ -1213,6 +1222,362 @@ void main() {
     expect(await api.readSessionToken(), 'new-tok');
     expect((await api.cachedSession())?.user?.id, 'u-new');
   });
+
+  testWidgets(
+      'open note dialog dismisses immediately on active-to-active partner '
+      'relink', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    // Short viewport so the note renders as a tag opening showDayNoteCard.
+    tester.view.physicalSize = const Size(412, 620);
+    addTearDown(tester.view.reset);
+
+    final fixedNow = DateTime(2026, 11, 21, 10, 0);
+    final local = MemoryLocalStore();
+    await local.writeDoc(localGlobalUser, 'last_user', 'u-partner');
+    await local.writeDoc(
+      'u-partner',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-partner',
+          'email': 'partner@example.com',
+          'name': 'Partner',
+          'role': 'partner',
+        },
+        'share': {
+          'status': 'active',
+          'owner_email': 'owner-a@example.com',
+          'can_edit_calendar': false,
+        },
+      }),
+    );
+    await local.writeDoc(
+      'u-partner',
+      'calendar',
+      'partner:active:owner-a@example.com',
+    );
+    await local.replaceMonth('u-partner', 2026, 11, const [
+      Entry(date: '2026-11-21', taken: true, notes: 'owner-a secret note'),
+    ]);
+    await local.replaceMonth('u-partner', 2026, 10, const []);
+    await local.replaceMonth('u-partner', 2026, 12, const []);
+
+    final sessionGate = Completer<void>();
+    final entriesGate = Completer<void>();
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://test.example',
+        workosClientId: '',
+        redirectUri: androidRedirectUri,
+      ),
+      httpClient: MockClient((request) async {
+        switch (request.url.path) {
+          case '/api/auth/config':
+            return http.Response(jsonEncode({'authkit': true}), 200);
+          case '/api/auth/session':
+            await sessionGate.future;
+            return http.Response(
+              jsonEncode({
+                'user': {
+                  'id': 'u-partner',
+                  'email': 'partner@example.com',
+                  'name': 'Partner',
+                  'role': 'partner',
+                },
+                'share': {
+                  'status': 'active',
+                  'owner_email': 'owner-b@example.com',
+                  'can_edit_calendar': false,
+                },
+                'consent': {'version': 1, 'required': false},
+              }),
+              200,
+            );
+          case '/api/entries':
+            await entriesGate.future;
+            return http.Response(jsonEncode({'entries': []}), 200);
+          case '/api/cycle':
+            await entriesGate.future;
+            return http.Response(
+              jsonEncode({
+                'cycle_length': 0,
+                'period_length': 0,
+                'period_starts': [],
+                'predictions': [],
+              }),
+              200,
+            );
+          default:
+            return http.Response('{}', 200);
+        }
+      }),
+      localStore: local,
+    );
+
+    await tester.pumpWidget(
+      App217(config: api.config, api: api, clock: () => fixedNow),
+    );
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.byKey(const ValueKey('day-tag-note')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('day-tag-note')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byKey(const ValueKey('day-note-card')), findsOneWidget);
+    expect(find.text('owner-a secret note'), findsOneWidget);
+
+    sessionGate.complete();
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.byKey(const ValueKey('day-note-card')), findsNothing);
+    expect(find.text('owner-a secret note'), findsNothing);
+
+    entriesGate.complete();
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('day-note-card')), findsNothing);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 30));
+  });
+
+  testWidgets(
+      'confirmed session relink is applied even when /api/auth/config returns '
+      '503 after /api/auth/session succeeds', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(412, 915);
+    addTearDown(tester.view.reset);
+
+    final fixedNow = DateTime(2026, 11, 21, 10, 0);
+    final local = MemoryLocalStore();
+    await local.writeDoc(localGlobalUser, 'last_user', 'u-partner');
+    await local.writeDoc(
+      'u-partner',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-partner',
+          'email': 'partner@example.com',
+          'name': 'Partner',
+          'role': 'partner',
+        },
+        'share': {
+          'status': 'active',
+          'owner_email': 'owner-a@example.com',
+          'can_edit_calendar': false,
+        },
+      }),
+    );
+    await local.writeDoc(
+      'u-partner',
+      'calendar',
+      'partner:active:owner-a@example.com',
+    );
+    await local.replaceMonth('u-partner', 2026, 11, const [
+      Entry(date: '2026-11-21', taken: true, notes: 'owner-a private note'),
+    ]);
+    await local.replaceMonth('u-partner', 2026, 10, const []);
+    await local.replaceMonth('u-partner', 2026, 12, const []);
+
+    final sessionReached = Completer<void>();
+    final configGate = Completer<void>();
+    final entriesGate = Completer<void>();
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://test.example',
+        workosClientId: '',
+        redirectUri: androidRedirectUri,
+      ),
+      httpClient: MockClient((request) async {
+        switch (request.url.path) {
+          case '/api/auth/session':
+            if (!sessionReached.isCompleted) sessionReached.complete();
+            return http.Response(
+              jsonEncode({
+                'user': {
+                  'id': 'u-partner',
+                  'email': 'partner@example.com',
+                  'name': 'Partner',
+                  'role': 'partner',
+                },
+                'share': {
+                  'status': 'active',
+                  'owner_email': 'owner-b@example.com',
+                  'can_edit_calendar': false,
+                },
+                'consent': {'version': 1, 'required': false},
+              }),
+              200,
+            );
+          case '/api/auth/config':
+            // Complete strictly AFTER /api/auth/session returns 200 so
+            // api.offline.value flips to true before _loadConfigAndSession()
+            // resolves.
+            await configGate.future;
+            return http.Response('unavailable', 503);
+          case '/api/entries':
+            await entriesGate.future;
+            return http.Response(jsonEncode({'entries': []}), 200);
+          case '/api/cycle':
+            await entriesGate.future;
+            return http.Response(
+              jsonEncode({
+                'cycle_length': 0,
+                'period_length': 0,
+                'period_starts': [],
+                'predictions': [],
+              }),
+              200,
+            );
+          default:
+            await entriesGate.future;
+            return http.Response('{}', 200);
+        }
+      }),
+      localStore: local,
+    );
+
+    await tester.pumpWidget(
+      App217(config: api.config, api: api, clock: () => fixedNow),
+    );
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+    await sessionReached.future;
+    await tester.pump();
+    configGate.complete();
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    // Even though /api/auth/config flipped offline=true, the confirmed session
+    // for Owner B must NOT be discarded and Owner A's private data must go.
+    expect(api.offline.value, isTrue);
+    expect(find.byType(CalendarScreen), findsOneWidget);
+    expect(find.text('owner-a private note'), findsNothing);
+    expect(find.text('Taken'), findsNothing);
+
+    entriesGate.complete();
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 30));
+  });
+
+  test(
+      'late listEntries paused in pendingWrites cannot repopulate cleared '
+      'cache after partner relink', () async {
+    FlutterSecureStorage.setMockInitialValues({'session_token': 'tok'});
+    final pendingReached = Completer<void>();
+    final pendingGate = Completer<void>();
+    var pauseNextPending = false;
+    final local = _GatedPendingWritesStore(
+      onPendingWrites: () {
+        if (pauseNextPending && !pendingReached.isCompleted) {
+          pauseNextPending = false;
+          pendingReached.complete();
+          return pendingGate.future;
+        }
+        return null;
+      },
+    );
+    await local.writeDoc(localGlobalUser, 'last_user', 'u-partner');
+    await local.writeDoc(
+      'u-partner',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-partner',
+          'email': 'partner@example.com',
+          'role': 'partner',
+        },
+        'share': {
+          'status': 'active',
+          'owner_email': 'owner-a@example.com',
+          'can_edit_calendar': false,
+        },
+      }),
+    );
+    await local.writeDoc(
+      'u-partner',
+      'calendar',
+      'partner:active:owner-a@example.com',
+    );
+
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://test.example',
+        workosClientId: '',
+        redirectUri: androidRedirectUri,
+      ),
+      httpClient: MockClient((request) async {
+        if (request.url.path == '/api/entries') {
+          return http.Response(
+            jsonEncode({
+              'entries': [
+                {
+                  'date': '2026-11-21',
+                  'taken': true,
+                  'notes': 'owner-a private entry',
+                  'period': false,
+                },
+              ],
+            }),
+            200,
+          );
+        }
+        if (request.url.path == '/api/auth/session') {
+          return http.Response(
+            jsonEncode({
+              'user': {
+                'id': 'u-partner',
+                'email': 'partner@example.com',
+                'role': 'partner',
+              },
+              'share': {
+                'status': 'active',
+                'owner_email': 'owner-b@example.com',
+                'can_edit_calendar': false,
+              },
+            }),
+            200,
+          );
+        }
+        return http.Response('{}', 200);
+      }),
+      localStore: local,
+    );
+
+    // Adopt cached session for Owner A so listEntries captures Owner A's scope.
+    expect((await api.cachedSession())?.user?.id, 'u-partner');
+    pauseNextPending = true;
+
+    final entriesFuture = api.listEntries(2026, 11);
+    await pendingReached.future;
+
+    // While listEntries is paused inside pendingWrites, partner relinks to B.
+    final relinkFuture = api.currentSession();
+
+    pendingGate.complete();
+    await Future.wait([entriesFuture, relinkFuture]);
+
+    // Owner A's response must NOT survive in the local cache after relink.
+    expect(await api.cachedMonth(2026, 11), isNull);
+  });
+}
+
+class _GatedPendingWritesStore extends MemoryLocalStore {
+  _GatedPendingWritesStore({required this.onPendingWrites});
+
+  final Future<void>? Function() onPendingWrites;
+
+  @override
+  Future<List<PendingWrite>> pendingWrites(String userId) async {
+    final gate = onPendingWrites();
+    if (gate != null) await gate;
+    return super.pendingWrites(userId);
+  }
 }
 
 class _RecordingDeviceKey extends DeviceKey {
