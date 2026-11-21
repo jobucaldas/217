@@ -41,6 +41,8 @@ class CalendarScreen extends StatefulWidget {
     this.stageSuggestion,
     this.onStageSuggestionAccepted,
     this.clock = DateTime.now,
+    this.initialMonths,
+    this.initialCycle,
   });
 
   final ApiClient api;
@@ -80,6 +82,13 @@ class CalendarScreen extends StatefulWidget {
 
   /// The current time; only tests replace it.
   final DateTime Function() clock;
+
+  /// Months already read from the device's store during bootstrap ("yyyy-M"),
+  /// so the very first calendar frame paints populated with no layout shift.
+  final Map<String, Map<String, Entry>>? initialMonths;
+
+  /// Last cycle predictions read from the device's store during bootstrap.
+  final CycleInfo? initialCycle;
 
   @override
   State<CalendarScreen> createState() => _CalendarScreenState();
@@ -261,7 +270,20 @@ class _CalendarScreenState extends State<CalendarScreen>
       });
     WidgetsBinding.instance.addObserver(this);
     widget.cycleRefreshSignal?.addListener(_onCycleRefresh);
-    _hydrateFromLocal();
+    if (widget.initialMonths != null) {
+      for (final entry in widget.initialMonths!.entries) {
+        _monthCache[entry.key] = Map<String, Entry>.of(entry.value);
+      }
+      _todayEntry = _monthCache[_monthKey(_today)]?[_todayKey];
+      _showCachedMonths();
+    }
+    if (widget.initialCycle != null) {
+      _cycle = widget.initialCycle!;
+    }
+    final needsLocal = widget.initialCycle == null ||
+        [_month, _prevMonth, _nextMonth]
+            .any((m) => !_monthCache.containsKey(_monthKey(m)));
+    if (needsLocal) _hydrateFromLocal();
     _load();
   }
 
@@ -366,7 +388,7 @@ class _CalendarScreenState extends State<CalendarScreen>
     final epoch = _writeEpoch;
     // Silent reload: never insert a progress bar into the Column — that
     // reflows/shrinks the month carousel during swipe/chevron month changes.
-    setState(() => _error = null);
+    if (_error != null) setState(() => _error = null);
     try {
       // Months as requested now: the view may move while the reads fly.
       final requested = _month;

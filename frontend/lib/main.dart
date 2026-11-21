@@ -12,9 +12,8 @@ Future<void> main() async {
   // Fonts come from assets/fonts: no request to Google Fonts (LGPD: no
   // third-party transfer of the user's IP address).
   GoogleFonts.config.allowRuntimeFetching = false;
-  // The embedded symbol/pattern map installs synchronously (the locale
-  // argument is ignored); not awaiting cannot leave formatting
-  // uninitialized, but keep the future so an early throw still surfaces.
+  // The embedded symbol/pattern map installs synchronously before returning,
+  // so skipping the await cannot leave formatting uninitialized.
   unawaited(initializeDateFormatting());
   final config = AppConfig.fromEnvironment();
   runApp(App217(config: config));

@@ -53,15 +53,46 @@ class ApiClient {
   /// notice changed while the app was open), so any screen can recover.
   void Function()? onConsentRequired;
 
+  /// True when [loadPersistedApiBase] failed to read the saved server URL.
+  /// Authenticated requests refuse to run until the server URL is resolved so
+  /// a custom server's bearer token can never be sent to a built-in default.
+  bool _apiBaseUnresolved = false;
+  bool get apiBaseResolved => !_apiBaseUnresolved;
+
+  /// Moves whenever the active server or auth lifecycle changes (sign-in,
+  /// logout, server switch, session clear), invalidating in-flight probes and
+  /// renewals started under an older scope.
+  int _scopeEpoch = 0;
+  int _authConfigGen = 0;
+
+  void invalidatePendingAuth() {
+    _scopeEpoch++;
+    _renewing = null;
+    _renewingScope = null;
+    _renewingBase = null;
+  }
+
+  bool _scopeChanged(int scope, String base) =>
+      scope != _scopeEpoch || base != config.apiBaseUrl;
+
   Future<void> loadAuthConfig() async {
+    final scope = _scopeEpoch;
+    final base = config.apiBaseUrl;
+    final gen = ++_authConfigGen;
     // A failed or unavailable config response must never retain another
     // server's WorkOS deletion capability.
     workosUserDeletion = false;
     privacyContact = '';
     authkit = false;
     try {
-      final response =
-          await _send('GET', _uri('/api/auth/config'), auth: false);
+      final response = await _send(
+        'GET',
+        _uriFor(base, '/api/auth/config'),
+        auth: false,
+        expectedScope: scope,
+        expectedBase: base,
+      );
+      if (_scopeChanged(scope, base) || gen != _authConfigGen) return;
       if (response.statusCode == 200) {
         final decoded = jsonDecode(response.body);
         if (decoded is Map) {
@@ -72,6 +103,7 @@ class ApiClient {
         }
       }
     } catch (_) {
+      if (_scopeChanged(scope, base) || gen != _authConfigGen) return;
       workosUserDeletion = false;
     }
   }
@@ -82,8 +114,20 @@ class ApiClient {
   static const _sessionDoc = 'session';
   static const _apiBaseKey = 'api_base_url';
 
-  Future<void> loadPersistedApiBase() async {
-    config.apiBaseUrl = (await storedLogin(config, _storage)).server;
+  /// Loads the persisted server URL override, if any. Returns false when
+  /// reading storage failed (distinct from "no override saved") and blocks
+  /// authenticated requests until resolved.
+  Future<bool> loadPersistedApiBase() async {
+    try {
+      final saved =
+          normalizeApiBase(await _storage.read(key: _apiBaseKey) ?? '');
+      config.apiBaseUrl = saved.isEmpty ? config.defaultApiBaseUrl : saved;
+      _apiBaseUnresolved = false;
+      return true;
+    } catch (_) {
+      _apiBaseUnresolved = true;
+      return false;
+    }
   }
 
   /// The server in use and its session token as saved on this device, read
@@ -148,8 +192,10 @@ class ApiClient {
     } else {
       await _storage.write(key: _apiBaseKey, value: next);
     }
+    _apiBaseUnresolved = false;
     if (next == config.apiBaseUrl) return false;
     config.apiBaseUrl = next;
+    invalidatePendingAuth();
     await clearSession();
     return true;
   }
@@ -161,6 +207,7 @@ class ApiClient {
 
   /// Signs this device out: token, device key and every local copy go.
   Future<void> clearSession() async {
+    invalidatePendingAuth();
     await _storage.delete(key: _sessionKey);
     await _forgetDevice();
     await _dropLocalData();
@@ -190,13 +237,25 @@ class ApiClient {
   }
 
   /// Session snapshot from a server answer, kept for offline starts.
-  Future<SessionSnapshot> _sessionFrom(http.Response response) async {
+  Future<SessionSnapshot> _sessionFrom(
+    http.Response response, {
+    int? expectedScope,
+    String? expectedBase,
+  }) async {
     final decoded = jsonDecode(response.body) as Map<String, dynamic>;
     final snapshot = SessionSnapshot.fromJson(decoded);
+    if (expectedScope != null &&
+        _scopeChanged(expectedScope, expectedBase ?? config.apiBaseUrl)) {
+      throw const StaleAuthScopeException();
+    }
     final user = snapshot.user;
     if (user != null) {
       // Never mix two accounts' data on the device.
       if (_userId != null && _userId != user.id) await _dropLocalData();
+      if (expectedScope != null &&
+          _scopeChanged(expectedScope, expectedBase ?? config.apiBaseUrl)) {
+        throw const StaleAuthScopeException();
+      }
       decoded
         ..remove('session_token')
         ..remove('device_key_id');
@@ -288,23 +347,49 @@ class ApiClient {
   }
 
   Future<bool>? _renewing;
+  int? _renewingScope;
+  String? _renewingBase;
 
   /// Gets a new session with the device key; false when there is none or
   /// the server no longer knows it. Throws when the server cannot answer
   /// now (offline, 429, 5xx), so nothing is cleared for a passing error.
-  /// One renewal at a time.
-  Future<bool> _renewSession() =>
-      _renewing ??= _doRenew().whenComplete(() => _renewing = null);
+  /// One renewal at a time per auth scope.
+  Future<bool> _renewSession({int? expectedScope, String? expectedBase}) {
+    final scope = expectedScope ?? _scopeEpoch;
+    final base = expectedBase ?? config.apiBaseUrl;
+    if (_scopeChanged(scope, base)) return Future.value(false);
+    if (_renewing != null &&
+        _renewingScope == scope &&
+        _renewingBase == base) {
+      return _renewing!;
+    }
+    _renewingScope = scope;
+    _renewingBase = base;
+    late final Future<bool> run;
+    run = _doRenew(scope, base).whenComplete(() {
+      if (identical(_renewing, run)) {
+        _renewing = null;
+        _renewingScope = null;
+        _renewingBase = null;
+      }
+    });
+    return _renewing = run;
+  }
 
-  Future<bool> _doRenew() async {
+  Future<bool> _doRenew(int scope, String base) async {
     final keyId = await _storage.read(key: _deviceKeyIdKey);
-    if (keyId == null || keyId.isEmpty) return false;
+    if (_scopeChanged(scope, base) || keyId == null || keyId.isEmpty) {
+      return false;
+    }
     final challengeResponse = await _sendOnce(
       'POST',
-      _uri('/api/auth/device/challenge'),
+      _uriFor(base, '/api/auth/device/challenge'),
       body: {'key_id': keyId},
       auth: false,
+      expectedScope: scope,
+      expectedBase: base,
     );
+    if (_scopeChanged(scope, base)) return false;
     if (challengeResponse.statusCode == 401) {
       await _forgetDevice();
       return false;
@@ -320,6 +405,7 @@ class ApiClient {
     // Same message the server checks (backend handler/device.go).
     final signature =
         await _deviceKey.sign('217 device session v1\n$keyId\n$challenge');
+    if (_scopeChanged(scope, base)) return false;
     if (signature == null) {
       // The Keystore lost the key (e.g. the screen lock was removed).
       await _forgetDevice();
@@ -327,10 +413,13 @@ class ApiClient {
     }
     final response = await _sendOnce(
       'POST',
-      _uri('/api/auth/device/session'),
+      _uriFor(base, '/api/auth/device/session'),
       body: {'key_id': keyId, 'challenge': challenge, 'signature': signature},
       auth: false,
+      expectedScope: scope,
+      expectedBase: base,
     );
+    if (_scopeChanged(scope, base)) return false;
     if (response.statusCode == 401) {
       await _forgetDevice();
       return false;
@@ -342,6 +431,7 @@ class ApiClient {
     if (token is! String || token.isEmpty) {
       throw ApiException('device session', response);
     }
+    if (_scopeChanged(scope, base)) return false;
     await saveSessionToken(token);
     return true;
   }
@@ -364,11 +454,34 @@ class ApiClient {
     Uri uri, {
     Object? body,
     bool auth = true,
+    int? expectedScope,
+    String? expectedBase,
   }) async {
-    var response = await _sendOnce(method, uri, body: body, auth: auth);
-    if (auth && response.statusCode == 401 && await _renewSession()) {
-      response = await _sendOnce(method, uri, body: body, auth: auth);
+    final scope = expectedScope ?? _scopeEpoch;
+    final base = expectedBase ?? config.apiBaseUrl;
+    var response = await _sendOnce(
+      method,
+      uri,
+      body: body,
+      auth: auth,
+      expectedScope: scope,
+      expectedBase: base,
+    );
+    if (_scopeChanged(scope, base)) return response;
+    if (auth &&
+        response.statusCode == 401 &&
+        await _renewSession(expectedScope: scope, expectedBase: base)) {
+      if (_scopeChanged(scope, base)) return response;
+      response = await _sendOnce(
+        method,
+        uri,
+        body: body,
+        auth: auth,
+        expectedScope: scope,
+        expectedBase: base,
+      );
     }
+    if (_scopeChanged(scope, base)) return response;
     if (auth &&
         response.statusCode == 403 &&
         ApiException._errorField(response.body) == 'consent required') {
@@ -382,10 +495,20 @@ class ApiClient {
     Uri uri, {
     Object? body,
     bool auth = true,
+    int? expectedScope,
+    String? expectedBase,
   }) async {
+    final scope = expectedScope ?? _scopeEpoch;
+    final base = expectedBase ?? config.apiBaseUrl;
     final headers = <String, String>{'Content-Type': 'application/json'};
     if (auth) {
+      if (_apiBaseUnresolved) {
+        throw StateError('server URL could not be read from storage');
+      }
       final token = await readSessionToken();
+      if (_scopeChanged(scope, base)) {
+        throw const StaleAuthScopeException();
+      }
       if (token != null && token.isNotEmpty) {
         headers['Authorization'] = 'Bearer $token';
       }
@@ -400,9 +523,10 @@ class ApiClient {
           await _http.send(request).timeout(const Duration(seconds: 20));
       response = await http.Response.fromStream(streamed);
     } catch (_) {
-      offline.value = true;
+      if (!_scopeChanged(scope, base)) offline.value = true;
       rethrow;
     }
+    if (_scopeChanged(scope, base)) return response;
     if (response.statusCode >= 502) {
       offline.value = true;
     } else if (offline.value) {
@@ -465,26 +589,50 @@ class ApiClient {
   /// The signed-in account. An expired session is renewed with the device
   /// key; out of reach, the last session kept on the device stands in.
   Future<SessionSnapshot> currentSession() async {
+    final scope = _scopeEpoch;
+    final base = config.apiBaseUrl;
     http.Response response;
     try {
-      response = await _send('GET', _uri('/api/auth/session'));
+      response = await _send(
+        'GET',
+        _uriFor(base, '/api/auth/session'),
+        expectedScope: scope,
+        expectedBase: base,
+      );
+      if (_scopeChanged(scope, base)) throw const StaleAuthScopeException();
       if (response.statusCode == 200 &&
           (jsonDecode(response.body) as Map)['user'] == null &&
-          await _renewSession()) {
-        response = await _send('GET', _uri('/api/auth/session'));
+          await _renewSession(expectedScope: scope, expectedBase: base)) {
+        if (_scopeChanged(scope, base)) throw const StaleAuthScopeException();
+        response = await _send(
+          'GET',
+          _uriFor(base, '/api/auth/session'),
+          expectedScope: scope,
+          expectedBase: base,
+        );
       }
     } catch (err) {
+      if (err is StaleAuthScopeException || _scopeChanged(scope, base)) {
+        throw const StaleAuthScopeException();
+      }
       final cached = await _cachedSession();
+      if (_scopeChanged(scope, base)) throw const StaleAuthScopeException();
       if (cached != null) return cached;
       rethrow;
     }
+    if (_scopeChanged(scope, base)) throw const StaleAuthScopeException();
     if (response.statusCode >= 500 || response.statusCode == 429) {
       return await _cachedSession() ?? const SessionSnapshot();
     }
     if (response.statusCode != 200) {
       return const SessionSnapshot();
     }
-    final snapshot = await _sessionFrom(response);
+    final snapshot = await _sessionFrom(
+      response,
+      expectedScope: scope,
+      expectedBase: base,
+    );
+    if (_scopeChanged(scope, base)) throw const StaleAuthScopeException();
     if (snapshot.user == null) {
       await clearSession();
     }
@@ -492,7 +640,11 @@ class ApiClient {
   }
 
   Future<User> signInWithWorkOS() async {
+    invalidatePendingAuth();
+    final scope = _scopeEpoch;
+    final base = config.apiBaseUrl;
     final clientId = await signInClientId();
+    if (_scopeChanged(scope, base)) throw const StaleAuthScopeException();
     final pkce = _Pkce.generate();
     final authorize =
         Uri.https('api.workos.com', '/user_management/authorize', {
@@ -518,6 +670,7 @@ class ApiClient {
           : redirect.scheme,
       options: const FlutterWebAuth2Options(useWebview: false),
     );
+    if (_scopeChanged(scope, base)) throw const StaleAuthScopeException();
     final returned = Uri.parse(result);
     final code = returned.queryParameters['code'];
     final state = returned.queryParameters['state'];
@@ -530,9 +683,13 @@ class ApiClient {
 
     // Android: a fresh Keystore key, so this sign-in lasts (see DeviceKey).
     final devicePublicKey = await _deviceKey.create();
+    if (_scopeChanged(scope, base)) {
+      if (devicePublicKey != null) await _deviceKey.delete();
+      throw const StaleAuthScopeException();
+    }
     final response = await _send(
       'POST',
-      _uri('/api/auth/workos/exchange'),
+      _uriFor(base, '/api/auth/workos/exchange'),
       body: {
         'code': code,
         'code_verifier': pkce.verifier,
@@ -540,7 +697,13 @@ class ApiClient {
         if (devicePublicKey != null) 'device_public_key': devicePublicKey,
       },
       auth: false,
+      expectedScope: scope,
+      expectedBase: base,
     );
+    if (_scopeChanged(scope, base)) {
+      if (devicePublicKey != null) await _deviceKey.delete();
+      throw const StaleAuthScopeException();
+    }
     if (response.statusCode != 200) {
       throw StateError(
           'WorkOS exchange failed (${response.statusCode}): ${response.body}');
@@ -551,6 +714,9 @@ class ApiClient {
     if (token == null || userJson == null) {
       throw StateError('WorkOS exchange response missing session');
     }
+    // Invalidate any probe that started while sign-in was in progress before
+    // persisting the new credentials and session cache.
+    invalidatePendingAuth();
     // Another account may have used this device: its data goes.
     await _dropLocalData();
     await saveSessionToken(token);
@@ -1090,6 +1256,15 @@ class ApiClient {
 
 /// Result of [ApiClient.checkServer].
 enum ServerCheck { ok, unreachable, notA217Server, signInNotConfigured }
+
+/// Thrown when an auth/session operation completes after the active server or
+/// account scope changed (sign-in, logout, or server switch).
+class StaleAuthScopeException implements Exception {
+  const StaleAuthScopeException();
+
+  @override
+  String toString() => 'stale auth scope';
+}
 
 /// Non-success API response. [message] is the server's `error` field, if any.
 class ApiException implements Exception {
