@@ -2041,42 +2041,72 @@ class ApiClient {
   /// your email to sign in` the caller shows the verification screen; a 429
   /// carries its Retry-After seconds in [ApiException.retryAfter].
   Future<User> signInWithPassword(String email, String password) async {
-    // Android: a fresh Keystore key, so this sign-in lasts (see DeviceKey,
-    // the same flow as the WorkOS exchange).
-    final devicePublicKey = await _deviceKey.create();
-    final response = await _sendOnce(
+    invalidatePendingAuth();
+    final scope = _scopeEpoch;
+    final base = config.apiBaseUrl;
+    int? keyGen;
+    final devicePublicKey = await _serializeAuth(() async {
+      if (_scopeChanged(scope, base)) throw const StaleAuthScopeException();
+      keyGen = ++_deviceKeyGen;
+      return _deviceKey.create();
+    });
+    Future<void> deleteOwnedDeviceKey() => _serializeAuth(() async {
+          if (devicePublicKey != null && keyGen == _deviceKeyGen) {
+            await _deviceKey.delete();
+          }
+        });
+    final response = await _send(
       'POST',
-      _uri('/api/auth/password/login'),
+      _uriFor(base, '/api/auth/password/login'),
       body: {
         'email': email,
         'password': password,
         if (devicePublicKey != null) 'device_public_key': devicePublicKey,
       },
       auth: false,
+      expectedScope: scope,
+      expectedBase: base,
     );
+    if (_scopeChanged(scope, base)) {
+      await deleteOwnedDeviceKey();
+      throw const StaleAuthScopeException();
+    }
     if (response.statusCode != 200) {
-      // The new key is of no use without a session.
-      if (devicePublicKey != null) await _deviceKey.delete();
+      await deleteOwnedDeviceKey();
       throw ApiException('password sign-in', response);
     }
     final decoded = jsonDecode(response.body) as Map<String, dynamic>;
     final userJson = decoded['user'] as Map<String, dynamic>?;
     final token = decoded['session_token'] as String?;
     if (userJson == null || token == null) {
-      if (devicePublicKey != null) await _deviceKey.delete();
+      await deleteOwnedDeviceKey();
       throw ApiException('password sign-in', response);
     }
-    // Same session handling as the WorkOS exchange: keep the token and the
-    // key id together so Keystore renewal keeps working.
-    await _dropLocalData();
-    await saveSessionToken(token);
-    final keyId = decoded['device_key_id'];
-    if (keyId is String && keyId.isNotEmpty) {
-      await _storage.write(key: _deviceKeyIdKey, value: keyId);
-    } else {
-      await _storage.delete(key: _deviceKeyIdKey);
-    }
-    await _sessionFrom(response);
+    final snapshot = SessionSnapshot.fromJson(decoded);
+    var shouldSync = false;
+    await _serializeAuth(() async {
+      if (_scopeChanged(scope, base)) {
+        if (devicePublicKey != null && keyGen == _deviceKeyGen) {
+          await _deviceKey.delete();
+        }
+        throw const StaleAuthScopeException();
+      }
+      invalidatePendingAuth();
+      await _dropLocalDataLocked();
+      await saveSessionToken(token);
+      final keyId = decoded['device_key_id'];
+      if (keyId is String && keyId.isNotEmpty) {
+        await _storage.write(key: _deviceKeyIdKey, value: keyId);
+      } else {
+        await _storage.delete(key: _deviceKeyIdKey);
+        if (devicePublicKey != null && keyGen == _deviceKeyGen) {
+          await _deviceKey.delete();
+        }
+      }
+      shouldSync = await _applySessionLocked(decoded, snapshot);
+      invalidatePendingAuth();
+    });
+    if (shouldSync) unawaited(syncPending());
     return User.fromJson(userJson);
   }
 
