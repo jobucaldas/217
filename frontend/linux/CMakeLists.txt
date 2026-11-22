@@ -73,6 +73,10 @@ set_target_properties(${BINARY_NAME}
 # Generated plugin build rules, which manage building the plugins and adding
 # them to the application.
 include(flutter/generated_plugins.cmake)
+# flutter_secure_storage_linux 1.x bundles a json.hpp that newer clang rejects
+# under -Werror (deprecated literal operator spacing); fixed upstream in 3.x.
+target_compile_options(flutter_secure_storage_linux_plugin PRIVATE
+  -Wno-unknown-warning-option -Wno-deprecated-literal-operator)
 
 
 # === Installation ===
