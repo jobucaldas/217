@@ -221,3 +221,188 @@ func TestDeleteUserForgetsCounters(t *testing.T) {
 		t.Fatalf("deleted user's session: %v", err)
 	}
 }
+
+// invalidatingStore runs fn once in the middle of a cache warm.
+type invalidatingStore struct {
+	store.Store
+	fn func()
+}
+
+func (i *invalidatingStore) GetSessionPrincipal(id string) (*model.User, time.Time, error) {
+	u, exp, err := i.Store.GetSessionPrincipal(id)
+	if fn := i.fn; fn != nil {
+		i.fn = nil
+		fn()
+	}
+	return u, exp, err
+}
+
+// alwaysInvalidatingStore invalidates one user on every read.
+type alwaysInvalidatingStore struct {
+	store.Store
+	hub  *Hub
+	user string
+}
+
+func (a *alwaysInvalidatingStore) GetSessionPrincipal(id string) (*model.User, time.Time, error) {
+	u, exp, err := a.Store.GetSessionPrincipal(id)
+	a.hub.Invalidate(a.user)
+	return u, exp, err
+}
+
+// addUser creates a consenting user and caches the session "<email>-token".
+func addUser(t *testing.T, f fixture, email, role string) (*model.User, string) {
+	t.Helper()
+	u, err := f.mem.CreateUser(email, email, "pw")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.mem.SetRole(u.ID, role); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.mem.RecordConsent(u.ID, model.ConsentVersion); err != nil {
+		t.Fatal(err)
+	}
+	token := email + "-token"
+	if err := f.mem.CreateSession(u.ID, token, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.hub.Lookup(token); err != nil {
+		t.Fatal(err)
+	}
+	return u, token
+}
+
+func cached(f fixture, token string) bool {
+	_, hit, _ := f.hub.Cached(token)
+	return hit
+}
+
+func TestInvalidateLeavesOtherUsersCached(t *testing.T) {
+	f := newFixture(t)
+	_, other := addUser(t, f, "other@example.com", model.RoleOwner)
+	if _, err := f.hub.Lookup(f.token); err != nil {
+		t.Fatal(err)
+	}
+	f.hub.Invalidate(f.owner.ID)
+	if cached(f, f.token) {
+		t.Fatal("invalidated user's session still cached")
+	}
+	f.hub.src = nil // a miss would now fail
+	if !cached(f, other) {
+		t.Fatal("another user's session was dropped")
+	}
+	if _, err := f.hub.Lookup(other); err != nil {
+		t.Fatalf("other user's lookup needed the store: %v", err)
+	}
+}
+
+func TestLogoutInvalidatesOnlyThatUser(t *testing.T) {
+	f := newFixture(t)
+	_, other := addUser(t, f, "other@example.com", model.RoleOwner)
+	for _, token := range []string{f.token, other} {
+		if _, err := f.hub.Lookup(token); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.s.DeleteSessionAndDevice(f.token); err != nil {
+		t.Fatal(err)
+	}
+	if cached(f, f.token) {
+		t.Fatal("logged-out session still cached")
+	}
+	if !cached(f, other) {
+		t.Fatal("logout dropped another user's session")
+	}
+}
+
+func TestLoadRacingUserInvalidationIsDiscarded(t *testing.T) {
+	f := newFixture(t)
+	other, _ := addUser(t, f, "other@example.com", model.RoleOwner)
+	// Invalidating the user being loaded mid-read: retried, then cached.
+	n := 0
+	f.hub.src = &invalidatingStore{Store: f.mem, fn: func() { n++; f.hub.Invalidate(f.owner.ID) }}
+	if _, err := f.hub.Load(f.token); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 || !cached(f, f.token) {
+		t.Fatalf("racing load: invalidations=%d cached=%v", n, cached(f, f.token))
+	}
+	// A persistent invalidation never caches pre-invalidation state.
+	f.hub.Invalidate(f.owner.ID)
+	f.hub.src = &alwaysInvalidatingStore{Store: f.mem, hub: f.hub, user: f.owner.ID}
+	if _, err := f.hub.Load(f.token); err == nil {
+		t.Fatal("persistent concurrent invalidation must not return a stale principal")
+	}
+	if cached(f, f.token) {
+		t.Fatal("a warm that raced an invalidation must not be cached")
+	}
+	// Invalidating someone unrelated does not discard the warm.
+	f.hub.src = &invalidatingStore{Store: f.mem, fn: func() { f.hub.Invalidate(other.ID) }}
+	if _, err := f.hub.Load(f.token); err != nil || !cached(f, f.token) {
+		t.Fatalf("unrelated invalidation discarded the warm: %v", err)
+	}
+	// A logout of exactly this token racing the warm is not cached either.
+	f.hub.Invalidate(f.owner.ID)
+	f.hub.src = &invalidatingStore{Store: f.mem, fn: func() { _ = f.s.DeleteSession(f.token) }}
+	if _, err := f.hub.Load(f.token); err != ErrUnauthorized || cached(f, f.token) {
+		t.Fatalf("logout racing a warm: %v", err)
+	}
+}
+
+func TestShareWritesInvalidateThePeer(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		act  func(f fixture, owner, partner *model.User) error
+	}{
+		{"revoke", func(f fixture, owner, _ *model.User) error { _, err := f.s.RevokeShare(owner.ID); return err }},
+		{"delete owner", func(f fixture, owner, _ *model.User) error { return f.s.DeleteUser(owner.ID) }},
+		{"delete partner", func(f fixture, _, partner *model.User) error { return f.s.DeleteUser(partner.ID) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t)
+			partner, partnerTok := addUser(t, f, "partner@example.com", model.RolePartner)
+			_, bystander := addUser(t, f, "bystander@example.com", model.RoleOwner)
+			share, err := f.s.EnableShare(f.owner.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := f.s.AcceptShare(partner.ID, share.InviteCode); err != nil {
+				t.Fatal(err)
+			}
+			for _, tok := range []string{f.token, partnerTok} {
+				if st, err := f.hub.Lookup(tok); err != nil || !st.ShareActive {
+					t.Fatalf("setup: %+v %v", st, err)
+				}
+			}
+			before, _ := f.hub.Lookup(partnerTok)
+			if err := tc.act(f, f.owner, partner); err != nil {
+				t.Fatal(err)
+			}
+			if !cached(f, bystander) {
+				t.Fatal("a user outside the share was dropped")
+			}
+			survivor, deleted := f.token, partnerTok // delete partner: the owner survives
+			if tc.name != "delete partner" {
+				survivor, deleted = partnerTok, ""
+			}
+			if cached(f, survivor) {
+				t.Fatal("the other side of the share stayed cached")
+			}
+			st, err := f.hub.Lookup(survivor)
+			if err != nil || st.ShareActive {
+				t.Fatalf("surviving side still sees the share: %+v %v", st, err)
+			}
+			if tc.name == "delete owner" {
+				if st.Tags.Account == before.Tags.Account || st.Tags.Inbox == before.Tags.Inbox || st.Tags.Calendar != "none" {
+					t.Fatalf("partner tags not bumped: %+v vs %+v", before.Tags, st.Tags)
+				}
+			}
+			if deleted != "" {
+				if _, err := f.hub.Lookup(deleted); err != ErrUnauthorized {
+					t.Fatalf("deleted user's session: %v", err)
+				}
+			}
+		})
+	}
+}
