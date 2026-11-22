@@ -10,6 +10,8 @@ import (
 var (
 	// ErrSessionNotFound indicates the session token is missing, expired, or bound to an idle/revoked device key.
 	ErrSessionNotFound = errors.New("session not found")
+	// ErrDeviceKeyNotFound indicates a missing or inactive device key.
+	ErrDeviceKeyNotFound = errors.New("device key not found")
 	// ErrEntryNotFound indicates no calendar entry exists for the requested date.
 	ErrEntryNotFound = errors.New("entry not found")
 )

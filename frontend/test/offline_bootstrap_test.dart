@@ -4129,6 +4129,46 @@ void main() {
     expect(await local.readDoc(localGlobalUser, 'last_user'), isNull);
   });
 
+  testWidgets('stalled session body times out', (tester) async {
+    FlutterSecureStorage.setMockInitialValues({});
+    final api = ApiClient(AppConfig.fromEnvironment(), httpClient: _StalledBodyClient());
+    final result = api.currentSession();
+    final expectation = expectLater(result, throwsA(isA<TimeoutException>()));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 21));
+    await expectation;
+  });
+
+  testWidgets('cookie session survives transient account refresh and retries', (tester) async {
+    FlutterSecureStorage.setMockInitialValues({});
+    var sessionCalls = 0;
+    var syncCalls = 0;
+    final api = ApiClient(AppConfig.fromEnvironment(), httpClient: MockClient((request) async {
+      if (request.url.path == '/api/auth/session') {
+        sessionCalls++;
+        if (sessionCalls == 2) return http.Response('unavailable', 503);
+        return http.Response(jsonEncode({'user': {'id': 'u1', 'email': 'owner@example.invalid', 'role': 'owner'}}), 200);
+      }
+      if (request.url.path == '/api/sync/status') {
+        syncCalls++;
+        return http.Response(jsonEncode({'etag': 'e$syncCalls', 'user_id': 'u1', 'role': 'owner', 'share_active': false, 'subject_consent': true, 'tags': {'account': 'a$syncCalls', 'inbox': 'i', 'calendar': 'c', 'prefs': 'p'}}), 200);
+      }
+      return http.Response('{}', 200);
+    }));
+    await tester.pumpWidget(App217(config: api.config, api: api, webStartup: true));
+    for (var i = 0; i < 15; i++) { await tester.pump(); }
+    expect(find.byType(CalendarScreen), findsOneWidget);
+    await tester.pump(const Duration(minutes: 2));
+    for (var i = 0; i < 15; i++) { await tester.pump(); }
+    expect(sessionCalls, 2);
+    expect(find.byType(CalendarScreen), findsOneWidget);
+    await tester.pump(const Duration(minutes: 2));
+    for (var i = 0; i < 15; i++) { await tester.pump(); }
+    expect(sessionCalls, greaterThanOrEqualTo(3));
+    expect(find.byType(CalendarScreen), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('web startup applies session before stalled auth config', (tester) async {
     final configGate = Completer<void>();
     final api = ApiClient(AppConfig.fromEnvironment(),
@@ -4151,6 +4191,12 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     await tester.pump();
   });
+}
+
+class _StalledBodyClient extends http.BaseClient {
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async =>
+      http.StreamedResponse(StreamController<List<int>>().stream, 200);
 }
 
 class _FailingKeyStorage extends FlutterSecureStoragePlatform {

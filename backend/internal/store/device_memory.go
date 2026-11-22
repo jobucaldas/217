@@ -78,7 +78,7 @@ func (s *MemoryStore) SetDeviceChallenge(keyID, challenge string, expiresAt time
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.deviceKeyActive(keyID, time.Now()) {
-		return fmt.Errorf("device key not found")
+		return ErrDeviceKeyNotFound
 	}
 	key := s.deviceKeys[keyID]
 	key.ChallengeHash, key.ChallengeExpires = hashString(challenge), expiresAt

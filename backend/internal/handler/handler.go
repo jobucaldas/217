@@ -345,6 +345,10 @@ func (h *Handler) CurrentSession(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusOK, payload)
 			return
 		}
+		if !errors.Is(err, store.ErrSessionNotFound) {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "session unavailable"})
+			return
+		}
 		http.SetCookie(w, h.clearSessionCookie())
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"user": nil, "share": nil})

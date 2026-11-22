@@ -11,6 +11,8 @@ import (
 	"log"
 	"net/http"
 	"time"
+
+	"217/backend/internal/store"
 )
 
 // Device keys let the Android app stay signed in: at sign-in it registers the
@@ -65,7 +67,11 @@ func (h *Handler) DeviceChallenge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.store.SetDeviceChallenge(body.KeyID, challenge, time.Now().UTC().Add(deviceChallengeTTL)); err != nil {
-		deviceNotRecognized(w)
+		if errors.Is(err, store.ErrDeviceKeyNotFound) {
+			deviceNotRecognized(w)
+		} else {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "device challenge unavailable"})
+		}
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")

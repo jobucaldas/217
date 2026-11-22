@@ -1084,9 +1084,10 @@ class ApiClient {
     }
     final http.Response response;
     try {
-      final streamed =
-          await _http.send(request).timeout(const Duration(seconds: 20));
-      response = await http.Response.fromStream(streamed);
+      response = await _http
+          .send(request)
+          .then(http.Response.fromStream)
+          .timeout(const Duration(seconds: 20));
     } catch (_) {
       if (!isStale()) offline.value = true;
       rethrow;

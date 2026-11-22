@@ -259,7 +259,11 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     } catch (_) {
       return; // offline: the next resume checks again
     }
-    if (!mounted || epoch != _accountEpoch) return;
+    if (!mounted ||
+        epoch != _accountEpoch ||
+        (session.fromCache && !session.consentRequired)) {
+      return;
+    }
     final user = session.user;
     if (user != null && user.id == _user?.id && !session.consentRequired) {
       return;
@@ -322,7 +326,9 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
       var handled = true;
       if (changed((t) => t.account)) {
         try {
-          await _refreshSession();
+          if (await _refreshSession(keepWhenOffline: true) == null) {
+            handled = false;
+          }
         } catch (_) {
           handled = false;
         }
@@ -852,7 +858,10 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     }));
     final session = await _api.currentSession();
     if (!mounted || epoch != _accountEpoch) return null;
-    if (keepWhenOffline && session.fromCache) return null;
+    if (session.fromCache &&
+        (keepWhenOffline || (_user != null && session.user == null && !session.consentRequired))) {
+      return null;
+    }
     final switchedAccount =
         _user != null && session.user != null && session.user!.id != _user!.id;
     _cancelOwnerReminderIfSessionLeavesOwner(session);

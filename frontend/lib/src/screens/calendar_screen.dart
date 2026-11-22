@@ -495,6 +495,14 @@ class _CalendarScreenState extends State<CalendarScreen>
             }
             _showCachedMonths();
           });
+          if (widget.user.isPartner &&
+              _monthKey(date) == _monthKey(_today)) {
+            unawaited(_syncPartnerAlerts(
+              _cycle,
+              sessionGeneration: widget.sessionGeneration?.call() ?? 0,
+              queueRevision: widget.partnerAlertSyncQueue?.revision,
+            ));
+          }
         } catch (_) {}
       }
       final neighbours = <String, DateTime>{

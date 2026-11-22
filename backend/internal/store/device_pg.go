@@ -57,7 +57,7 @@ func (s *PGStore) SetDeviceChallenge(keyID, challenge string, expiresAt time.Tim
 		return fmt.Errorf("setting device challenge: %w", err)
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		return fmt.Errorf("device key not found")
+		return ErrDeviceKeyNotFound
 	}
 	return nil
 }
