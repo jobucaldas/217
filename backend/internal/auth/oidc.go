@@ -38,7 +38,11 @@ func (o *OIDC) discover(ctx context.Context) (*oidc.Provider, error) {
 func (o *OIDC) config(p *oidc.Provider, redirect string) oauth2.Config {
 	e := p.Endpoint()
 	e.AuthStyle = oauth2.AuthStyleInHeader
-	return oauth2.Config{ClientID: o.ClientID, ClientSecret: o.ClientSecret, RedirectURL: redirect, Endpoint: e, Scopes: []string{oidc.ScopeOpenID, "profile", "email", "offline_access"}}
+	if o.ClientSecret == "" {
+		// Public client: send client_id in the body, no empty Basic auth.
+		e.AuthStyle = oauth2.AuthStyleInParams
+	}
+	return oauth2.Config{ClientID: o.ClientID, ClientSecret: o.ClientSecret, RedirectURL: redirect, Endpoint: e, Scopes: []string{oidc.ScopeOpenID, "profile", "email"}}
 }
 
 func (o *OIDC) AuthURL(ctx context.Context, redirect, state, challenge, nonce string, prompt bool) (string, error) {

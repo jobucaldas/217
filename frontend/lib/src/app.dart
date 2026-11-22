@@ -628,9 +628,13 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
           try {
             if (_user == null) throw StateError('not signed in');
             await _api.confirmOIDCLink(linkCode);
-            await _refreshSession();
           } catch (_) {
             linkFailed = true;
+          }
+          if (!linkFailed) {
+            try {
+              await _refreshSession();
+            } catch (_) {}
           }
         }
         final message = authError == 'account_exists'
@@ -1671,7 +1675,9 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
         initialAction: privacyActionFrom(Uri.base.queryParameters['confirm']),
         onSignIn: (returnTo) async {
           await _api.loadAuthConfig();
-          if (_api.workos) {
+          final oidcAccount =
+              (user?.oidcLinked ?? false) && _api.oidcName != null;
+          if (_api.workos && !oidcAccount) {
             await beginWorkOSSignIn(_api, returnTo: returnTo);
           } else {
             await beginOIDCSignIn(_api, returnTo: returnTo);

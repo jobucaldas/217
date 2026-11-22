@@ -180,7 +180,10 @@ class ApiClient {
           workos = decoded['workos'] != false && decoded['authkit'] != false;
           final oidc = decoded['oidc'];
           final name = oidc is Map ? oidc['name'] : null;
-          oidcName = name is String && name.trim().isNotEmpty ? name : null;
+          // Desktop cannot receive the app-scheme callback: no OIDC there.
+          oidcName = !isDesktopPlatform && name is String && name.trim().isNotEmpty
+              ? name
+              : null;
           final contact = decoded['privacy_contact'];
           privacyContact = contact is String ? contact.trim() : '';
         }
@@ -1161,7 +1164,7 @@ class ApiClient {
       }
       return decoded['authkit'] == true ||
               decoded['password'] == true ||
-              decoded['oidc'] is Map
+              (decoded['oidc'] is Map && !isDesktopPlatform)
           ? ServerCheck.ok
           : ServerCheck.signInNotConfigured;
     } on FormatException {

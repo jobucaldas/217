@@ -155,7 +155,7 @@ docker compose up -d
 
 If any command fails, stop and resolve the error before continuing. Keep `217.dump` until you have verified the restored data in the app, then delete it and any older plaintext backups. Do not rerun the dump command over your existing backup after removing the old volume.
 
-OpenID Connect is optional: set both `OIDC_ISSUER` and `OIDC_CLIENT_ID`, plus `OIDC_CLIENT_SECRET` for a confidential client; register `/api/auth/oidc/callback` on each allowed origin. The API exposes browser start and callback, native start and exchange, and account link/unlink routes under `/api/auth/oidc` and `/api/account/oidc`; existing accounts with unverified identity-provider email must sign in first and link explicitly. The current apps do not yet expose this sign-in mode.
+OpenID Connect is optional: set both `OIDC_ISSUER` and `OIDC_CLIENT_ID`, plus `OIDC_CLIENT_SECRET` for a confidential client; register `/api/auth/oidc/callback` on each allowed origin. The API exposes browser start and callback, native start and exchange, and account link/unlink routes under `/api/auth/oidc` and `/api/account/oidc`; an existing account with a password, or a provider email that is not verified, must sign in first and connect the provider from Settings › Sign-in methods. The web and Android apps show a "Continue with" button and that Settings row; the desktop apps do not offer OIDC.
 
 To reset a password, run `server -reset-password user@example.com` with the server's usual database and encryption settings, and enter the new password on standard input; restart the server to end cached sync sessions immediately.
 
