@@ -139,6 +139,12 @@ func TestOIDCBrowserAndNative(t *testing.T) {
 	}
 	cookie, state := start(false, "")
 	w := callback(cookie, state)
+	if w.Code != 302 || w.Header().Get("Location") != "https://app.example.com/app/?auth_error=oidc_failed" {
+		t.Fatalf("unverified new email: %d %s", w.Code, w.Header().Get("Location"))
+	}
+	verified = true
+	cookie, state = start(false, "")
+	w = callback(cookie, state)
 	if w.Code != 302 {
 		t.Fatalf("browser: %d %s", w.Code, w.Body.String())
 	}
@@ -155,7 +161,7 @@ func TestOIDCBrowserAndNative(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	subject, email = "existing-subject", "existing@example.com"
+	subject, email, verified = "existing-subject", "existing@example.com", false
 	cookie, state = start(false, "")
 	if w = callback(cookie, state); w.Code != 302 || w.Header().Get("Location") != "https://app.example.com/app/?auth_error=account_exists" {
 		t.Fatalf("unverified existing email: %d %s", w.Code, w.Header().Get("Location"))

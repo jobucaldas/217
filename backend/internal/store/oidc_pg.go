@@ -45,6 +45,9 @@ func (s *PGStore) LinkOIDCIdentity(issuer, subject, email, name string, verified
 	if count == 1 {
 		u, err = s.scanUser(tx.QueryRow(`SELECT `+userColumns+` FROM users u WHERE u.email_index=$1 FOR UPDATE`, index))
 	} else {
+		if !verified {
+			return nil, fmt.Errorf("unverified email")
+		}
 		if name == "" {
 			name = email
 		}

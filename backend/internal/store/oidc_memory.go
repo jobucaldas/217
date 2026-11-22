@@ -39,6 +39,9 @@ func (s *MemoryStore) LinkOIDCIdentity(issuer, subject, email, name string, veri
 			}
 		}
 	} else {
+		if !verified {
+			return nil, fmt.Errorf("unverified email")
+		}
 		if name == "" {
 			name = email
 		}

@@ -35,9 +35,15 @@ func TestOIDCIdentityContract(t *testing.T) {
 			if _, err = s.LinkOIDCIdentity("issuer", "subject", "changed@example.com", "", false); err != nil {
 				t.Fatal(err)
 			}
-			other, err := s.LinkOIDCIdentity("issuer", "other", "oidc-other@example.com", "", false)
+			if _, err = s.LinkOIDCIdentity("issuer", "unverified-new", "oidc-other@example.com", "", false); err == nil || err == ErrOIDCAccountExists {
+				t.Fatalf("unverified new email: %v", err)
+			}
+			other, err := s.LinkOIDCIdentity("issuer", "other", "oidc-other@example.com", "", true)
 			if err != nil {
 				t.Fatal(err)
+			}
+			if _, err = s.LinkOIDCIdentity("issuer", "unverified-new", "oidc-other@example.com", "", true); err == nil {
+				t.Fatal("unverified identity was created")
 			}
 			if err = s.AttachOIDCIdentity(other.ID, "issuer", "subject"); err == nil {
 				t.Fatal("moved linked identity")
