@@ -1,6 +1,8 @@
 package synchub
 
 import (
+	"time"
+
 	"217/backend/internal/model"
 	"217/backend/internal/store"
 )
@@ -23,6 +25,51 @@ func (w *wrapped) bumpPeer(userID, prefix string) {
 	if peer, err := w.Store.ActivePeer(userID); err == nil && peer != "" {
 		w.hub.Bump(prefix + peer)
 	}
+}
+
+func (w *wrapped) SetPasswordCredential(userID, hash string) error {
+	defer w.hub.Invalidate(userID)
+	err := w.Store.SetPasswordCredential(userID, hash)
+	if err == nil {
+		w.hub.Bump("a:" + userID)
+	}
+	return err
+}
+
+func (w *wrapped) DeletePasswordCredential(userID string) error {
+	defer w.hub.Invalidate(userID)
+	err := w.Store.DeletePasswordCredential(userID)
+	if err == nil {
+		w.hub.Bump("a:" + userID)
+	}
+	return err
+}
+
+func (w *wrapped) CreateEmailVerification(userID, code string, expiresAt time.Time) error {
+	defer w.hub.Invalidate(userID)
+	err := w.Store.CreateEmailVerification(userID, code, expiresAt)
+	if err == nil {
+		w.hub.Bump("a:" + userID)
+	}
+	return err
+}
+
+func (w *wrapped) RefreshEmailVerification(userID, code string, expiresAt time.Time) (bool, error) {
+	defer w.hub.Invalidate(userID)
+	refreshed, err := w.Store.RefreshEmailVerification(userID, code, expiresAt)
+	if err == nil && refreshed {
+		w.hub.Bump("a:" + userID)
+	}
+	return refreshed, err
+}
+
+func (w *wrapped) ConsumeEmailVerification(userID, code string) (bool, error) {
+	defer w.hub.Invalidate(userID)
+	consumed, err := w.Store.ConsumeEmailVerification(userID, code)
+	if err == nil && consumed {
+		w.hub.Bump("a:" + userID)
+	}
+	return consumed, err
 }
 
 func (w *wrapped) UpsertEntry(userID, date string, req model.UpsertRequest) (*model.Entry, error) {

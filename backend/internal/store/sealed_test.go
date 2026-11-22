@@ -169,6 +169,21 @@ func TestSealExistingRowsDropsPlaintext(t *testing.T) {
 	if err != nil || len(list) != 1 || list[0].Endpoint != "https://push.example/secret-endpoint" || list[0].Auth != "auth-key" {
 		t.Fatalf("reminder targets after sealing: %+v %v", list, err)
 	}
+
+	// The password tables store only hashes: the Argon2id hash of a known
+	// password and a hashed verification code must not leak the plaintext.
+	if err := s.SetPasswordCredential(owner, "argon2id$1$65536$2$c2FsdA$YWJjZGVmZ2hpams"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateEmailVerification(owner, "314159", time.Now().UTC().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	dump = dumpSchema(t, s.db)
+	for _, secret := range []string{"a-plain-test-password", "314159"} {
+		if strings.Contains(dump, secret) {
+			t.Errorf("plaintext %q still stored", secret)
+		}
+	}
 }
 
 func TestSealedValuesStayOnTheirRow(t *testing.T) {

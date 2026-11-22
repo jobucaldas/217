@@ -48,22 +48,27 @@ type MemoryStore struct {
 	messages       map[string]*model.Message
 	partnerAlerts  map[string]model.PartnerAlertPreference
 	deviceKeys     map[string]*memoryDeviceKey
+	// passwordCredentials mirrors password_credentials (user_id -> hash).
+	passwordCredentials map[string]memoryCredential
+	emailVerifications  map[string]memoryVerification
 }
 
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
-		users:          make(map[string]*model.User),
-		entries:        make(map[string]*model.Entry),
-		preferences:    make(map[string]*model.ReminderPreference),
-		subscriptions:  make(map[string]*model.PushSubscription),
-		deliveries:     make(map[string]memoryDelivery),
-		workosSubjects: make(map[string]string),
-		oauthAttempts:  make(map[string]memoryOAuthAttempt),
-		sessions:       make(map[string]memorySession),
-		shares:         make(map[string]*model.CalendarShare),
-		messages:       make(map[string]*model.Message),
-		partnerAlerts:  make(map[string]model.PartnerAlertPreference),
-		deviceKeys:     make(map[string]*memoryDeviceKey),
+		users:               make(map[string]*model.User),
+		entries:             make(map[string]*model.Entry),
+		preferences:         make(map[string]*model.ReminderPreference),
+		subscriptions:       make(map[string]*model.PushSubscription),
+		deliveries:          make(map[string]memoryDelivery),
+		workosSubjects:      make(map[string]string),
+		oauthAttempts:       make(map[string]memoryOAuthAttempt),
+		sessions:            make(map[string]memorySession),
+		shares:              make(map[string]*model.CalendarShare),
+		messages:            make(map[string]*model.Message),
+		partnerAlerts:       make(map[string]model.PartnerAlertPreference),
+		deviceKeys:          make(map[string]*memoryDeviceKey),
+		passwordCredentials: make(map[string]memoryCredential),
+		emailVerifications:  make(map[string]memoryVerification),
 	}
 }
 
@@ -311,6 +316,9 @@ func (s *MemoryStore) LinkWorkOSIdentity(subject, verifiedEmail, name string, au
 	if matchingUser != nil {
 		if !authoritative {
 			return nil, fmt.Errorf("legacy account requires independent ownership proof")
+		}
+		if _, ok := s.passwordCredentials[matchingUser.ID]; ok {
+			return nil, fmt.Errorf("account has a password credential")
 		}
 		for _, userID := range s.workosSubjects {
 			if userID == matchingUser.ID {

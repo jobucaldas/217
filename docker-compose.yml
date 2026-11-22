@@ -53,6 +53,13 @@ services:
       TLS_KEY_FILE: /certs/backend/tls.key
       WORKOS_API_KEY: "${WORKOS_API_KEY:-}"
       WORKOS_CLIENT_ID: "${WORKOS_CLIENT_ID:-}"
+      AUTH_PASSWORD_ENABLED: "${AUTH_PASSWORD_ENABLED:-true}"
+      AUTH_WORKOS_ENABLED: "${AUTH_WORKOS_ENABLED:-true}"
+      SMTP_HOST: "${SMTP_HOST:-}"
+      SMTP_PORT: "${SMTP_PORT:-587}"
+      SMTP_USER: "${SMTP_USER:-}"
+      SMTP_PASS: "${SMTP_PASS:-}"
+      SMTP_FROM: "${SMTP_FROM:-}"
       APP_BASE_URL: "${APP_BASE_URL:-http://localhost:8787}"
       APP_ALLOWED_ORIGINS: "${APP_ALLOWED_ORIGINS:-}"
       VAPID_PUBLIC_KEY: "${VAPID_PUBLIC_KEY:-}"

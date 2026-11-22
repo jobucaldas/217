@@ -381,6 +381,13 @@ func (s *PGStore) LinkWorkOSIdentity(subject, verifiedEmail, name string, author
 		if !authoritative {
 			return nil, fmt.Errorf("legacy account requires independent ownership proof")
 		}
+		var hasPassword bool
+		if err := tx.QueryRow(`SELECT EXISTS (SELECT 1 FROM password_credentials pc JOIN users u ON u.id = pc.user_id WHERE u.email_index = $1)`, index).Scan(&hasPassword); err != nil {
+			return nil, fmt.Errorf("checking password credential: %w", err)
+		}
+		if hasPassword {
+			return nil, fmt.Errorf("account has a password credential")
+		}
 		var alreadyLinked bool
 		if err := tx.QueryRow(`SELECT EXISTS (SELECT 1 FROM workos_identities gi JOIN users u ON u.id = gi.user_id WHERE u.email_index = $1)`, index).Scan(&alreadyLinked); err != nil {
 			return nil, fmt.Errorf("checking existing workos link: %w", err)

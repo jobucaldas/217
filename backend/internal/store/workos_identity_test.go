@@ -13,6 +13,43 @@ func TestWorkOSIdentityStoreContract(t *testing.T) {
 	t.Run("postgres", func(t *testing.T) { testWorkOSIdentityStore(t, pgTestStore(t)) })
 }
 
+func TestRefreshVerificationStoreContract(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		store func(*testing.T) Store
+	}{
+		{"memory", func(t *testing.T) Store { return NewMemoryStore() }},
+		{"postgres", func(t *testing.T) Store { return pgTestStore(t) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := tc.store(t)
+			u, err := s.CreateUser("refresh@example.com", "User", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			expires := time.Now().Add(time.Hour)
+			if ok, err := s.RefreshEmailVerification(u.ID, "new", expires); err != nil || ok {
+				t.Fatalf("missing: %v %v", ok, err)
+			}
+			if err := s.CreateEmailVerification(u.ID, "old", expires); err != nil {
+				t.Fatal(err)
+			}
+			if ok, err := s.RefreshEmailVerification(u.ID, "new", expires); err != nil || !ok {
+				t.Fatalf("refresh: %v %v", ok, err)
+			}
+			if ok, err := s.ConsumeEmailVerification(u.ID, "old"); err != nil || ok {
+				t.Fatalf("old: %v %v", ok, err)
+			}
+			if ok, err := s.ConsumeEmailVerification(u.ID, "new"); err != nil || !ok {
+				t.Fatalf("new: %v %v", ok, err)
+			}
+			if ok, err := s.RefreshEmailVerification(u.ID, "later", expires); err != nil || ok {
+				t.Fatalf("consumed: %v %v", ok, err)
+			}
+		})
+	}
+}
+
 func testWorkOSIdentityStore(t *testing.T, s Store) {
 	t.Helper()
 	legacy, err := s.CreateUser("Legacy@example.com", "Legacy", "password123")
@@ -32,6 +69,16 @@ func testWorkOSIdentityStore(t *testing.T, s Store) {
 	}
 	if _, err := s.LinkWorkOSIdentity("another", "legacy@example.com", "Other", true); err == nil {
 		t.Fatal("different subject inherited linked account")
+	}
+	passwordUser, err := s.CreatePasswordUser("password@example.com", "hash", "", time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.LinkWorkOSIdentity("password-subject", "password@example.com", "Password", true); err == nil {
+		t.Fatal("password account automatically linked")
+	}
+	if subject, err := s.WorkOSSubject(passwordUser.ID); err != nil || subject != "" {
+		t.Fatalf("password account identity changed: %q %v", subject, err)
 	}
 	created, err := s.LinkWorkOSIdentity("new-external", "new@example.net", "New", false)
 	if err != nil || created.ID == legacy.ID {
