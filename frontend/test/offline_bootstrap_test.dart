@@ -4045,6 +4045,112 @@ void main() {
     expect(await local.pendingWrites('u-owner'), isEmpty);
     expect(api.pendingWrites.value, 0);
   });
+
+  test('late consent acceptance cannot override a newer denial', () async {
+    final local = MemoryLocalStore();
+    final accepted = Completer<void>();
+    final sent = Completer<void>();
+    String session(bool required) => jsonEncode({
+          'user': {'id': 'u1', 'email': 'owner@example.invalid', 'role': 'owner'},
+          'consent': {'version': 1, 'required': required},
+        });
+    await local.writeDoc(localGlobalUser, 'last_user', 'u1');
+    await local.writeDoc('u1', 'session', session(true));
+    await local.writeDoc('u1', 'calendar', 'own');
+    final api = ApiClient(AppConfig.fromEnvironment(), localStore: local,
+        httpClient: MockClient((request) async {
+      if (request.url.path == '/api/account/consent') {
+        sent.complete();
+        await accepted.future;
+        return http.Response(session(false), 200);
+      }
+      return http.Response(session(true), 200);
+    }));
+    await api.cachedSession();
+    final pending = api.acceptConsent(1);
+    final rejected = expectLater(pending, throwsA(isA<StaleAuthScopeException>()));
+    await sent.future;
+    expect((await api.currentSession()).consentRequired, isTrue);
+    accepted.complete();
+    await rejected;
+    expect((await api.cachedSession())?.consentRequired, isTrue);
+  });
+
+  test('routine refresh does not discard a successful role change', () async {
+    final local = MemoryLocalStore();
+    final gate = Completer<void>();
+    final sent = Completer<void>();
+    String session(String role) => jsonEncode({
+          'user': {'id': 'u1', 'email': 'owner@example.invalid', 'role': role},
+          'consent': {'version': 1, 'required': false},
+        });
+    await local.writeDoc(localGlobalUser, 'last_user', 'u1');
+    await local.writeDoc('u1', 'session', session(''));
+    await local.writeDoc('u1', 'calendar', 'own');
+    final api = ApiClient(AppConfig.fromEnvironment(), localStore: local,
+        httpClient: MockClient((request) async {
+      if (request.url.path == '/api/account/role') {
+        sent.complete();
+        await gate.future;
+        return http.Response(session('owner'), 200);
+      }
+      return http.Response(session(''), 200);
+    }));
+    await api.cachedSession();
+    final pending = api.setRole('owner');
+    await sent.future;
+    await api.currentSession();
+    gate.complete();
+    expect((await pending).user?.role, 'owner');
+    expect((await api.cachedSession())?.user?.role, 'owner');
+  });
+
+  test('transient status retains cache but 401 clears credentials and data', () async {
+    final local = MemoryLocalStore();
+    final session = jsonEncode({
+      'user': {'id': 'u1', 'email': 'owner@example.invalid', 'role': 'owner'},
+    });
+    await local.writeDoc(localGlobalUser, 'last_user', 'u1');
+    await local.writeDoc('u1', 'session', session);
+    await local.writeDoc('u1', 'calendar', 'own');
+    await local.replaceMonth('u1', 2026, 11, const [
+      Entry(date: '2026-11-15', taken: true, notes: ''),
+    ]);
+    var status = 408;
+    final api = ApiClient(AppConfig.fromEnvironment(), localStore: local,
+        httpClient: MockClient((_) async => http.Response('', status)));
+    await api.cachedSession();
+    expect((await api.currentSession()).user?.id, 'u1');
+    expect(await api.cachedMonth(2026, 11), isNotNull);
+    status = 401;
+    expect((await api.currentSession()).user, isNull);
+    expect(await api.readSessionToken(), isNull);
+    expect(await api.cachedSession(), isNull);
+    expect(await local.readDoc(localGlobalUser, 'last_user'), isNull);
+  });
+
+  testWidgets('web startup applies session before stalled auth config', (tester) async {
+    final configGate = Completer<void>();
+    final api = ApiClient(AppConfig.fromEnvironment(),
+        httpClient: MockClient((request) async {
+      if (request.url.path == '/api/auth/config') {
+        await configGate.future;
+        return http.Response('{"authkit":true}', 200);
+      }
+      if (request.url.path == '/api/auth/session') {
+        return http.Response(jsonEncode({
+          'user': {'id': 'u1', 'email': 'owner@example.invalid', 'role': 'owner'},
+        }), 200);
+      }
+      return http.Response('{}', 200);
+    }));
+    await tester.pumpWidget(App217(config: api.config, api: api, webStartup: true));
+    for (var i = 0; i < 10; i++) { await tester.pump(); }
+    expect(find.byType(CalendarScreen), findsOneWidget);
+    configGate.complete();
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+  });
 }
 
 class _FailingKeyStorage extends FlutterSecureStoragePlatform {

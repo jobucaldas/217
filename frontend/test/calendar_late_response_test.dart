@@ -36,6 +36,36 @@ class _DelayedServerApi extends ApiClient {
   Future<CycleInfo> getCycle(String today) async => CycleInfo.empty;
 }
 
+class _HangingNeighbourApi extends ApiClient {
+  _HangingNeighbourApi() : super(AppConfig.fromEnvironment());
+
+  final gate = Completer<void>();
+  final visibleGate = Completer<void>();
+  var cycles = 0;
+
+  @override
+  Future<List<Entry>?> cachedMonth(int year, int month) async => [
+        Entry(date: DateFormat('yyyy-MM-dd').format(DateTime.now()), taken: true, notes: ''),
+      ];
+
+  @override
+  Future<List<Entry>> listEntries(int year, int month) async {
+    final now = DateTime.now();
+    if (year != now.year || month != now.month) {
+      await gate.future;
+    } else {
+      await visibleGate.future;
+    }
+    return const [];
+  }
+
+  @override
+  Future<CycleInfo> getCycle(String today) async {
+    cycles++;
+    return CycleInfo.empty;
+  }
+}
+
 Future<void> _pump(WidgetTester tester, ApiClient api) async {
   tester.view.devicePixelRatio = 1;
   tester.view.physicalSize = const Size(800, 900);
@@ -54,6 +84,23 @@ Future<void> _pump(WidgetTester tester, ApiClient api) async {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   GoogleFonts.config.allowRuntimeFetching = false;
+
+  testWidgets('hanging neighbouring months do not block visible month or cycle',
+      (tester) async {
+    final api = _HangingNeighbourApi();
+    await _pump(tester, api);
+    await tester.pump();
+    expect(find.text('Taken'), findsOneWidget);
+    api.visibleGate.complete();
+    for (var i = 0; i < 5; i++) {
+      await tester.pump();
+    }
+    expect(find.text('Taken'), findsNothing);
+    expect(api.cycles, greaterThan(0));
+    api.gate.complete();
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+  });
 
   testWidgets('late network answer updates the calendar without input',
       (tester) async {

@@ -452,56 +452,40 @@ class _CalendarScreenState extends State<CalendarScreen>
           rethrow;
         }
       }
-      final results = await Future.wait([
-        fetchMonth(year, month),
-        fetchMonth(
-          month == 1 ? year - 1 : year,
-          month == 1 ? 12 : month - 1,
-        ),
-        fetchMonth(
-          month == 12 ? year + 1 : year,
-          month == 12 ? 1 : month + 1,
-        ),
-      ]);
-      if (!mounted || generation != _loadGeneration) return;
-      // Every month read here is fresh; today's month is one of the three
-      // unless the view is two or more months away, then it is read too.
-      final fresh = <String, Map<String, Entry>>{
-        _monthKey(requested): {for (final e in results[0]) e.date: e},
-        _monthKey(requestedPrev): {for (final e in results[1]) e.date: e},
-        _monthKey(requestedNext): {for (final e in results[2]) e.date: e},
-      };
-      final today = _today;
-      final todayMonth = _monthKey(today);
-      // The summary's day must be as fresh as the grid: read its month too
-      // when the view has moved away from it.
-      final selected = _selected;
-      final selectedMonth = selected == null ? null : _monthKey(selected);
-      for (final month in [
-        today,
-        if (selected != null) selected,
-      ]) {
-        if (fresh.containsKey(_monthKey(month))) continue;
+      Future<void> applyNeighbour(DateTime date) async {
         try {
-          final list = await widget.api.listEntries(month.year, month.month);
-          if (!mounted || generation != _loadGeneration) return;
-          fresh[_monthKey(month)] = {for (final e in list) e.date: e};
-        } catch (err) {
-          if (!mounted) return;
-          if ((generation == _loadGeneration || _isCalendarAccessDenial(err)) &&
-              _handleConsentFailure(err)) {
+          final entries = await fetchMonth(date.year, date.month);
+          if (!mounted ||
+              generation != _loadGeneration ||
+              epoch != _writeEpoch ||
+              _pendingWrites > 0) {
             return;
           }
-          if (generation != _loadGeneration) return;
-          // Today keeps _todayEntry, which is never older than the cached
-          // month (edits and reads update both). A selected day whose month
-          // could not be read falls back to today below.
-        }
+          final fresh = {for (final e in entries) e.date: e};
+          setState(() {
+            _monthCache[_monthKey(date)] = fresh;
+            if (_monthKey(date) == _monthKey(_today)) {
+              _todayEntry = fresh[_todayKey];
+            }
+            _showCachedMonths();
+          });
+        } catch (_) {}
       }
-      final todayFresh = fresh[todayMonth];
-      final todayEntry =
-          todayFresh != null ? todayFresh[_todayKey] : _todayEntry;
+      final neighbours = <String, DateTime>{
+        for (final date in [
+          requestedPrev,
+          requestedNext,
+          _today,
+          if (_selected != null) _selected!,
+        ])
+          if (_monthKey(date) != _monthKey(requested)) _monthKey(date): date,
+      };
+      for (final date in neighbours.values) {
+        unawaited(applyNeighbour(date));
+      }
+      final visible = await fetchMonth(year, month);
       if (!mounted || generation != _loadGeneration) return;
+      final fresh = {for (final e in visible) e.date: e};
       if (_pendingWrites > 0) {
         _reloadAfterWrites = true;
         return;
@@ -514,15 +498,11 @@ class _CalendarScreenState extends State<CalendarScreen>
       _confirmed.clear();
       _dataBlocked = false;
       setState(() {
-        // Today's month included, so its grid matches _todayEntry.
-        _monthCache.addAll(fresh);
-        if (selectedMonth != null &&
-            _selected == selected &&
-            !fresh.containsKey(selectedMonth)) {
-          _selected = null;
+        _monthCache[_monthKey(requested)] = fresh;
+        if (_monthKey(requested) == _monthKey(_today)) {
+          _todayEntry = fresh[_todayKey];
         }
         _showCachedMonths();
-        _todayEntry = todayEntry;
       });
     } catch (err) {
       if (!mounted || generation != _loadGeneration) return;

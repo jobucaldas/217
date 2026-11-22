@@ -44,6 +44,7 @@ class App217 extends StatefulWidget {
     this.installedVersion,
     this.clock = DateTime.now,
     this.webPage,
+    this.webStartup = kIsWeb,
   });
 
   final AppConfig config;
@@ -65,6 +66,9 @@ class App217 extends StatefulWidget {
 
   /// Standalone privacy page override; only tests replace it.
   final WebPage? webPage;
+
+  /// Exercises the web bootstrap path in widget tests.
+  final bool webStartup;
 
   @override
   State<App217> createState() => _App217State();
@@ -374,7 +378,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     } else if (apiBaseResolved && !_api.config.needsServerSetup) {
       final hasWebConfirmAction = _webPage != null &&
           privacyActionFrom(Uri.base.queryParameters['confirm']) != null;
-      if (kIsWeb && (_webPage == null || hasWebConfirmAction)) {
+      if (widget.webStartup && (_webPage == null || hasWebConfirmAction)) {
         // Web keeps no offline copy (memory-only store), so a cached
         // session is always null here and the server's answer decides:
         // waiting for it (bounded by the request timeout) avoids flashing
@@ -630,16 +634,13 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     }
   }
 
-  /// Auth config and session asked together, so an unreachable server costs
-  /// one request timeout instead of two. The config load never throws.
-  Future<SessionSnapshot> _loadConfigAndSession() async {
-    final config = _api.loadAuthConfig();
-    final session = _api.currentSession();
-    try {
-      return await session;
-    } finally {
-      await config;
-    }
+  /// Auth config updates independently of the session response.
+  Future<SessionSnapshot> _loadConfigAndSession() {
+    final epoch = _accountEpoch;
+    unawaited(_api.loadAuthConfig().then((_) {
+      if (mounted && epoch == _accountEpoch) setState(() {});
+    }));
+    return _api.currentSession();
   }
 
   /// Re-reads the session from the server and applies it. With

@@ -276,9 +276,12 @@ class ApiClient {
         invalidatePendingAuth();
       });
 
-  Future<void> _clearSessionInScope(int expectedScope, String expectedBase) =>
+  Future<void> _clearSessionInScope(int expectedScope, String expectedBase,
+          {int? expectedSessionRevision}) =>
       _serializeAuth(() async {
-        if (_scopeChanged(expectedScope, expectedBase)) {
+        if (_scopeChanged(expectedScope, expectedBase) ||
+            (expectedSessionRevision != null &&
+                expectedSessionRevision != _sessionRevision)) {
           throw const StaleAuthScopeException();
         }
         invalidatePendingAuth();
@@ -299,6 +302,7 @@ class ApiClient {
     _calendarGeneration++;
     _sessionRevision++;
     _consentRevision++;
+    _mutationRevision++;
     pendingWrites.value = 0;
     await _local.clearAll();
     _calendarCacheBlocked = false;
@@ -336,6 +340,7 @@ class ApiClient {
     int? expectedScope,
     String? expectedBase,
     int? expectedSessionRevision,
+    int? expectedMutationRevision,
     bool consentGranted = false,
   }) async {
     final decoded = jsonDecode(response.body) as Map<String, dynamic>;
@@ -346,8 +351,10 @@ class ApiClient {
           _scopeChanged(expectedScope, expectedBase ?? config.apiBaseUrl)) {
         throw const StaleAuthScopeException();
       }
-      if (expectedSessionRevision != null &&
-          expectedSessionRevision != _sessionRevision) {
+      if ((expectedSessionRevision != null &&
+              expectedSessionRevision != _sessionRevision) ||
+          (expectedMutationRevision != null &&
+              expectedMutationRevision != _mutationRevision)) {
         throw const StaleAuthScopeException();
       }
       shouldSync = await _applySessionLocked(
@@ -385,6 +392,7 @@ class ApiClient {
           snapshot.consentVersion > 0 ? snapshot.consentVersion : null;
       _calendarGeneration++;
       _sessionRevision++;
+      _mutationRevision++;
       try {
         await _calendarIs(user.id, user.role, snapshot.share);
       } catch (_) {
@@ -452,6 +460,9 @@ class ApiClient {
   /// calendar invalidation commits, so an in-flight session response or offline
   /// fallback cannot roll back a newer session, consent block, or share state.
   int _sessionRevision = 0;
+
+  // Unlike session refreshes, these changes invalidate pending mutations.
+  int _mutationRevision = 0;
 
   /// Moves whenever consent is explicitly granted or transitions from blocked
   /// to confirmed, so a late `403 consent required` from before consent was
@@ -533,6 +544,7 @@ class ApiClient {
       return;
     }
     _calendarGeneration++;
+    _mutationRevision++;
     if (known != null ||
         role == 'partner' ||
         _calendarCacheBlocked ||
@@ -585,6 +597,7 @@ class ApiClient {
           } catch (_) {}
         }
         _sessionRevision++;
+        _mutationRevision++;
       }
     });
     return share;
@@ -931,6 +944,7 @@ class ApiClient {
           return false;
         }
         if (expectedConsentRev != _consentRevision) return false;
+        _mutationRevision++;
         final wasBlocked = _consentBlocked;
         final prevBlockedVersion = _consentBlockedVersion;
         _consentBlocked = true;
@@ -1157,7 +1171,12 @@ class ApiClient {
       rethrow;
     }
     if (_scopeChanged(scope, base)) throw const StaleAuthScopeException();
-    if (response.statusCode >= 500 || response.statusCode == 429) {
+    if (response.statusCode == 401) {
+      await _clearSessionInScope(scope, base,
+          expectedSessionRevision: startRevision);
+      return const SessionSnapshot();
+    }
+    if (response.statusCode != 200) {
       return await _adoptCachedSession(
             expectedScope: scope,
             expectedBase: base,
@@ -1165,9 +1184,6 @@ class ApiClient {
             throwOnStale: true,
           ) ??
           const SessionSnapshot(fromCache: true);
-    }
-    if (response.statusCode != 200) {
-      return const SessionSnapshot();
     }
     final snapshot = await _sessionFrom(
       response,
@@ -1319,7 +1335,7 @@ class ApiClient {
   }) async {
     final scope = _scopeEpoch;
     final base = config.apiBaseUrl;
-    final startRevision = _sessionRevision;
+    final startRevision = _mutationRevision;
     final response = await _send(
       method,
       _uriFor(base, path),
@@ -1335,8 +1351,7 @@ class ApiClient {
       response,
       expectedScope: scope,
       expectedBase: base,
-      expectedSessionRevision:
-          consentGranted || consentWithdrawn ? null : startRevision,
+      expectedMutationRevision: consentWithdrawn ? null : startRevision,
       consentGranted: consentGranted,
     );
   }
