@@ -4,6 +4,8 @@ import 'local_reminders.dart';
 
 /// Plans partner alerts from the latest calendar data and hands them to the
 /// OS scheduler. Unlinked partners (or both toggles off) clear all alerts.
+/// [requestPermission] only matters for the default scheduler and is for
+/// explicit user actions.
 Future<LocalReminderSyncStatus> syncPartnerAlertsFrom({
   required Strings strings,
   required PartnerAlertPreference pref,
@@ -13,6 +15,7 @@ Future<LocalReminderSyncStatus> syncPartnerAlertsFrom({
   required String ownerName,
   Future<LocalReminderSyncStatus> Function(List<PlannedAlert>)? scheduler,
   DateTime? now,
+  bool requestPermission = false,
 }) {
   final dates = strings.dates;
   final at = now ?? DateTime.now();
@@ -32,5 +35,6 @@ Future<LocalReminderSyncStatus> syncPartnerAlertsFrom({
           pillBody: (when) => strings.pillNotifBody(ownerName, dates.time(when)),
         )
       : const <PlannedAlert>[];
-  return (scheduler ?? syncPartnerAlerts)(alerts);
+  return (scheduler ??
+      (a) => syncPartnerAlerts(a, requestPermission: requestPermission))(alerts);
 }

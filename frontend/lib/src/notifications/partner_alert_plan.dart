@@ -46,6 +46,25 @@ const maxPillRepeatsPerDay = 48;
 
 const partnerPillRepeatIdCount = pillRepeatHorizonDays * maxPillRepeatsPerDay;
 
+/// How long before the pill alert the one-off background pre-check runs, so
+/// an owner logging just before it cancels the alert before it fires.
+const partnerPrecheckLead = Duration(minutes: 3);
+
+/// When to look once more before today's pill alert: [partnerPrecheckLead]
+/// before it, or null when no such time is ahead (alert off, pill already
+/// logged, or the time has passed).
+DateTime? partnerPrecheckAt(
+  DateTime now,
+  PartnerAlertPreference pref,
+  bool todayLogged,
+) {
+  if (!pref.pillEnabled || todayLogged) return null;
+  final t = parseReminderTime(pref.pillTime);
+  final at = DateTime(now.year, now.month, now.day, t.hour, t.minute)
+      .subtract(partnerPrecheckLead);
+  return at.isAfter(now) ? at : null;
+}
+
 /// Plans partner alerts from the latest calendar data.
 ///
 /// PMS: one alert on each predicted PMS start day at [PartnerAlertPreference.pmsTime].

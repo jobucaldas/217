@@ -33,12 +33,18 @@ func (s *PGStore) CreateDeviceKey(userID string, publicKey []byte) (string, erro
 
 func (s *PGStore) CreateDeviceSession(userID, keyID, sessionID string, expiresAt time.Time) error {
 	_, _ = s.db.Exec(`DELETE FROM sessions WHERE expires_at <= NOW()`)
-	if _, err := s.db.Exec(`INSERT INTO sessions (id, user_id, created_at, expires_at, device_key_id)
-		VALUES ($1, $2, NOW(), $3, $4)`, hashString(sessionID), userID, expiresAt, keyID); err != nil {
+	res, err := s.db.Exec(`WITH active_key AS (
+		UPDATE device_keys SET last_used_at = NOW()
+		WHERE id = $4 AND user_id = $2 AND last_used_at > $5 RETURNING id, user_id
+	)
+	INSERT INTO sessions (id, user_id, created_at, expires_at, device_key_id)
+	SELECT $1, user_id, NOW(), $3::timestamptz, id FROM active_key`,
+		hashString(sessionID), userID, expiresAt, keyID, time.Now().Add(-model.DeviceKeyIdleRetention))
+	if err != nil {
 		return fmt.Errorf("creating device session: %w", err)
 	}
-	if _, err := s.db.Exec(`UPDATE device_keys SET last_used_at = NOW() WHERE id = $1`, keyID); err != nil {
-		return fmt.Errorf("touching device key: %w", err)
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("device key not found")
 	}
 	return nil
 }
@@ -64,9 +70,10 @@ func (s *PGStore) ConsumeDeviceChallenge(keyID, challenge string) (string, []byt
 		expires   sql.NullTime
 	)
 	err := s.db.QueryRow(`UPDATE device_keys d SET challenge_hash = NULL, challenge_expires_at = NULL
-		FROM (SELECT id, challenge_hash, challenge_expires_at FROM device_keys WHERE id = $1 FOR UPDATE) old
+		FROM (SELECT id, challenge_hash, challenge_expires_at FROM device_keys WHERE id = $1 AND last_used_at > $2 FOR UPDATE) old
 		WHERE d.id = old.id
-		RETURNING d.user_id, d.public_key, old.challenge_hash, old.challenge_expires_at`, keyID).
+		RETURNING d.user_id, d.public_key, old.challenge_hash, old.challenge_expires_at`,
+		keyID, time.Now().Add(-model.DeviceKeyIdleRetention)).
 		Scan(&userID, &publicKey, &hash, &expires)
 	if err == sql.ErrNoRows {
 		return "", nil, fmt.Errorf("device key not found")
@@ -84,7 +91,7 @@ func (s *PGStore) ConsumeDeviceChallenge(keyID, challenge string) (string, []byt
 func (s *PGStore) DeleteSessionAndDevice(sessionID string) error {
 	hash := hashString(sessionID)
 	if _, err := s.db.Exec(`DELETE FROM device_keys WHERE id = (
-		SELECT device_key_id FROM sessions WHERE id = $1)`, hash); err != nil {
+		SELECT device_key_id FROM sessions WHERE id = $1 AND expires_at > NOW())`, hash); err != nil {
 		return fmt.Errorf("revoking device key: %w", err)
 	}
 	return s.DeleteSession(sessionID)
@@ -92,7 +99,7 @@ func (s *PGStore) DeleteSessionAndDevice(sessionID string) error {
 
 func (s *PGStore) ListDeviceKeys(userID string) ([]model.DeviceKey, error) {
 	rows, err := s.db.Query(`SELECT id, created_at, last_used_at FROM device_keys
-		WHERE user_id = $1 ORDER BY created_at`, userID)
+		WHERE user_id = $1 AND last_used_at > $2 ORDER BY created_at`, userID, time.Now().Add(-model.DeviceKeyIdleRetention))
 	if err != nil {
 		return nil, fmt.Errorf("listing device keys: %w", err)
 	}

@@ -129,4 +129,63 @@ void main() {
     expect(settingsResult, LocalReminderSyncStatus.scheduled);
     expect(calls, [const <PlannedAlert>[]]);
   });
+
+  test('only user-requested plans use the permission scheduler', () async {
+    final calls = <String>[];
+    final queue = PartnerAlertSyncQueue(
+      scheduler: (alerts) async {
+        calls.add('quiet:${alerts.length}');
+        return LocalReminderSyncStatus.scheduled;
+      },
+      permissionScheduler: (alerts) async {
+        calls.add('prompt:${alerts.length}');
+        return LocalReminderSyncStatus.scheduled;
+      },
+    );
+    final plan = [
+      PlannedAlert(
+        id: 21720,
+        when: DateTime(2026, 10, 14),
+        title: 'Reminder',
+        body: 'Pill not logged',
+      ),
+    ];
+
+    final first = queue.beginIntent();
+    await queue.scheduleIfCurrent(revision: first, alerts: plan);
+    queue.finishIntent(first); // else a pending user write skips background
+    await queue.scheduleBackgroundIfCurrent(
+        revision: queue.revision, alerts: plan);
+    final second = queue.beginIntent();
+    await queue.scheduleIfCurrent(
+      revision: second,
+      alerts: plan,
+      requestPermission: true,
+    );
+    queue.finishIntent(second);
+    await queue.scheduleUserIntent(plan, requestPermission: true);
+    await queue.scheduleUserIntent(plan);
+    expect(calls, [
+      'quiet:1',
+      'quiet:1',
+      'prompt:1',
+      'prompt:1',
+      'quiet:1',
+    ]);
+  });
+
+  test('without a permission scheduler the one scheduler serves both',
+      () async {
+    final calls = <int>[];
+    final queue = PartnerAlertSyncQueue(scheduler: (alerts) async {
+      calls.add(alerts.length);
+      return LocalReminderSyncStatus.scheduled;
+    });
+    await queue.scheduleIfCurrent(
+      revision: queue.beginIntent(),
+      alerts: const [],
+      requestPermission: true,
+    );
+    expect(calls, [0]);
+  });
 }

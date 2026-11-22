@@ -14,6 +14,9 @@ const _partnerChannelId = 'partner_alerts';
 const _notifId = 21701;
 const _messagesChannelId = 'messages';
 const _messageNotifId = 21750;
+const _partnerStatusChannelId = 'partner_status';
+const _partnerPillTakenNotifId = 21730;
+const _partnerPillTakenTimeoutMs = 2 * 60 * 60 * 1000;
 
 final FlutterLocalNotificationsPlugin _plugin =
     FlutterLocalNotificationsPlugin();
@@ -32,23 +35,28 @@ Future<LocalReminderSyncResult> syncLocalDailyReminder({
   bool repeatEnabled = false,
   int repeatMinutes = 15,
   bool todayLogged = false,
+  bool requestPermission = false,
 }) async {
   if (!supportsLocalReminders) {
     return const LocalReminderSyncResult(LocalReminderSyncStatus.unsupported);
   }
 
   try {
-    final ready = await _ensureReady(requestPermission: enabled);
+    await _initialize();
+    // Cancelling needs neither permission nor an Activity, so it always
+    // runs first: a denied permission must not leave old repeats behind.
+    // (Repeats are replanned in full below.)
+    await _cancelOwnerReminderRepeats();
+    if (!enabled) {
+      await _plugin.cancel(_notifId);
+      return const LocalReminderSyncResult(LocalReminderSyncStatus.cancelled);
+    }
+
+    final ready = await _ensureReady(requestPermission: requestPermission);
     if (!ready) {
       return const LocalReminderSyncResult(
         LocalReminderSyncStatus.permissionDenied,
       );
-    }
-
-    if (!enabled) {
-      await _plugin.cancel(_notifId);
-      await _cancelOwnerReminderRepeats();
-      return const LocalReminderSyncResult(LocalReminderSyncStatus.cancelled);
     }
 
     final parsed = parseReminderTime(timeHhMm);
@@ -79,9 +87,6 @@ Future<LocalReminderSyncResult> syncLocalDailyReminder({
       matchDateTimeComponents: DateTimeComponents.time,
     );
 
-    // Repeat range cleared in full on every sync (idempotent replan), so a
-    // logged pill or a disabled repeat drops any pending occurrence.
-    await _cancelOwnerReminderRepeats();
     if (repeatEnabled) {
       final repeats = planOwnerReminderRepeat(
         now: DateTime.now(),
@@ -125,7 +130,7 @@ Future<void> _cancelOwnerReminderRepeats() async {
   }
 }
 
-Future<bool> _ensureReady({bool requestPermission = true}) async {
+Future<void> _initialize() async {
   if (!_initialized) {
     tzdata.initializeTimeZones();
     try {
@@ -147,7 +152,23 @@ Future<bool> _ensureReady({bool requestPermission = true}) async {
     );
     _initialized = true;
   }
-  if (!requestPermission) return true;
+}
+
+/// Whether notifications can be shown. With [requestPermission] it may ask
+/// (needs an Activity: explicit user actions only). Without, it only checks:
+/// the background worker runs headless, where asking would crash.
+Future<bool> _ensureReady({required bool requestPermission}) async {
+  await _initialize();
+  if (!requestPermission) {
+    final android = _plugin.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
+    try {
+      // Only an explicit "off" counts as denied; unknown stays allowed.
+      return await android?.areNotificationsEnabled() != false;
+    } catch (_) {
+      return true;
+    }
+  }
 
   final android = _plugin.resolvePlatformSpecificImplementation<
       AndroidFlutterLocalNotificationsPlugin>();
@@ -206,14 +227,14 @@ tz.TZDateTime _nextTz(int hour, int minute) {
 }
 
 Future<LocalReminderSyncStatus> syncPartnerAlerts(
-  List<PlannedAlert> alerts,
-) async {
+  List<PlannedAlert> alerts, {
+  bool requestPermission = false,
+}) async {
   if (!supportsLocalReminders) return LocalReminderSyncStatus.unsupported;
   try {
-    // Clearing alerts must not prompt for notification permission.
-    if (!await _ensureReady(requestPermission: alerts.isNotEmpty)) {
-      return LocalReminderSyncStatus.permissionDenied;
-    }
+    await _initialize();
+    // Cancelling needs neither permission nor an Activity (the background
+    // worker has none), so it always runs first, permission or not.
     for (final base in [partnerPmsIdBase, partnerPillIdBase]) {
       for (var i = 0; i < partnerAlertIdCount; i++) {
         await _plugin.cancel(base + i);
@@ -224,7 +245,14 @@ Future<LocalReminderSyncStatus> syncPartnerAlerts(
     for (var i = 0; i < partnerPillRepeatIdCount; i++) {
       await _plugin.cancel(partnerPillRepeatIdBase + i);
     }
-    if (alerts.isEmpty) return LocalReminderSyncStatus.cancelled;
+    if (alerts.isEmpty) {
+      // Nothing of a partner session may outlive it, the quiet note included.
+      await _plugin.cancel(_partnerPillTakenNotifId);
+      return LocalReminderSyncStatus.cancelled;
+    }
+    if (!await _ensureReady(requestPermission: requestPermission)) {
+      return LocalReminderSyncStatus.permissionDenied;
+    }
     final exact = await _canUseExactAlarms();
     // Same high-importance, sound-on channel as the other partner alerts
     // makes the pill repeat alarm-like. Exact alarms fire on time but need
@@ -240,6 +268,8 @@ Future<LocalReminderSyncStatus> syncPartnerAlerts(
         channelDescription: 'PMS heads-up and pill not logged',
         importance: Importance.high,
         priority: Priority.high,
+        // Private: the lock screen shows that an alert came, not its text.
+        visibility: NotificationVisibility.private,
       ),
       iOS: DarwinNotificationDetails(),
     );
@@ -262,6 +292,63 @@ Future<LocalReminderSyncStatus> syncPartnerAlerts(
     return LocalReminderSyncStatus.unsupported;
   } catch (_) {
     return LocalReminderSyncStatus.failed;
+  }
+}
+
+/// Whether today's pill-not-logged alert or one of its repeats is in the
+/// tray: ids [partnerPillIdBase] and the first day's repeat block.
+Future<bool> hasActivePartnerPillAlert() async {
+  if (!supportsLocalReminders) return false;
+  try {
+    await _initialize();
+    final android = _plugin.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
+    if (android == null) return false;
+    for (final active in await android.getActiveNotifications()) {
+      final id = active.id;
+      if (id == null) continue;
+      if (id == partnerPillIdBase ||
+          (id >= partnerPillRepeatIdBase &&
+              id < partnerPillRepeatIdBase + maxPillRepeatsPerDay)) {
+        return true;
+      }
+    }
+    return false;
+  } catch (_) {
+    return false;
+  }
+}
+
+/// One silent, low-importance note that expires on its own, replacing a
+/// pill-not-logged alert that was showing. Private on the lock screen.
+Future<bool> showPartnerPillTakenClosure({
+  required String title,
+  required String body,
+}) async {
+  if (!supportsLocalReminders) return false;
+  try {
+    await _ensureReady(requestPermission: false);
+    const details = NotificationDetails(
+      android: AndroidNotificationDetails(
+        _partnerStatusChannelId,
+        'Partner status',
+        channelDescription: 'Quiet note once the pill is logged',
+        importance: Importance.low,
+        priority: Priority.low,
+        playSound: false,
+        enableVibration: false,
+        onlyAlertOnce: true,
+        visibility: NotificationVisibility.private,
+        timeoutAfter: _partnerPillTakenTimeoutMs,
+      ),
+      iOS: DarwinNotificationDetails(presentSound: false),
+    );
+    await _plugin.show(_partnerPillTakenNotifId, title, body, details);
+    return true;
+  } on MissingPluginException {
+    return false;
+  } catch (_) {
+    return false;
   }
 }
 

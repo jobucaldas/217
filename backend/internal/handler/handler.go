@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -19,6 +20,7 @@ import (
 	"217/backend/internal/auth"
 	"217/backend/internal/model"
 	"217/backend/internal/store"
+	"217/backend/internal/synchub"
 )
 
 type contextKey string
@@ -42,6 +44,8 @@ const (
 	// Invite codes are 8 chars from a 32-letter alphabet; cap guesses per
 	// account and per address so codes can't be brute-forced.
 	inviteAcceptLimit = 10
+	// syncMissLimit caps sync status polls that need the database.
+	syncMissLimit = 30
 )
 
 type Handler struct {
@@ -56,6 +60,9 @@ type Handler struct {
 	inviteLimiter   *ipRateLimiter
 	privacyContact  string
 	reauthWindow    time.Duration
+	reminderNotify  func()
+	syncHub         *synchub.Hub
+	syncMissLimiter *ipRateLimiter
 }
 
 func New(s store.Store) *Handler {
@@ -65,6 +72,7 @@ func New(s store.Store) *Handler {
 		sessionDuration: maxSessionDuration,
 		authLimiter:     newIPRateLimiter(defaultAuthLimit, time.Minute),
 		inviteLimiter:   newIPRateLimiter(inviteAcceptLimit, time.Minute),
+		syncMissLimiter: newIPRateLimiter(syncMissLimit, time.Minute),
 		reauthWindow:    defaultReauthWindow,
 	}
 }
@@ -93,6 +101,15 @@ func (h *Handler) SetRateLimit(limit int) {
 	h.authLimiter = newIPRateLimiter(limit, time.Minute)
 }
 func (h *Handler) SetOAuthProvider(p auth.OAuthProvider) { h.oauthProvider = p }
+
+// SetReminderNotifier wires the schedule refresh hook before serving requests.
+func (h *Handler) SetReminderNotifier(fn func()) { h.reminderNotify = fn }
+
+func (h *Handler) notifyReminders() {
+	if h.reminderNotify != nil {
+		h.reminderNotify()
+	}
+}
 
 // SetPrivacyContact sets who answers privacy requests for this server
 // (the controller or its data protection officer): an email or a URL.
@@ -656,8 +673,13 @@ func (h *Handler) GetEntry(w http.ResponseWriter, r *http.Request) {
 	}
 
 	entry, err := h.store.GetEntry(subjectID, date)
-	if err != nil {
+	if errors.Is(err, store.ErrEntryNotFound) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "entry not found"})
+		return
+	}
+	if err != nil {
+		log.Printf("get entry error: %v", err)
+		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, http.StatusOK, entry)
@@ -821,6 +843,7 @@ func (h *Handler) UpsertReminderPreference(w http.ResponseWriter, r *http.Reques
 		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
 		return
 	}
+	h.notifyReminders()
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -869,6 +892,7 @@ func (h *Handler) SavePushSubscription(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "could not save push subscription"})
 		return
 	}
+	h.notifyReminders()
 	writeJSON(w, http.StatusCreated, map[string]string{"status": "subscribed"})
 }
 
@@ -884,6 +908,7 @@ func (h *Handler) DeletePushSubscription(w http.ResponseWriter, r *http.Request)
 		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
 		return
 	}
+	h.notifyReminders()
 	w.WriteHeader(http.StatusNoContent)
 }
 

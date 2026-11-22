@@ -206,7 +206,8 @@ jobs:
   linux:
     name: Linux AppImage
     needs: version
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-26.04's clang rejects flutter_secure_storage_linux's json.hpp (-Werror).
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: frontend

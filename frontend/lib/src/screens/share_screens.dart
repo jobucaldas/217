@@ -589,9 +589,68 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _compose.addListener(() => setState(() {}));
     _refresh = Timer.periodic(_refreshEvery, (_) {
-      if (_visible) _load();
+      if (_visible) _refreshIfChanged();
     });
-    _load();
+    unawaited(_load().then((loaded) {
+      if (loaded && mounted && _etag == null) {
+        unawaited(_seedSyncBaseline());
+      }
+    }));
+  }
+
+  /// What the last status answer said about the inbox, and its ETag.
+  String? _etag;
+  String? _inboxTag;
+  bool _checkingSync = false;
+
+  /// Records the current ETag/inbox tag right after the initial inbox read so
+  /// the first periodic tick gets a cheap 304 instead of re-reading the inbox.
+  Future<void> _seedSyncBaseline() async {
+    if (_checkingSync) return;
+    _checkingSync = true;
+    try {
+      final result = await widget.api.syncStatus();
+      if (!mounted) return;
+      final status = result.status;
+      if (status != null) {
+        _etag = status.etag;
+        _inboxTag = status.tags.inbox;
+      }
+    } catch (_) {
+      // Offline or unsupported: the next tick handles it.
+    } finally {
+      _checkingSync = false;
+    }
+  }
+
+  /// Asks the server what changed (no database work when nothing did) and
+  /// reads the inbox only when it did, or when the server cannot tell
+  /// (older server). Keeps an open conversation from waking the database
+  /// every few seconds.
+  Future<void> _refreshIfChanged() async {
+    if (_checkingSync) return;
+    _checkingSync = true;
+    try {
+      final result = await widget.api.syncStatus(etag: _etag);
+      if (!mounted || result.notModified) return;
+      final status = result.status;
+      if (status == null) {
+        await _load(); // unsupported: read it like before
+        return;
+      }
+      if (status.tags.inbox == _inboxTag) {
+        _etag = status.etag;
+      } else if (_visible && await _load()) {
+        // Moves on only once the new messages were read, so a failed read
+        // is tried again.
+        _etag = status.etag;
+        _inboxTag = status.tags.inbox;
+      }
+    } catch (_) {
+      // Offline or refused: the next tick tries again.
+    } finally {
+      _checkingSync = false;
+    }
   }
 
   /// In the foreground with this conversation on top. Only then are
@@ -606,7 +665,13 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed && mounted) _load();
+    if (state == AppLifecycleState.resumed && mounted) {
+      if (_etag != null) {
+        unawaited(_refreshIfChanged());
+      } else {
+        _load();
+      }
+    }
   }
 
   @override
@@ -618,7 +683,8 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
     super.dispose();
   }
 
-  Future<void> _load() async {
+  /// Reads the inbox; true when this call's answer is what is on screen.
+  Future<bool> _load() async {
     final generation = ++_loadGeneration;
     setState(() {
       _loading = _messages.isEmpty && _error == null && _loading;
@@ -626,7 +692,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
     try {
       var messages = await widget.api.listInbox();
       // Closed, covered or backgrounded meanwhile: nothing was seen.
-      if (!_visible || generation != _loadGeneration) return;
+      if (!_visible || generation != _loadGeneration) return false;
       final unread = messages.where((m) => m.isUnread).toList();
       final marked = <String>{};
       if (unread.isNotEmpty) {
@@ -651,7 +717,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
                 : m,
         ];
       }
-      if (!mounted || generation != _loadGeneration) return;
+      if (!mounted || generation != _loadGeneration) return false;
       final ids = {for (final m in messages) m.id};
       final merged = [
         ...messages,
@@ -665,13 +731,15 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
         _error = null;
       });
       widget.onSynced?.call(messages);
+      return true;
     } catch (err) {
-      if (!mounted || generation != _loadGeneration) return;
+      if (!mounted || generation != _loadGeneration) return false;
       setState(() {
         _loading = false;
         // A failed background refresh keeps the conversation on screen.
         if (_messages.isEmpty) _error = friendlyError(widget.strings, err);
       });
+      return false;
     }
   }
 

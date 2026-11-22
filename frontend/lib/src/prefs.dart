@@ -1,7 +1,10 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import 'i18n.dart';
+import 'models.dart';
 import 'theme/palette.dart';
 
 /// Persists appearance across auth and restarts.
@@ -23,6 +26,12 @@ class AppearancePrefs {
   static const messagesForegroundAtKey = 'messages_foreground_at';
   static const stageSuggestionDismissedPrefix = 'stage_suggestion_dismissed_';
   static const stageSuggestionSeenPrefix = 'stage_suggestion_seen_';
+  static const syncStateKey = 'sync_state';
+  static const appSyncStateKey = 'sync_state_app';
+  static const partnerOwnerNamePrefix = 'partner_owner_name_';
+  static const partnerAlertsEnabledPrefix = 'partner_alerts_enabled_';
+  static const partnerAlertsActiveUserKey = 'partner_alerts_active_user';
+  static const partnerLastPlanDatePrefix = 'partner_last_plan_date_';
 
   /// Stage suggestion [userId] dismissed on this device (null: none).
   Future<String?> stageSuggestionDismissed(String userId) =>
@@ -129,6 +138,105 @@ class AppearancePrefs {
       ? _storage.delete(key: messagesForegroundAtKey)
       : _storage.write(
           key: messagesForegroundAtKey, value: at.toUtc().toIso8601String());
+
+  Future<({String server, SyncStatus status})?> _readSyncState(
+      String key) async {
+    try {
+      final raw = await _storage.read(key: key);
+      if (raw == null || raw.isEmpty) return null;
+      final json = jsonDecode(raw) as Map<String, dynamic>;
+      return (
+        server: (json['server'] as String?) ?? '',
+        status: SyncStatus.fromJson(json),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _writeSyncState(
+          String key, String server, SyncStatus status) =>
+      _storage.write(
+        key: key,
+        value: jsonEncode({'server': server, ...status.toJson()}),
+      );
+
+  /// The last `/api/sync/status` answer handled by the background worker.
+  /// Kept separate from [appSyncState] so a background check advancing its
+  /// ETag never causes the live app to skip refreshing on resume.
+  Future<({String server, SyncStatus status})?> syncState() =>
+      _readSyncState(syncStateKey);
+
+  Future<void> saveSyncState(String server, SyncStatus status) =>
+      _writeSyncState(syncStateKey, server, status);
+
+  /// The last `/api/sync/status` answer handled by the live foreground app.
+  Future<({String server, SyncStatus status})?> appSyncState() =>
+      _readSyncState(appSyncStateKey);
+
+  Future<void> saveAppSyncState(String server, SyncStatus status) =>
+      _writeSyncState(appSyncStateKey, server, status);
+
+  /// Sign-out, account or server change: the next check starts fresh.
+  Future<void> clearSyncState() async {
+    await _storage.delete(key: syncStateKey);
+    await _storage.delete(key: appSyncStateKey);
+    await _storage.delete(key: partnerAlertsActiveUserKey);
+  }
+
+  /// The owner's name as the partner's last sync saw it, so replanned
+  /// alerts in the background name her like the foreground ones.
+  Future<String> partnerOwnerName(String userId) async =>
+      await _storage.read(key: partnerOwnerNamePrefix + userId) ?? '';
+
+  Future<void> savePartnerOwnerName(String userId, String name) =>
+      _storage.write(key: partnerOwnerNamePrefix + userId, value: name);
+
+  /// Whether [userId] has a partner alert (PMS or pill) switched on, as of
+  /// the last sync: tells the worker to run before any request is made.
+  Future<bool> partnerAlertsEnabled(String userId) async =>
+      await _storage.read(key: partnerAlertsEnabledPrefix + userId) == '1';
+
+  Future<void> savePartnerAlertsEnabled(String userId, bool enabled) async {
+    await _storage.write(
+        key: partnerAlertsEnabledPrefix + userId, value: enabled ? '1' : '0');
+    if (enabled) {
+      await _storage.write(key: partnerAlertsActiveUserKey, value: userId);
+    } else if (await _storage.read(key: partnerAlertsActiveUserKey) == userId) {
+      await _storage.delete(key: partnerAlertsActiveUserKey);
+    }
+  }
+
+  /// Whether the background worker should poll for partner alerts. When
+  /// [userId] is not yet known (before the first sync baseline is saved),
+  /// falls back to the last partner account that enabled alerts on this device.
+  Future<bool> hasPartnerAlertsForWorker({String? userId}) async {
+    if (userId != null && userId.isNotEmpty) {
+      return partnerAlertsEnabled(userId);
+    }
+    final activeUser = await _storage.read(key: partnerAlertsActiveUserKey);
+    if (activeUser == null || activeUser.isEmpty) return false;
+    return partnerAlertsEnabled(activeUser);
+  }
+
+  /// Local calendar date (YYYY-MM-DD) for which [userId]'s partner alerts
+  /// were last planned, so the background worker refreshes once per new day
+  /// even when the server returns 304.
+  Future<String?> partnerLastPlanDate(String userId) =>
+      _storage.read(key: partnerLastPlanDatePrefix + userId);
+
+  Future<void> savePartnerLastPlanDate(String userId, String date) =>
+      _storage.write(key: partnerLastPlanDatePrefix + userId, value: date);
+
+  /// Drops what was kept for [userId]'s calendar (sign-out, deletion).
+  Future<void> clearPartnerCache(String userId) async {
+    await _storage.delete(key: partnerOwnerNamePrefix + userId);
+    await _storage.delete(key: partnerAlertsEnabledPrefix + userId);
+    await _storage.delete(key: partnerLastPlanDatePrefix + userId);
+    if (await _storage.read(key: partnerAlertsActiveUserKey) == userId) {
+      await _storage.delete(key: partnerAlertsActiveUserKey);
+    }
+  }
 
   static ThemeMode _parseThemeMode(String? raw) {
     switch (raw) {

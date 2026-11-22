@@ -12,13 +12,23 @@ Future<LocalReminderSyncResult> syncLocalDailyReminder({
   bool repeatEnabled = false,
   int repeatMinutes = 15,
   bool todayLogged = false,
+  bool requestPermission = false,
 }) async =>
     const LocalReminderSyncResult(LocalReminderSyncStatus.unsupported);
 
 Future<LocalReminderSyncStatus> syncPartnerAlerts(
-  List<PlannedAlert> alerts,
-) async =>
+  List<PlannedAlert> alerts, {
+  bool requestPermission = false,
+}) async =>
     LocalReminderSyncStatus.unsupported;
+
+Future<bool> hasActivePartnerPillAlert() async => false;
+
+Future<bool> showPartnerPillTakenClosure({
+  required String title,
+  required String body,
+}) async =>
+    false;
 
 Future<bool> showMessageNotification({
   required String title,

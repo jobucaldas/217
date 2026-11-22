@@ -290,6 +290,8 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen> {
                 repeatEnabled: saved.repeatEnabled,
                 repeatMinutes: saved.repeatMinutes,
                 todayLogged: todayLogged,
+                // The user just saved this: the permission may be asked.
+                requestPermission: true,
               )
             : await queue.scheduleIfCurrent(
                 revision: reminderRevision!,
@@ -300,6 +302,7 @@ class _ReminderSettingsScreenState extends State<ReminderSettingsScreen> {
                 repeatEnabled: saved.repeatEnabled,
                 repeatMinutes: saved.repeatMinutes,
                 todayLogged: todayLogged,
+                requestPermission: true,
               );
       }
       if (queue != null && !queue.isCurrent(reminderRevision!)) return;

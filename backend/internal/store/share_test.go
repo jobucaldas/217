@@ -138,6 +138,25 @@ func TestListAccountSharesIncludesAllStatuses(t *testing.T) {
 		if !statuses[model.ShareRevoked] || !statuses[model.ShareOpen] {
 			t.Fatalf("expected revoked and open shares, got %+v", shares)
 		}
+		old := time.Now().Add(-model.RetentionAfterRevoke - time.Hour)
+		switch s := s.(type) {
+		case *PGStore:
+			if _, err := s.db.Exec(`UPDATE calendar_shares SET updated_at = $1 WHERE owner_id = $2 AND status = 'revoked'`, old, owner.ID); err != nil {
+				t.Fatal(err)
+			}
+		case *MemoryStore:
+			for _, share := range s.shares {
+				if share.Status == model.ShareRevoked {
+					share.UpdatedAt = old
+				}
+			}
+		}
+		if state, err := s.GetShareState(partner.ID); err != nil || state.Status != model.ShareNone || state.OwnerEmail != "" {
+			t.Fatalf("expired revocation visible before purge: %+v, %v", state, err)
+		}
+		if rows, err := s.ListAccountShares(owner.ID); err != nil || len(rows) != 1 || rows[0].Status != model.ShareOpen {
+			t.Fatalf("expired share included in account export: %+v, %v", rows, err)
+		}
 	})
 }
 
@@ -215,9 +234,19 @@ func TestPurgeExpiredKeepsLiveData(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if _, err := s.RecordConsent(u.ID, model.ConsentVersion); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.UpsertReminderPreference(u.ID, model.ReminderPreference{Enabled: true, Time: "20:00", Timezone: "UTC"}); err != nil {
+				t.Fatal(err)
+			}
 			base := time.Now().UTC()
-			_, _ = s.ClaimReminderDelivery(oldSub.ID, base.AddDate(0, 0, -31), base)
-			_, _ = s.ClaimReminderDelivery(recentSub.ID, base.AddDate(0, 0, -2), base)
+			for offset, sub := range map[int]*model.PushSubscription{-31: oldSub, -2: recentSub} {
+				target := model.ReminderTarget{SubscriptionID: sub.ID, UserID: u.ID, Endpoint: sub.Endpoint, Time: "20:00", Timezone: "UTC"}
+				if claimed, _, err := s.ClaimReminderDelivery(target, base.AddDate(0, 0, offset), base); err != nil || !claimed {
+					t.Fatalf("seed delivery: claimed=%v, err=%v", claimed, err)
+				}
+			}
 			if err := s.PurgeExpired(time.Now().Add(2 * time.Second)); err != nil {
 				t.Fatal(err)
 			}
@@ -334,6 +363,16 @@ func TestReminderTargetsRequireCurrentConsent(t *testing.T) {
 		if len(targets) != 1 || targets[0].UserID != yes.ID {
 			t.Fatalf("targets=%+v want consented subscriber only", targets)
 		}
+		target, now := targets[0], time.Now().UTC().Truncate(time.Second)
+		if claimed, _, err := s.ClaimReminderDelivery(target, now, now); err != nil || !claimed {
+			t.Fatalf("initial claim = %v, %v", claimed, err)
+		}
+		if retryAt, err := s.FinishReminderDelivery(target.SubscriptionID, now, false, now); err != nil || !retryAt.Equal(now.Add(time.Minute)) {
+			t.Fatalf("finished retry at %v: %v", retryAt, err)
+		}
+		if claimed, retryAt, err := s.ClaimReminderDelivery(target, now, now); err != nil || claimed || !retryAt.Equal(now.Add(time.Minute)) {
+			t.Fatalf("denied claim = %v, retry at %v: %v", claimed, retryAt, err)
+		}
 	})
 }
 
@@ -435,6 +474,55 @@ func TestSharingRequiresOwnerConsent(t *testing.T) {
 		}
 		if _, err := s.SendMessage(partner.ID, "hi"); err == nil || err.Error() != "calendar owner consent required" {
 			t.Fatalf("note without owner consent: err=%v", err)
+		}
+	})
+}
+
+func TestActivePeerAndSessionPrincipal(t *testing.T) {
+	forEachStore(t, func(t *testing.T, name string, s Store) {
+		owner, _ := s.LinkWorkOSIdentity("peer-owner-"+name, "peer-owner-"+name+"@example.com", "O", true)
+		partner, _ := s.LinkWorkOSIdentity("peer-partner-"+name, "peer-partner-"+name+"@example.com", "P", true)
+		for _, u := range []*model.User{owner, partner} {
+			if _, err := s.RecordConsent(u.ID, model.ConsentVersion); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := s.SetRole(owner.ID, model.RoleOwner); err != nil {
+			t.Fatal(err)
+		}
+		share, err := s.EnableShare(owner.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if peer, err := s.ActivePeer(owner.ID); err != nil || peer != "" {
+			t.Fatalf("open share peer %q %v", peer, err)
+		}
+		if _, err := s.AcceptShare(partner.ID, share.InviteCode); err != nil {
+			t.Fatal(err)
+		}
+		if peer, err := s.ActivePeer(owner.ID); err != nil || peer != partner.ID {
+			t.Fatalf("owner peer %q %v", peer, err)
+		}
+		if peer, err := s.ActivePeer(partner.ID); err != nil || peer != owner.ID {
+			t.Fatalf("partner peer %q %v", peer, err)
+		}
+		if _, err := s.RevokeShare(owner.ID); err != nil {
+			t.Fatal(err)
+		}
+		if peer, err := s.ActivePeer(partner.ID); err != nil || peer != "" {
+			t.Fatalf("revoked peer %q %v", peer, err)
+		}
+
+		expires := time.Now().Add(time.Hour).Truncate(time.Second)
+		if err := s.CreateSession(owner.ID, "principal-"+name, expires); err != nil {
+			t.Fatal(err)
+		}
+		u, got, err := s.GetSessionPrincipal("principal-" + name)
+		if err != nil || u.ID != owner.ID || !got.Equal(expires) {
+			t.Fatalf("principal %v %v %v", u, got, err)
+		}
+		if _, _, err := s.GetSessionPrincipal("missing-" + name); err == nil {
+			t.Fatal("unknown session must fail")
 		}
 	})
 }

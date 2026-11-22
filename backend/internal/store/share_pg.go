@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"217/backend/internal/model"
 	"github.com/google/uuid"
@@ -116,8 +117,8 @@ func (s *PGStore) buildShareState(user *model.User) (*model.ShareState, error) {
 		err = s.db.QueryRow(
 			`SELECT id, owner_id, COALESCE(partner_id::text, ''), status, created_at, updated_at
 			 FROM calendar_shares
-			 WHERE partner_id = $1
-			 ORDER BY updated_at DESC LIMIT 1`, user.ID,
+			 WHERE partner_id = $1 AND status = 'revoked' AND updated_at > $2
+			 ORDER BY updated_at DESC LIMIT 1`, user.ID, time.Now().Add(-model.RetentionAfterRevoke),
 		).Scan(&share.ID, &share.OwnerID, &share.PartnerID, &share.Status, &share.CreatedAt, &share.UpdatedAt)
 		if err == sql.ErrNoRows {
 			// Partner who has not joined a calendar yet.
@@ -317,6 +318,21 @@ func (s *PGStore) CalendarSubjectID(userID string) (string, error) {
 	return ownerID, nil
 }
 
+func (s *PGStore) ActivePeer(userID string) (string, error) {
+	var peerID string
+	err := s.db.QueryRow(
+		`SELECT CASE WHEN owner_id = $1 THEN partner_id ELSE owner_id END FROM calendar_shares
+		 WHERE (owner_id = $1 OR partner_id = $1) AND status = 'active' AND partner_id IS NOT NULL LIMIT 1`, userID,
+	).Scan(&peerID)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("active peer: %w", err)
+	}
+	return peerID, nil
+}
+
 func (s *PGStore) SetRole(userID, role string) (*model.User, error) {
 	role = model.NormalizeRole(role)
 	if role == "" {
@@ -358,7 +374,9 @@ func (s *PGStore) SetRole(userID, role string) (*model.User, error) {
 }
 
 func (s *PGStore) ListAccountShares(userID string) ([]*model.CalendarShare, error) {
-	rows, err := s.db.Query(`SELECT id,owner_id,COALESCE(partner_id::text,''),status,created_at,updated_at FROM calendar_shares WHERE owner_id=$1 OR partner_id=$1 ORDER BY created_at`, userID)
+	rows, err := s.db.Query(`SELECT id,owner_id,COALESCE(partner_id::text,''),status,created_at,updated_at FROM calendar_shares
+		WHERE (owner_id=$1 OR partner_id=$1) AND (status <> 'revoked' OR updated_at > $2) ORDER BY created_at`,
+		userID, time.Now().Add(-model.RetentionAfterRevoke))
 	if err != nil {
 		return nil, err
 	}

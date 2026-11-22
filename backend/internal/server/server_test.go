@@ -6,7 +6,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/synctest"
+	"time"
 
+	"217/backend/internal/store"
 	webpush "github.com/SherClockHolmes/webpush-go"
 )
 
@@ -97,6 +100,44 @@ func TestHardeningMiddleware(t *testing.T) {
 	if readErr == nil {
 		t.Fatal("oversized body accepted")
 	}
+}
+
+type purgeRecorder struct {
+	store.Store
+	calls chan time.Time
+}
+
+func (s *purgeRecorder) PurgeExpired(now time.Time) error {
+	select {
+	case s.calls <- now:
+	default:
+	}
+	return nil
+}
+
+func TestPurgeExpiredRunsImmediatelyThenMonthlyAndStops(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s := &purgeRecorder{calls: make(chan time.Time, 2)}
+		stop, done := make(chan struct{}), make(chan struct{})
+		start := time.Now()
+		go func() {
+			defer close(done)
+			purgeExpired(s, retentionPurgeInterval, stop)
+		}()
+		synctest.Wait()
+		first := len(s.calls) == 1 && (<-s.calls).Equal(start)
+		const month = 30 * 24 * time.Hour
+		time.Sleep(month - time.Nanosecond)
+		synctest.Wait()
+		noExtra := len(s.calls) == 0
+		time.Sleep(time.Nanosecond)
+		synctest.Wait()
+		close(stop)
+		<-done
+		if !first || !noExtra || len(s.calls) != 1 || (<-s.calls).Sub(start) != month {
+			t.Fatal("expected exactly one startup purge and one at the monthly tick")
+		}
+	})
 }
 
 func TestDatabaseTLSVerified(t *testing.T) {
