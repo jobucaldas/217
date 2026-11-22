@@ -148,6 +148,10 @@ func (h *Handler) SetDelayTimings(step, max, reset time.Duration, queue int) {
 // cookie for browsers, JSON session_token for native clients that posted a
 // device public key (same shape as the WorkOS exchange).
 func (h *Handler) issueSession(w http.ResponseWriter, r *http.Request, user *model.User, devicePublicKey []byte) {
+	payload := h.sessionPayload(w, user)
+	if payload == nil {
+		return
+	}
 	var deviceKeyID string
 	var err error
 	if devicePublicKey != nil {
@@ -163,7 +167,6 @@ func (h *Handler) issueSession(w http.ResponseWriter, r *http.Request, user *mod
 		http.Error(w, `{"error":"cannot create session"}`, http.StatusInternalServerError)
 		return
 	}
-	payload := h.sessionPayload(user)
 	payload["session_token"] = token
 	if deviceKeyID != "" {
 		payload["device_key_id"] = deviceKeyID

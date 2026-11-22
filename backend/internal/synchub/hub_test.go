@@ -22,12 +22,14 @@ var (
 		"CreateDeviceSession", "SetDeviceChallenge", "ConsumeDeviceChallenge", "ListDeviceKeys",
 		"GetShareState", "CalendarSubjectID", "ActivePeer", "GetPartnerAlerts",
 		"ListMessages", "ListAccountShares", "ListAccountSubscriptions", "Close",
+		"GetPasswordCredential", "LookupPasswordHashByEmail", "HasEmailVerification", "ErrEmailTaken", "CreatePasswordUser",
 	}
 	hooked = []string{
 		"UpsertEntry", "DeleteEntry", "SetStage", "SetProfile", "SendMessage", "MarkMessageRead",
 		"UpsertPartnerAlerts", "UpsertReminderPreference",
 		"RecordConsent", "SetRole", "EnableShare", "RevokeShare", "AcceptShare", "DeleteUser",
 		"DeleteSession", "DeleteSessionAndDevice", "DeleteAllSessionsForUser", "CreateDeviceKey", "LinkWorkOSIdentity",
+		"SetPasswordCredential", "DeletePasswordCredential", "CreateEmailVerification", "ConsumeEmailVerification",
 	}
 )
 
@@ -79,6 +81,32 @@ func newFixture(t *testing.T) fixture {
 		t.Fatal(err)
 	}
 	return fixture{mem: mem, hub: hub, s: s, owner: owner, token: "owner-token"}
+}
+
+func TestPasswordWritesInvalidateSession(t *testing.T) {
+	f := newFixture(t)
+	writes := []struct {
+		name string
+		run  func() error
+	}{
+		{"set credential", func() error { return f.s.SetPasswordCredential(f.owner.ID, "hash") }},
+		{"create verification", func() error { return f.s.CreateEmailVerification(f.owner.ID, "123456", time.Now().Add(time.Hour)) }},
+		{"consume verification", func() error { _, err := f.s.ConsumeEmailVerification(f.owner.ID, "123456"); return err }},
+		{"delete credential", func() error { return f.s.DeletePasswordCredential(f.owner.ID) }},
+	}
+	for _, write := range writes {
+		t.Run(write.name, func(t *testing.T) {
+			if _, err := f.hub.Load(f.token); err != nil {
+				t.Fatal(err)
+			}
+			if err := write.run(); err != nil {
+				t.Fatal(err)
+			}
+			if _, hit, _ := f.hub.Cached(f.token); hit {
+				t.Fatal("password write left a cached session")
+			}
+		})
+	}
 }
 
 // flushingStore runs a Flush in the middle of a cache warm.
