@@ -29,6 +29,18 @@ func (h *Handler) sessionPayload(w http.ResponseWriter, user *model.User) map[st
 	} else {
 		user.HasPassword = has != ""
 	}
+	if h.oidc.Enabled() {
+		identities, err := h.store.OIDCIdentities(user.ID)
+		if err != nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "service unavailable"})
+			return nil
+		}
+		for _, identity := range identities {
+			if identity.Issuer == h.oidc.Issuer {
+				user.OIDCLinked = true
+			}
+		}
+	}
 	return map[string]interface{}{
 		"user":  user,
 		"share": h.withInviteURL(share),
@@ -101,6 +113,10 @@ func (h *Handler) ExportAccount(w http.ResponseWriter, r *http.Request) {
 	fail := func(what string, err error) {
 		log.Printf("export %s: %v", what, err)
 		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+	}
+	if out.OIDCIdentities, err = h.store.OIDCIdentities(userID); err != nil {
+		fail("oidc identities", err)
+		return
 	}
 	if out.Share, err = h.store.GetShareState(userID); err != nil {
 		fail("share", err)

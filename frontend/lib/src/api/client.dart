@@ -68,6 +68,9 @@ class ApiClient {
   /// the button.
   bool workos = true;
 
+  /// Configured generic OIDC provider name, or null when disabled.
+  String? oidcName;
+
   /// Account whose data is kept on the device; set once a session is known.
   String? _userId;
 
@@ -155,6 +158,7 @@ class ApiClient {
     passwordSignup = false;
     mailVerification = false;
     workos = true;
+    oidcName = null;
     try {
       final response = await _send(
         'GET',
@@ -174,6 +178,12 @@ class ApiClient {
           mailVerification = decoded['mail'] == true;
           // Absent key: an older server, which always offered WorkOS.
           workos = decoded['workos'] != false && decoded['authkit'] != false;
+          final oidc = decoded['oidc'];
+          final name = oidc is Map ? oidc['name'] : null;
+          // Desktop cannot receive the app-scheme callback: no OIDC there.
+          oidcName = !isDesktopPlatform && name is String && name.trim().isNotEmpty
+              ? name
+              : null;
           final contact = decoded['privacy_contact'];
           privacyContact = contact is String ? contact.trim() : '';
         }
@@ -1152,7 +1162,9 @@ class ApiClient {
       if (decoded is! Map || !decoded.containsKey('authkit')) {
         return ServerCheck.notA217Server;
       }
-      return decoded['authkit'] == true || decoded['password'] == true
+      return decoded['authkit'] == true ||
+              decoded['password'] == true ||
+              (decoded['oidc'] is Map && !isDesktopPlatform)
           ? ServerCheck.ok
           : ServerCheck.signInNotConfigured;
     } on FormatException {
@@ -1286,6 +1298,41 @@ class ApiClient {
       throw StateError('WorkOS callback state mismatch');
     }
 
+    return _exchangeSignIn(scope, base, '/api/auth/workos/exchange', {
+      'code': code,
+      'code_verifier': pkce.verifier,
+      'redirect_uri': config.redirectUri,
+    });
+  }
+
+  Future<User> signInWithOIDC() async {
+    invalidatePendingAuth();
+    final scope = _scopeEpoch;
+    final base = config.apiBaseUrl;
+    final pkce = _Pkce.generate();
+    final url = _uriFor(base, '/api/auth/oidc/native',
+        {'app_challenge': pkce.challenge});
+    final result = await FlutterWebAuth2.authenticate(
+      url: url.toString(),
+      callbackUrlScheme: 'com.caldasstudios.app217',
+      options: const FlutterWebAuth2Options(useWebview: false),
+    );
+    if (_scopeChanged(scope, base)) throw const StaleAuthScopeException();
+    final returned = Uri.parse(result);
+    final error = returned.queryParameters['error'];
+    if (error != null) throw OIDCSignInException(error);
+    final code = returned.queryParameters['code'];
+    if (code == null || code.isEmpty) {
+      throw const OIDCSignInException('oidc_failed');
+    }
+    return _exchangeSignIn(scope, base, '/api/auth/oidc/exchange', {
+      'code': code,
+      'code_verifier': pkce.verifier,
+    });
+  }
+
+  Future<User> _exchangeSignIn(
+      int scope, String base, String path, Map<String, String> body) async {
     // Android: a fresh Keystore key, so this sign-in lasts (see DeviceKey).
     int? keyGen;
     final devicePublicKey = await _serializeAuth(() async {
@@ -1300,11 +1347,9 @@ class ApiClient {
         });
     final response = await _send(
       'POST',
-      _uriFor(base, '/api/auth/workos/exchange'),
+      _uriFor(base, path),
       body: {
-        'code': code,
-        'code_verifier': pkce.verifier,
-        'redirect_uri': config.redirectUri,
+        ...body,
         if (devicePublicKey != null) 'device_public_key': devicePublicKey,
       },
       auth: false,
@@ -2170,6 +2215,26 @@ class ApiClient {
     }
   }
 
+  Future<String> beginOIDCLink(String platform) async {
+    final response = await _send('POST', _uri('/api/account/oidc/link'),
+        body: {'platform': platform});
+    if (response.statusCode != 200) throw ApiException('connect', response);
+    final url = (jsonDecode(response.body) as Map)['url'];
+    if (url is! String || url.isEmpty) throw StateError('missing link URL');
+    return url;
+  }
+
+  Future<void> confirmOIDCLink(String code) async {
+    final response = await _send('POST', _uri('/api/account/oidc/link/confirm'),
+        body: {'code': code});
+    if (response.statusCode != 204) throw ApiException('connect', response);
+  }
+
+  Future<void> removeOIDC() async {
+    final response = await _send('DELETE', _uri('/api/account/oidc'));
+    if (response.statusCode != 204) throw ApiException('disconnect', response);
+  }
+
   /// Removes the account's password credential (another sign-in method must
   /// remain; the server answers 409 otherwise).
   Future<void> removePassword() async {
@@ -2178,6 +2243,11 @@ class ApiClient {
       throw ApiException('remove password', response);
     }
   }
+}
+
+class OIDCSignInException implements Exception {
+  const OIDCSignInException(this.reason);
+  final String reason;
 }
 
 /// Result of [ApiClient.checkServer].

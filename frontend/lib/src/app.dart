@@ -612,6 +612,44 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
       _setConsent(session);
       _loading = false;
     });
+    if (kIsWeb && _webPage == null) {
+      final uri = Uri.base;
+      final params = Map<String, String>.from(uri.queryParameters);
+      final authError = params.remove('auth_error');
+      final linkError = params.remove('link_error');
+      final linked = params.remove('linked');
+      final linkCode = params.remove('link_code');
+      if (authError != null || linkError != null || linked != null || linkCode != null) {
+        replaceWebPath(params.isEmpty
+            ? uri.path
+            : uri.replace(queryParameters: params).toString());
+        var linkFailed = linkError != null;
+        if (linkCode != null) {
+          try {
+            if (_user == null) throw StateError('not signed in');
+            await _api.confirmOIDCLink(linkCode);
+          } catch (_) {
+            linkFailed = true;
+          }
+          if (!linkFailed) {
+            try {
+              await _refreshSession();
+            } catch (_) {}
+          }
+        }
+        final message = authError == 'account_exists'
+            ? _strings.oidcAccountExists
+            : authError != null ? _strings.oidcFailed
+            : linkFailed ? _strings.oidcLinkFailed
+            : _strings.oidcLinkSuccess;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            _messengerKey.currentState?.showSnackBar(
+                SnackBar(content: Text(message)));
+          }
+        });
+      }
+    }
     // Re-register only after the account is known.
     unawaited(_syncBackgroundWorker());
     // The web wait above already has the server's answer; only a session
@@ -1324,7 +1362,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _signIn() async {
+  Future<void> _signIn({bool oidc = false}) async {
     final epoch = ++_accountEpoch;
     _api.invalidatePendingAuth();
     _clearInitialCalendarCache();
@@ -1338,7 +1376,9 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
       if (!mounted || epoch != _accountEpoch) return;
       await _api.loadAuthConfig();
       if (!mounted || epoch != _accountEpoch) return;
-      final user = await beginWorkOSSignIn(_api);
+      final user = oidc
+          ? await beginOIDCSignIn(_api)
+          : await beginWorkOSSignIn(_api);
       if (!mounted || epoch != _accountEpoch) return;
       if (user != null) {
         final session = await _api.currentSession();
@@ -1369,7 +1409,9 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
       if (err is PlatformException && err.code == 'CANCELED') return;
       if (kDebugMode) debugPrint('sign-in failed: $err');
       _messengerKey.currentState?.showSnackBar(
-        SnackBar(content: Text(_strings.signInError)),
+        SnackBar(content: Text(err is OIDCSignInException
+            ? (err.reason == 'account_exists' ? _strings.oidcAccountExists : _strings.oidcFailed)
+            : _strings.signInError)),
       );
     }
   }
@@ -1505,6 +1547,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
         api: _api,
         onSignedIn: _onSignedIn,
         onSignInWorkOS: _signIn,
+        onSignInOIDC: () => _signIn(oidc: true),
         server: Uri.tryParse(_api.config.apiBaseUrl)?.authority,
         onOpenSettings: _openSettings,
         // Server choice happens before sign-in; web always uses its origin.
@@ -1632,7 +1675,13 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
         initialAction: privacyActionFrom(Uri.base.queryParameters['confirm']),
         onSignIn: (returnTo) async {
           await _api.loadAuthConfig();
-          await beginWorkOSSignIn(_api, returnTo: returnTo);
+          final oidcAccount =
+              (user?.oidcLinked ?? false) && _api.oidcName != null;
+          if (_api.workos && !oidcAccount) {
+            await beginWorkOSSignIn(_api, returnTo: returnTo);
+          } else {
+            await beginOIDCSignIn(_api, returnTo: returnTo);
+          }
         },
         onSessionChanged: (session) {
           _clearInitialCalendarCache();

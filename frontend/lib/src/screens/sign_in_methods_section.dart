@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../api/client.dart';
+import '../auth/sign_in.dart';
 import '../errors.dart';
 import '../i18n.dart';
 import '../models.dart';
@@ -106,6 +107,28 @@ class _SignInMethodsSectionState extends State<SignInMethodsSection> {
     }
   }
 
+  Future<void> _changeOIDC() async {
+    try {
+      if (widget.user.oidcLinked) {
+        await widget.api.removeOIDC();
+      } else if (!await connectOIDC(widget.api)) {
+        if (mounted) _showSnack(widget.strings.oidcLinkFailed);
+        return;
+      }
+      final session = await _refreshSession();
+      if (session != null) widget.onSessionChanged?.call(session);
+      if (mounted && !widget.user.oidcLinked) {
+        _showSnack(widget.strings.oidcLinkSuccess);
+      }
+    } on ApiException catch (err) {
+      if (mounted) {
+        _showSnack(err.statusCode == 409 ? widget.strings.oidcNeedsOther : _errorText(err));
+      }
+    } catch (err) {
+      if (mounted) _showSnack(friendlyError(widget.strings, err));
+    }
+  }
+
   /// The session after a password change, or null when unreachable.
   Future<SessionSnapshot?> _refreshSession() async {
     try {
@@ -119,7 +142,21 @@ class _SignInMethodsSectionState extends State<SignInMethodsSection> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return widget.group([
-      ListTile(
+      if (widget.api.oidcName != null)
+        ListTile(
+          key: const ValueKey('settings-oidc'),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+          title: Text(widget.api.oidcName!),
+          subtitle: Text(widget.user.oidcLinked
+              ? widget.strings.oidcConnected : widget.strings.oidcNotConnected),
+          trailing: TextButton(
+            key: const ValueKey('settings-oidc-action'),
+            onPressed: _changeOIDC,
+            child: Text(widget.user.oidcLinked
+                ? widget.strings.oidcDisconnect : widget.strings.oidcConnect),
+          ),
+        ),
+      if (widget.api.passwordAuth) ListTile(
         key: const ValueKey('settings-change-password'),
         contentPadding: const EdgeInsets.symmetric(horizontal: 4),
         title: Text(
@@ -131,7 +168,7 @@ class _SignInMethodsSectionState extends State<SignInMethodsSection> {
             Icon(Icons.password_outlined, color: scheme.onSurfaceVariant),
         onTap: _editPassword,
       ),
-      if (widget.user.hasPassword)
+      if (widget.api.passwordAuth && widget.user.hasPassword)
         ListTile(
           key: const ValueKey('settings-remove-password'),
           contentPadding: const EdgeInsets.symmetric(horizontal: 4),

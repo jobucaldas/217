@@ -71,6 +71,33 @@ class Strings {
   String get continueWorkOSOther => _t(
       'Continue with WorkOS', 'Continuar com a WorkOS', 'Continuar con WorkOS');
 
+  String continueOIDC(String name) => _t(
+        'Continue with $name', 'Continuar com $name', 'Continuar con $name');
+  String get oidcAccountExists => _t(
+        'This account already exists. Sign in with your existing method, then connect from Settings.',
+        'Esta conta já existe. Entre com seu método atual e conecte em Ajustes.',
+        'Esta cuenta ya existe. Inicia sesión con tu método actual y conecta en Ajustes.');
+  String get oidcFailed => _t(
+        'Sign-in failed. Please try again.',
+        'Não foi possível entrar. Tente novamente.',
+        'No se pudo iniciar sesión. Inténtalo de nuevo.');
+  String get oidcConnected => _t('Connected', 'Conectado', 'Conectado');
+  String get oidcNotConnected => _t('Not connected', 'Não conectado', 'No conectado');
+  String get oidcConnect => _t('Connect', 'Conectar', 'Conectar');
+  String get oidcDisconnect => _t('Disconnect', 'Desconectar', 'Desconectar');
+  String get oidcLinkFailed => _t(
+        'Could not connect the sign-in method.',
+        'Não foi possível conectar o método de entrada.',
+        'No se pudo conectar el método de inicio de sesión.');
+  String get oidcLinkSuccess => _t(
+        'Sign-in method connected.',
+        'Método de entrada conectado.',
+        'Método de inicio de sesión conectado.');
+  String get oidcNeedsOther => _t(
+        'Set up another sign-in method first.',
+        'Configure outro método de entrada primeiro.',
+        'Configura primero otro método de inicio de sesión.');
+
   // Email + password sign-in (first-party sign-in)
   String get signInEmail => _t(
         'Sign in with email',

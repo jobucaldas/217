@@ -63,7 +63,7 @@ services:
       TLS_KEY_FILE: /certs/backend/tls.key
       APP_BASE_URL: ${APP_BASE_URL:?set APP_BASE_URL in .env}
       APP_ALLOWED_ORIGINS: ${APP_ALLOWED_ORIGINS:-}
-      WORKOS_CLIENT_ID: ${WORKOS_CLIENT_ID:?set WORKOS_CLIENT_ID in .env}
+      WORKOS_CLIENT_ID: ${WORKOS_CLIENT_ID:-}
       WORKOS_API_KEY: ${WORKOS_API_KEY:-}
       AUTH_PASSWORD_ENABLED: "${AUTH_PASSWORD_ENABLED:-true}"
       AUTH_WORKOS_ENABLED: "${AUTH_WORKOS_ENABLED:-true}"
@@ -72,6 +72,10 @@ services:
       SMTP_USER: "${SMTP_USER:-}"
       SMTP_PASS: "${SMTP_PASS:-}"
       SMTP_FROM: "${SMTP_FROM:-}"
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      OIDC_NAME: ${OIDC_NAME:-Single sign-on}
       PRIVACY_CONTACT: ${PRIVACY_CONTACT:-}
     volumes:
       - certs:/certs:ro
@@ -116,6 +120,10 @@ APP_BASE_URL=https://217.example.com   # or http://localhost:8787 to try it
 # APP_ALLOWED_ORIGINS=https://217.example.com,https://217.example.org  # optional: serve sign-in on more hosts
 WORKOS_CLIENT_ID=client_...
 WORKOS_API_KEY=sk_...                  # optional: also deletes the WorkOS sign-in identity during account erasure
+# OIDC_ISSUER=https://identity.example.com  # optional OpenID Connect issuer
+# OIDC_CLIENT_ID=client-id
+# OIDC_CLIENT_SECRET=client-secret
+# OIDC_NAME=Single sign-on              # optional sign-in label
 # AUTH_PASSWORD_ENABLED=true           # first-party email+password sign-in (default on)
 # AUTH_WORKOS_ENABLED=true             # set false for password sign-in only (WorkOS routes answer 410)
 # SMTP_HOST=smtp.example.com           # optional: emails verification codes for password sign-up; without it accounts are accepted unverified
@@ -146,6 +154,10 @@ docker compose up -d
 ```
 
 If any command fails, stop and resolve the error before continuing. Keep `217.dump` until you have verified the restored data in the app, then delete it and any older plaintext backups. Do not rerun the dump command over your existing backup after removing the old volume.
+
+OpenID Connect is optional: set both `OIDC_ISSUER` and `OIDC_CLIENT_ID`, plus `OIDC_CLIENT_SECRET` for a confidential client; register `/api/auth/oidc/callback` on each allowed origin. The API exposes browser start and callback, native start and exchange, and account link/unlink routes under `/api/auth/oidc` and `/api/account/oidc`; an existing account with a password, or a provider email that is not verified, must sign in first and connect the provider from Settings › Sign-in methods. The web and Android apps show a "Continue with" button and that Settings row; the desktop apps do not offer OIDC.
+
+To reset a password, run `server -reset-password user@example.com` with the server's usual database and encryption settings, and enter the new password on standard input; restart the server to end cached sync sessions immediately.
 
 Optional server variables for the `backend` service: `PRIVACY_CONTACT` (email or URL for privacy requests, shown on the privacy notice and account deletion pages), `SESSION_TTL` (e.g. `720h`), `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` (web push).
 

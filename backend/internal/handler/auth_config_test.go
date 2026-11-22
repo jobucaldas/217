@@ -68,6 +68,38 @@ func TestAuthConfigReportsPublicClientID(t *testing.T) {
 	}
 }
 
+func TestOIDCConfigAndDisabledRoutes(t *testing.T) {
+	h := New(store.NewMemoryStore())
+	for _, fn := range []http.HandlerFunc{h.StartOIDC, h.StartOIDCNative, h.OIDCCallback, h.ExchangeOIDC, h.StartOIDCLink, h.BeginOIDCLink, h.DeleteOIDC} {
+		w := httptest.NewRecorder()
+		fn(w, httptest.NewRequest("GET", "/", nil))
+		if w.Code != http.StatusGone {
+			t.Fatalf("disabled route status %d", w.Code)
+		}
+	}
+	w := httptest.NewRecorder()
+	h.AuthConfig(w, httptest.NewRequest("GET", "/", nil))
+	if strings.Contains(w.Body.String(), `"oidc"`) {
+		t.Fatal("disabled OIDC in config")
+	}
+	h.SetOIDC(&auth.OIDC{Issuer: "http://127.0.0.1:1", ClientID: "client"})
+	w = httptest.NewRecorder()
+	h.AuthConfig(w, httptest.NewRequest("GET", "/", nil))
+	if !strings.Contains(w.Body.String(), `"name":"Single sign-on"`) {
+		t.Fatal("missing OIDC config")
+	}
+	w = httptest.NewRecorder()
+	h.StartOIDC(w, httptest.NewRequest("GET", "/", nil))
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("discovery failure: %d", w.Code)
+	}
+	w = httptest.NewRecorder()
+	h.AuthConfig(w, httptest.NewRequest("GET", "/", nil))
+	if w.Code != http.StatusOK {
+		t.Fatal("discovery failure broke config")
+	}
+}
+
 func TestPasswordLoginForbidden(t *testing.T) {
 	h := New(store.NewMemoryStore())
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"email":"a@b.c","password":"x"}`))

@@ -10,6 +10,60 @@ import (
 // Password credentials live in their own table (password_credentials); the
 // legacy users.password_hash column is left alone.
 
+// ResetPasswordCredential atomically replaces the credential and revokes access.
+func (s *PGStore) ResetPasswordCredential(userID, hash string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err = tx.Exec(`INSERT INTO password_credentials (user_id, hash)
+		VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE
+		SET hash = EXCLUDED.hash, updated_at = NOW()`, userID, hash); err != nil {
+		return fmt.Errorf("storing password credential: %w", err)
+	}
+	if _, err = tx.Exec(`DELETE FROM sessions WHERE user_id = $1`, userID); err != nil {
+		return fmt.Errorf("revoking sessions: %w", err)
+	}
+	if _, err = tx.Exec(`DELETE FROM device_keys WHERE user_id = $1`, userID); err != nil {
+		return fmt.Errorf("revoking devices: %w", err)
+	}
+	return tx.Commit()
+}
+
+func (s *PGStore) RemoveSignInMethod(userID, issuer string, password, passwordEnabled, workosEnabled bool) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var locked string
+	if err := tx.QueryRow(`SELECT id FROM users WHERE id=$1 FOR UPDATE`, userID).Scan(&locked); err != nil {
+		return err
+	}
+	var other bool
+	if password {
+		err = tx.QueryRow(`SELECT ($2 AND EXISTS (SELECT 1 FROM workos_identities WHERE user_id=$1)) OR ($3 <> '' AND EXISTS (SELECT 1 FROM oidc_identities WHERE user_id=$1 AND issuer=$3))`, userID, workosEnabled, issuer).Scan(&other)
+	} else {
+		err = tx.QueryRow(`SELECT ($2 AND EXISTS (SELECT 1 FROM workos_identities WHERE user_id=$1)) OR ($3 AND EXISTS (SELECT 1 FROM password_credentials WHERE user_id=$1))`, userID, workosEnabled, passwordEnabled).Scan(&other)
+	}
+	if err != nil {
+		return err
+	}
+	if !other {
+		return ErrOnlySignInMethod
+	}
+	if password {
+		_, err = tx.Exec(`DELETE FROM password_credentials WHERE user_id=$1`, userID)
+	} else {
+		_, err = tx.Exec(`DELETE FROM oidc_identities WHERE user_id=$1 AND issuer=$2`, userID, issuer)
+	}
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (s *PGStore) SetPasswordCredential(userID string, hash string) error {
 	_, err := s.db.Exec(`INSERT INTO password_credentials (user_id, hash)
 		VALUES ($1, $2)

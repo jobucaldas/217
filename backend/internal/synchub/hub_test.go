@@ -13,7 +13,7 @@ import (
 // synced state) pass through, the rest are overridden in wrap.go.
 var (
 	readOnly = []string{
-		"CreateUser", "GetUserByEmail", "GetUserByID", "WorkOSSubject", "PurgeExpired",
+		"CreateUser", "GetUserByEmail", "GetUserByID", "WorkOSSubject", "OIDCIdentities", "PurgeExpired",
 		"GetEntry", "ListEntries", "ListAllEntries", "GetStats", "ListPeriodDays",
 		"GetReminderPreference", "SavePushSubscription", "DeletePushSubscription", "CountPushSubscriptions",
 		"ListReminderTargets", "ClaimReminderDelivery", "FinishReminderDelivery",
@@ -30,6 +30,7 @@ var (
 		"RecordConsent", "SetRole", "EnableShare", "RevokeShare", "AcceptShare", "DeleteUser",
 		"DeleteSession", "DeleteSessionAndDevice", "DeleteAllSessionsForUser", "CreateDeviceKey", "LinkWorkOSIdentity",
 		"SetPasswordCredential", "DeletePasswordCredential", "CreateEmailVerification", "RefreshEmailVerification", "ConsumeEmailVerification",
+		"LinkOIDCIdentity", "AttachOIDCIdentity", "DeleteOIDCIdentity", "RemoveSignInMethod",
 	}
 )
 
