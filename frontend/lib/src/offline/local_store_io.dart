@@ -8,6 +8,7 @@ import 'package:sqflite_sqlcipher/sqflite.dart';
 
 import '../models.dart';
 import 'local_store.dart';
+import '../secure_storage.dart';
 
 LocalStore? createLocalStore() =>
     Platform.isAndroid ? SqliteLocalStore() : null;
@@ -16,7 +17,7 @@ LocalStore? createLocalStore() =>
 /// only lives in the Keystore-backed secure storage.
 class SqliteLocalStore implements LocalStore {
   SqliteLocalStore({FlutterSecureStorage? storage})
-      : _storage = storage ?? const FlutterSecureStorage();
+      : _storage = storage ?? appSecureStorage;
 
   final FlutterSecureStorage _storage;
   Future<Database>? _db;
