@@ -1152,7 +1152,7 @@ class ApiClient {
       if (decoded is! Map || !decoded.containsKey('authkit')) {
         return ServerCheck.notA217Server;
       }
-      return decoded['authkit'] == true
+      return decoded['authkit'] == true || decoded['password'] == true
           ? ServerCheck.ok
           : ServerCheck.signInNotConfigured;
     } on FormatException {

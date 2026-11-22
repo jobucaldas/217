@@ -263,6 +263,7 @@ func TestPasswordRemoveCredential(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.SetPasswordEnabled(false)
+	h.SetOAuthProvider(&fakeOAuthProvider{})
 	req = authedRequest(http.MethodDelete, "/api/account/password", cookie, nil)
 	w = httptest.NewRecorder()
 	h.AuthMiddleware(h.RemovePasswordCredential)(w, req)

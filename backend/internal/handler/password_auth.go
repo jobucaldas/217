@@ -204,7 +204,7 @@ func (h *Handler) setCredentialPassword(userID, password string) error {
 // for good. The WorkOS identity counts as that other method only while WorkOS
 // sign-in is actually enabled (AUTH_WORKOS_ENABLED=false answers 410 there).
 func (h *Handler) RemovePasswordCredential(w http.ResponseWriter, r *http.Request) {
-	if h.workosDisabled || !h.workosLinked(r) {
+	if h.workosDisabled || !h.authkitEnabled() || !h.workosLinked(r) {
 		writeJSON(w, http.StatusConflict, map[string]string{
 			"error": "set up another sign-in method first",
 		})

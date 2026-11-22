@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -12,6 +13,7 @@ import 'package:a217/src/config.dart';
 import 'package:a217/src/i18n.dart';
 import 'package:a217/src/models.dart';
 import 'package:a217/src/screens/auth_screen.dart';
+import 'package:a217/src/screens/privacy_page.dart';
 import 'package:a217/src/screens/settings_screen.dart';
 import 'package:a217/src/screens/sign_in_methods_section.dart';
 import 'package:a217/src/theme/app_theme.dart';
@@ -34,9 +36,12 @@ class _Server {
     this.workos = false,
     this.omitWorkosKey = false,
     this.fail = false,
+    this.signupStatus = 201,
     this.loginStatus = 200,
     this.loginError = '',
     this.retryAfter,
+    this.signupGate,
+    this.verifyGate,
   });
 
   /// When set, /api/auth/config throws (unreachable server).
@@ -49,9 +54,12 @@ class _Server {
   final bool password;
   final bool signup;
   final bool workos;
-  final int loginStatus;
-  final String loginError;
+  final int signupStatus;
+  int loginStatus;
+  String loginError;
   final int? retryAfter;
+  final Future<void>? signupGate;
+  final Future<void>? verifyGate;
   final calls = <String>[];
 
   ApiClient client() => ApiClient(
@@ -77,7 +85,12 @@ class _Server {
                 200,
               );
             case '/api/auth/password/signup':
-              return http.Response('', 201);
+              await signupGate;
+              return http.Response(
+                  jsonEncode({'error': 'email already registered'}), signupStatus);
+            case '/api/auth/password/verify':
+              await verifyGate;
+              return http.Response('{}', 200);
             case '/api/auth/password/login':
               if (loginStatus != 200) {
                 return http.Response(
@@ -145,6 +158,40 @@ Future<void> _pump(WidgetTester tester, Widget page) async {
 }
 
 void main() {
+  test('server check accepts password or AuthKit', () async {
+    expect(await _Server().client().checkServer(), ServerCheck.ok);
+    expect(await _Server(password: false, workos: true).client().checkServer(),
+        ServerCheck.ok);
+    expect(await _Server(password: false).client().checkServer(),
+        ServerCheck.signInNotConfigured);
+  });
+
+  testWidgets('privacy reauth uses password when both methods are enabled',
+      (tester) async {
+    final api = _Server(workos: true).client();
+    await api.loadAuthConfig();
+    await _pump(
+      tester,
+      PrivacyPage(
+        api: api,
+        strings: const Strings(AppLanguage.en),
+        web: PrivacyWebSession(
+          user: const User(id: 'u1', email: 'user@example.com', name: 'User',
+              role: 'owner', hasPassword: true),
+          consentRequired: false,
+          onSignIn: (_) async => fail('should use password re-entry'),
+          onSessionChanged: (_) {},
+          onDeleted: () {},
+        ),
+      ),
+    );
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Delete account'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('privacy-confirm')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('reauth-password')), findsOneWidget);
+  });
+
   testWidgets('password-only server: email form, no WorkOS button',
       (tester) async {
     final server = _Server();
@@ -291,7 +338,7 @@ void main() {
   });
 
   testWidgets('a 409 on sign-up says the email is taken', (tester) async {
-    final server = _Server(loginStatus: 409, loginError: 'email already registered');
+    final server = _Server(signupStatus: 409);
     final api = server.client();
     await api.loadAuthConfig();
     await _pump(
@@ -313,6 +360,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('This email already has an account. Sign in instead.'),
         findsOneWidget);
+    expect(server.calls, isNot(contains('POST /api/auth/password/login')));
   });
 
   testWidgets('a 429 shows the retry-after seconds', (tester) async {
@@ -386,6 +434,69 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('auth-email')), findsOneWidget);
   });
+
+  testWidgets('verification is not repeated after login fails', (tester) async {
+    final server = _Server(
+        loginStatus: 403, loginError: 'verify your email to sign in');
+    final api = server.client();
+    await api.loadAuthConfig();
+    var signedIn = 0;
+    await _pump(tester, AuthScreen(
+      strings: const Strings(AppLanguage.en), api: api,
+      onSignedIn: (_) async => signedIn++,
+    ));
+    await tester.enterText(find.byKey(const ValueKey('auth-email')), 'user@example.com');
+    await tester.enterText(find.byKey(const ValueKey('auth-password')), 'long-enough-password');
+    await tester.tap(find.byKey(const ValueKey('auth-submit')));
+    await tester.pumpAndSettle();
+    server.loginStatus = 500;
+    await tester.enterText(find.byKey(const ValueKey('verify-code')), '123456');
+    await tester.tap(find.byKey(const ValueKey('verify-submit')));
+    await tester.pumpAndSettle();
+    server.loginStatus = 200;
+    await tester.tap(find.byKey(const ValueKey('verify-submit')));
+    await tester.pumpAndSettle();
+    expect(server.calls.where((call) => call == 'POST /api/auth/password/verify').length, 1);
+    expect(signedIn, 1);
+  });
+
+  for (final duringVerify in [false, true]) {
+    testWidgets('server switch during ${duringVerify ? 'verification' : 'signup'} blocks login',
+        (tester) async {
+      final gate = Completer<void>();
+      final server = _Server(
+        signupGate: duringVerify ? null : gate.future,
+        verifyGate: duringVerify ? gate.future : null,
+        loginStatus: duringVerify ? 403 : 200,
+        loginError: 'verify your email to sign in',
+      );
+      final api = server.client();
+      await api.loadAuthConfig();
+      await _pump(tester, AuthScreen(
+        strings: const Strings(AppLanguage.en), api: api,
+        onSignedIn: (_) async => fail('must not sign in'),
+      ));
+      if (!duringVerify) {
+        await tester.tap(find.byKey(const ValueKey('auth-to-signup')));
+        await tester.pumpAndSettle();
+      }
+      await tester.enterText(find.byKey(const ValueKey('auth-email')), 'user@example.com');
+      await tester.enterText(find.byKey(const ValueKey('auth-password')), 'long-enough-password');
+      await tester.tap(find.byKey(const ValueKey('auth-submit')));
+      await tester.pump();
+      if (duringVerify) {
+        await tester.pumpAndSettle();
+        await tester.enterText(find.byKey(const ValueKey('verify-code')), '123456');
+        await tester.tap(find.byKey(const ValueKey('verify-submit')));
+        await tester.pump();
+      }
+      await api.setApiBaseUrl('https://other.example');
+      gate.complete();
+      await tester.pumpAndSettle();
+      expect(server.calls.where((call) => call == 'POST /api/auth/password/login').length,
+          duringVerify ? 1 : 0);
+    });
+  }
 
   testWidgets('settings shows Set password without one, and Remove with',
       (tester) async {

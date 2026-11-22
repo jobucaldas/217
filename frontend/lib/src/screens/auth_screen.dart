@@ -79,17 +79,19 @@ class _AuthScreenState extends State<AuthScreen> {
       _busy = true;
       _error = null;
     });
+    final base = widget.api.config.apiBaseUrl;
     try {
       if (_create) {
         await widget.api
             .signUpWithPassword(_email.text.trim(), _password.text);
+        if (!mounted || base != widget.api.config.apiBaseUrl) return;
       }
       final user = await widget.api
           .signInWithPassword(_email.text.trim(), _password.text);
       if (!mounted) return;
       await widget.onSignedIn(user);
     } on ApiException catch (err) {
-      if (!mounted) return;
+      if (!mounted || base != widget.api.config.apiBaseUrl) return;
       setState(() {
         if (err.statusCode == 403 &&
             err.message == 'verify your email to sign in') {
@@ -106,7 +108,7 @@ class _AuthScreenState extends State<AuthScreen> {
         }
       });
     } catch (_) {
-      if (!mounted) return;
+      if (!mounted || base != widget.api.config.apiBaseUrl) return;
       setState(() => _error = widget.strings.connectionError);
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -326,6 +328,7 @@ class _VerifyForm extends StatefulWidget {
 
 class _VerifyFormState extends State<_VerifyForm> {
   bool _busy = false;
+  String? _verifiedBase;
   String? _error;
   final _code = TextEditingController();
 
@@ -341,19 +344,25 @@ class _VerifyFormState extends State<_VerifyForm> {
       _busy = true;
       _error = null;
     });
+    final base = widget.api.config.apiBaseUrl;
     try {
-      await widget.api.verifyEmail(widget.email, _code.text.trim());
+      if (_verifiedBase != null && _verifiedBase != base) return;
+      if (_verifiedBase == null) {
+        await widget.api.verifyEmail(widget.email, _code.text.trim());
+        if (!mounted || base != widget.api.config.apiBaseUrl) return;
+        _verifiedBase = base;
+      }
       final user = await widget.api
           .signInWithPassword(widget.email, widget.password);
       if (!mounted) return;
       await widget.onVerified(user);
     } on ApiException catch (err) {
-      if (!mounted) return;
+      if (!mounted || base != widget.api.config.apiBaseUrl) return;
       setState(() => _error = err.statusCode == 400
           ? widget.strings.invalidCode
           : widget.strings.genericError);
     } catch (_) {
-      if (!mounted) return;
+      if (!mounted || base != widget.api.config.apiBaseUrl) return;
       setState(() => _error = widget.strings.connectionError);
     } finally {
       if (mounted) setState(() => _busy = false);

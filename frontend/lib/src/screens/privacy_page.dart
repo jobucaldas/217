@@ -169,9 +169,8 @@ class _PrivacyPageState extends State<PrivacyPage> {
     final web = widget.web;
     if (web == null) return;
     setState(() => _error = null);
-    // Without WorkOS the fresh sign-in is a password re-entry here (the
-    // AuthKit redirect would hit a server that cannot start it).
-    if (!widget.api.workos && widget.api.passwordAuth) {
+    if (widget.api.passwordAuth &&
+        (!widget.api.workos || (web.user?.hasPassword ?? false))) {
       final ok = await showDialog<bool>(
         context: context,
         builder: (_) => _PasswordReentryDialog(

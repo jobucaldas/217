@@ -71,4 +71,39 @@ func TestChangePasswordUpdatesHasPassword(t *testing.T) {
 	if has, err := s.GetPasswordCredential(user.ID); err != nil || has == "" {
 		t.Fatalf("credential not stored: %q %v", has, err)
 	}
+	req = authedRequest(http.MethodGet, "/api/auth/session", cookie, nil)
+	w = httptest.NewRecorder()
+	h.CurrentSession(w, req)
+	var body struct {
+		User struct {
+			HasPassword bool `json:"has_password"`
+		} `json:"user"`
+	}
+	if w.Code != http.StatusOK {
+		t.Fatalf("session status %d", w.Code)
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil || !body.User.HasPassword {
+		t.Fatalf("session has_password: %t, error: %v", body.User.HasPassword, err)
+	}
+}
+
+func TestRemovePasswordWithoutOAuthProvider(t *testing.T) {
+	h, s := newTestHandler(t)
+	user, err := s.LinkWorkOSIdentity("subject-no-provider", "linked@example.com", "Linked", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetPasswordCredential(user.ID, "stored-hash"); err != nil {
+		t.Fatal(err)
+	}
+	cookie := sessionCookie(t, s, user.ID)
+	req := authedRequest(http.MethodDelete, "/api/account/password", cookie, nil)
+	w := httptest.NewRecorder()
+	h.AuthMiddleware(h.RemovePasswordCredential)(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409 without provider, got %d", w.Code)
+	}
+	if hash, err := s.GetPasswordCredential(user.ID); err != nil || hash != "stored-hash" {
+		t.Fatalf("credential changed: %q %v", hash, err)
+	}
 }

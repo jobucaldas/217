@@ -1256,7 +1256,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     if (!mounted || epoch != _accountEpoch) return;
     await _api.loadAuthConfig();
     if (!mounted || epoch != _accountEpoch) return;
-    if (!changed) setState(() {});
+    setState(() {});
   }
 
   Future<void> _openSelfHostGuide() async {
@@ -1294,6 +1294,9 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     try {
       final session = await _api.currentSession();
       if (!mounted) return;
+      if (kIsWeb && session.user == null) {
+        throw StateError('browser session was not established');
+      }
       _clearRemindersIfConsentRequired(session);
       if (!mounted) return;
       _accountEpoch++;
@@ -1304,6 +1307,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
         _setConsent(session);
         _loading = false;
       });
+      unawaited(_syncBackgroundWorker());
       if (!_consentRequired) {
         unawaited(_loadRemindersState());
         unawaited(_maybeCheckForUpdate());
@@ -1438,7 +1442,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
             onPaletteChanged: _setPalette,
             onShareChanged: (share) => setState(() => _share = share),
             onLogout: _user == null ? null : _logout,
-            onApiBaseChanged: _onApiBaseChanged,
+            onApiBaseChanged: () => _onServerConnected(changed: true),
             onRoleChanged: _user == null ? null : _onRoleChosen,
             onStageChanged: _user == null ? null : _onStageChanged,
             onRemindersToggled: _user == null ? null : _onRemindersToggled,
