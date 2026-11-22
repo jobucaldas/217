@@ -87,6 +87,22 @@ func (o *OIDC) Exchange(ctx context.Context, redirect, code, verifier, nonce str
 	if err := id.Claims(&claims); err != nil {
 		return nil, err
 	}
+	if claims.Email == "" {
+		ui, err := p.UserInfo(ctx, oauth2.StaticTokenSource(token))
+		if err != nil {
+			return nil, err
+		}
+		if ui.Subject != id.Subject {
+			return nil, fmt.Errorf("userinfo subject mismatch")
+		}
+		var profile struct {
+			Name string `json:"name"`
+		}
+		if err := ui.Claims(&profile); err != nil {
+			return nil, err
+		}
+		claims.Email, claims.EmailVerified, claims.Name = ui.Email, ui.EmailVerified, profile.Name
+	}
 	if id.Subject == "" || claims.Email == "" {
 		return nil, fmt.Errorf("missing identity")
 	}

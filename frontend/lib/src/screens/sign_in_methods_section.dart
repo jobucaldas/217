@@ -145,7 +145,6 @@ class _SignInMethodsSectionState extends State<SignInMethodsSection> {
       if (widget.api.oidcName != null)
         ListTile(
           key: const ValueKey('settings-oidc'),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 4),
           title: Text(widget.api.oidcName!),
           subtitle: Text(widget.user.oidcLinked
               ? widget.strings.oidcConnected : widget.strings.oidcNotConnected),
@@ -158,7 +157,6 @@ class _SignInMethodsSectionState extends State<SignInMethodsSection> {
         ),
       if (widget.api.passwordAuth) ListTile(
         key: const ValueKey('settings-change-password'),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 4),
         title: Text(
           widget.user.hasPassword
               ? widget.strings.changePassword
@@ -171,7 +169,6 @@ class _SignInMethodsSectionState extends State<SignInMethodsSection> {
       if (widget.api.passwordAuth && widget.user.hasPassword)
         ListTile(
           key: const ValueKey('settings-remove-password'),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 4),
           title: Text(widget.strings.removePassword),
           trailing: Icon(Icons.remove_circle_outline,
               color: scheme.onSurfaceVariant),

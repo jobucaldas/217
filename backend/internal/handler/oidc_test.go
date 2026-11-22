@@ -47,16 +47,25 @@ func TestOIDCBrowserAndNative(t *testing.T) {
 	}
 	var issuer, nonce, challenge string
 	var verified, failExchange bool
+	idTokenProfile := true
+	var userinfoSubject string
 	subject, email := "subject", "oidc@example.com"
 	mux := http.NewServeMux()
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 	issuer = srv.URL
 	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]any{"issuer": issuer, "authorization_endpoint": issuer + "/authorize", "token_endpoint": issuer + "/token", "jwks_uri": issuer + "/jwks", "id_token_signing_alg_values_supported": []string{"EdDSA"}})
+		json.NewEncoder(w).Encode(map[string]any{"issuer": issuer, "authorization_endpoint": issuer + "/authorize", "token_endpoint": issuer + "/token", "userinfo_endpoint": issuer + "/userinfo", "jwks_uri": issuer + "/jwks", "id_token_signing_alg_values_supported": []string{"EdDSA"}})
 	})
 	mux.HandleFunc("/jwks", func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{Key: pub, KeyID: "test", Algorithm: "EdDSA", Use: "sig"}}})
+	})
+	mux.HandleFunc("/userinfo", func(w http.ResponseWriter, r *http.Request) {
+		sub := subject
+		if userinfoSubject != "" {
+			sub = userinfoSubject
+		}
+		json.NewEncoder(w).Encode(map[string]any{"sub": sub, "email": email, "email_verified": verified, "name": "Example"})
 	})
 	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
 		if failExchange {
@@ -80,7 +89,10 @@ func TestOIDCBrowserAndNative(t *testing.T) {
 			t.Error(err)
 			return
 		}
-		claims := map[string]any{"iss": issuer, "sub": subject, "aud": "client", "exp": time.Now().Add(time.Minute).Unix(), "iat": time.Now().Unix(), "nonce": nonce, "email": email, "email_verified": verified}
+		claims := map[string]any{"iss": issuer, "sub": subject, "aud": "client", "exp": time.Now().Add(time.Minute).Unix(), "iat": time.Now().Unix(), "nonce": nonce}
+		if idTokenProfile {
+			claims["email"], claims["email_verified"], claims["name"] = email, verified, "Example"
+		}
 		raw, err := jwt.Signed(signer).Claims(claims).Serialize()
 		if err != nil {
 			t.Error(err)
@@ -137,8 +149,16 @@ func TestOIDCBrowserAndNative(t *testing.T) {
 		h.OIDCCallback(w, r)
 		return w
 	}
+	idTokenProfile = false
+	userinfoSubject = "different-subject"
 	cookie, state := start(false, "")
 	w := callback(cookie, state)
+	if w.Code != 302 || w.Header().Get("Location") != "https://app.example.com/app/?auth_error=oidc_failed" {
+		t.Fatalf("userinfo subject mismatch: %d %s", w.Code, w.Header().Get("Location"))
+	}
+	userinfoSubject = ""
+	cookie, state = start(false, "")
+	w = callback(cookie, state)
 	if w.Code != 302 || w.Header().Get("Location") != "https://app.example.com/app/?auth_error=oidc_failed" {
 		t.Fatalf("unverified new email: %d %s", w.Code, w.Header().Get("Location"))
 	}
@@ -157,6 +177,7 @@ func TestOIDCBrowserAndNative(t *testing.T) {
 	if !found {
 		t.Fatal("no session cookie")
 	}
+	idTokenProfile = true
 	existing, err := s.CreateUser("existing@example.com", "Existing", "password")
 	if err != nil {
 		t.Fatal(err)
