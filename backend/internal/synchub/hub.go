@@ -61,9 +61,14 @@ type principal struct {
 }
 
 type Hub struct {
-	mu       sync.RWMutex
-	key      [32]byte
-	epoch    uint64
+	mu  sync.RWMutex
+	key [32]byte
+	// seq orders invalidations. A Load that started at seq N must not cache
+	// when a Flush (flushSeq) or an invalidation of a user or token it
+	// touched (inval) happened after N.
+	seq      uint64
+	flushSeq uint64
+	inval    map[string]uint64
 	sessions map[[32]byte]*principal
 	versions map[string]uint64
 	now      func() time.Time
@@ -75,6 +80,7 @@ type Hub struct {
 func New() *Hub {
 	h := &Hub{
 		sessions: map[[32]byte]*principal{},
+		inval:    map[string]uint64{},
 		versions: map[string]uint64{},
 		now:      time.Now,
 		capacity: defaultCapacity,
@@ -115,8 +121,9 @@ func (h *Hub) Cached(token string) (st Status, hit bool, err error) {
 	return h.statusLocked(p), true, nil
 }
 
-// Load reads the session from the store and caches it. If a Flush ran during
-// the read, it retries so a response never reflects pre-revocation state.
+// Load reads the session from the store and caches it. If a Flush, or an
+// invalidation of a user it depends on, ran during the read, it retries so a
+// response never reflects pre-revocation state.
 func (h *Hub) Load(token string) (Status, error) {
 	if h.src == nil {
 		return Status{}, errors.New("synchub: no store")
@@ -126,7 +133,7 @@ func (h *Hub) Load(token string) (Status, error) {
 
 	for attempt := 0; attempt < maxLoadAttempts; attempt++ {
 		h.mu.RLock()
-		startEpoch := h.epoch
+		startSeq := h.seq
 		h.mu.RUnlock()
 
 		user, expires, err := h.src.GetSessionPrincipal(token)
@@ -156,7 +163,7 @@ func (h *Hub) Load(token string) (Status, error) {
 			owner, err := h.src.GetUserByID(peerID)
 			if err != nil {
 				h.mu.RLock()
-				changed := h.epoch != startEpoch
+				changed := h.staleLocked(startSeq, tokenKey(id), user.ID, peerID)
 				h.mu.RUnlock()
 				if changed {
 					continue
@@ -168,7 +175,7 @@ func (h *Hub) Load(token string) (Status, error) {
 		}
 
 		h.mu.Lock()
-		if h.epoch == startEpoch {
+		if !h.staleLocked(startSeq, tokenKey(id), user.ID, peerID) {
 			if len(h.sessions) >= h.capacity {
 				clear(h.sessions)
 			}
@@ -182,12 +189,71 @@ func (h *Hub) Load(token string) (Status, error) {
 	return Status{}, errors.New("synchub: concurrent authorization change")
 }
 
-// Flush drops every cached session; the next poll of each reloads it.
+// Flush drops every cached session; the next poll of each reloads it. Use it
+// when the affected users cannot be determined.
 func (h *Hub) Flush() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.epoch++
+	h.seq++
+	h.flushSeq = h.seq
 	clear(h.sessions)
+}
+
+// Invalidate drops the cached sessions of the given users, and of anyone whose
+// calendar subject is one of them (a partner caches their owner's consent and
+// share), so the next poll reloads them. Empty IDs are ignored.
+func (h *Hub) Invalidate(userIDs ...string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.seq++
+	set := make(map[string]bool, len(userIDs))
+	for _, id := range userIDs {
+		if id != "" {
+			set[id] = true
+			h.markLocked(id)
+		}
+	}
+	for id, p := range h.sessions {
+		if set[p.userID] || set[p.subjectID] {
+			delete(h.sessions, id)
+		}
+	}
+}
+
+// invalidateToken drops one cached session (logout).
+func (h *Hub) invalidateToken(token string) {
+	id := sha256.Sum256([]byte(token))
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.seq++
+	h.markLocked(tokenKey(id))
+	delete(h.sessions, id)
+}
+
+func tokenKey(id [32]byte) string { return "t:" + string(id[:]) }
+
+// markLocked records an invalidation for loads in flight. Past capacity it
+// degrades to a full flush marker, which is always safe.
+func (h *Hub) markLocked(key string) {
+	if len(h.inval) >= h.capacity {
+		clear(h.inval)
+		h.flushSeq = h.seq
+	}
+	h.inval[key] = h.seq
+}
+
+// staleLocked reports whether a load that started at startSeq was overtaken by
+// a flush or an invalidation of any of the keys (a token key or user IDs).
+func (h *Hub) staleLocked(startSeq uint64, keys ...string) bool {
+	if h.flushSeq > startSeq {
+		return true
+	}
+	for _, k := range keys {
+		if k != "" && h.inval[k] > startSeq {
+			return true
+		}
+	}
+	return false
 }
 
 // Bump marks keys ("a:", "i:", "c:", "p:" + user ID) as changed.
