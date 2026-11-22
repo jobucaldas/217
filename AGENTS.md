@@ -15,7 +15,7 @@ Linked owner and partner can message each other (Messages screen, unread badge o
 ## Tech Stack
 - Client: Flutter (Android + web)
 - Backend: Go — REST API
-- Auth: WorkOS AuthKit (PKCE; API key server-side only)
+- Auth: WorkOS AuthKit (PKCE; API key server-side only) or first-party email+password (`AUTH_PASSWORD_ENABLED`, default on)
 - Database: PostgreSQL 16 — containerized (Docker Compose; Podman works too)
 - Reverse Proxy: Caddy — Flutter web UI + `/api/*`
 - Crypto: personal data sealed in the API (`backend/internal/fieldcrypt`, AES-256-GCM, `DATA_ENCRYPTION_KEY`) before PostgreSQL; internal hops TLS via the `certs` service (`server -init-tls`)

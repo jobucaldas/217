@@ -1256,7 +1256,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     if (!mounted || epoch != _accountEpoch) return;
     await _api.loadAuthConfig();
     if (!mounted || epoch != _accountEpoch) return;
-    if (!changed) setState(() {});
+    setState(() {});
   }
 
   Future<void> _openSelfHostGuide() async {
@@ -1285,6 +1285,43 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
         ),
       ),
     );
+  }
+
+  // Applies the session after a first-party email+password sign-in (the
+  // client already stored the token); mirrors the WorkOS post-login block.
+  Future<void> _onSignedIn(User user) async {
+    setState(() => _loading = true);
+    try {
+      final session = await _api.currentSession();
+      if (!mounted) return;
+      if (kIsWeb && session.user == null) {
+        throw StateError('browser session was not established');
+      }
+      _clearRemindersIfConsentRequired(session);
+      if (!mounted) return;
+      _accountEpoch++;
+      _sessionGeneration++;
+      setState(() {
+        _user = session.user ?? user;
+        _share = session.share ?? const ShareState(status: 'none');
+        _setConsent(session);
+        _loading = false;
+      });
+      unawaited(_syncBackgroundWorker());
+      if (!_consentRequired) {
+        unawaited(_loadRemindersState());
+        unawaited(_maybeCheckForUpdate());
+        unawaited(_checkMessages());
+        await _offerPendingInvite();
+      }
+    } catch (err) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      if (kDebugMode) debugPrint('sign-in failed: $err');
+      _messengerKey.currentState?.showSnackBar(
+        SnackBar(content: Text(_strings.signInError)),
+      );
+    }
   }
 
   Future<void> _signIn() async {
@@ -1405,7 +1442,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
             onPaletteChanged: _setPalette,
             onShareChanged: (share) => setState(() => _share = share),
             onLogout: _user == null ? null : _logout,
-            onApiBaseChanged: _onApiBaseChanged,
+            onApiBaseChanged: () => _onServerConnected(changed: true),
             onRoleChanged: _user == null ? null : _onRoleChosen,
             onStageChanged: _user == null ? null : _onStageChanged,
             onRemindersToggled: _user == null ? null : _onRemindersToggled,
@@ -1462,9 +1499,13 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     }
     if (_user == null) {
       return AuthScreen(
+        // A new server starts a fresh form (mode, verify step, typed fields).
+        key: ValueKey(_api.config.apiBaseUrl),
         strings: _strings,
+        api: _api,
+        onSignedIn: _onSignedIn,
+        onSignInWorkOS: _signIn,
         server: Uri.tryParse(_api.config.apiBaseUrl)?.authority,
-        onSignIn: _signIn,
         onOpenSettings: _openSettings,
         // Server choice happens before sign-in; web always uses its origin.
         // Builds without a built-in server switch on the setup screen.
