@@ -9,6 +9,7 @@ import '../config.dart';
 import '../i18n.dart';
 import '../models.dart';
 import '../prefs.dart';
+import '../secure_storage.dart';
 import 'local_reminders.dart';
 import 'message_sync.dart';
 import 'message_worker.dart';
@@ -49,7 +50,7 @@ Future<void> checkMessagesInBackground({
   required http.Client client,
   required AppearancePrefs prefs,
   required AppLanguage deviceLanguage,
-  FlutterSecureStorage storage = const FlutterSecureStorage(),
+  FlutterSecureStorage storage = appSecureStorage,
   MessageNotifier show = showMessageNotification,
   DateTime Function() now = DateTime.now,
   PartnerAlertScheduler schedulePartnerAlerts = _scheduleWithoutPrompt,

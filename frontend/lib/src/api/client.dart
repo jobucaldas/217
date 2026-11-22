@@ -13,6 +13,7 @@ import '../config.dart';
 import '../models.dart';
 import '../offline/local_store.dart';
 import 'platform_http.dart';
+import '../secure_storage.dart';
 
 enum SyncStatusKind { notModified, changed, unsupported }
 
@@ -34,7 +35,7 @@ class ApiClient {
       LocalStore? localStore,
       DeviceKey? deviceKey})
       : _http = httpClient ?? createPlatformHttpClient(),
-        _storage = storage ?? const FlutterSecureStorage(),
+        _storage = storage ?? appSecureStorage,
         _local = localStore ?? LocalStore(),
         _deviceKey = deviceKey ?? const DeviceKey();
 
