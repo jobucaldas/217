@@ -61,7 +61,7 @@ func (h *Handler) oidcStart(w http.ResponseWriter, r *http.Request, a oidcAttemp
 		return "", false
 	}
 	redirect := h.requestOrigin(r) + oidcCallbackPath
-	authURL, err := h.oidc.AuthURL(r.Context(), redirect, state, pkceChallengeS256(verifier), nonce, a.Return != "")
+	authURL, err := h.oidc.AuthURL(r.Context(), redirect, state, pkceChallengeS256(verifier), nonce, a.Return != "" || a.Kind == "link")
 	if err != nil {
 		http.Error(w, `{"error":"oidc unavailable"}`, 503)
 		return "", false
@@ -105,6 +105,19 @@ func (h *Handler) StartOIDCNative(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, u, 302)
 	}
 }
+func oidcFailure(w http.ResponseWriter, r *http.Request, a oidcAttempt, redirectURI, reason string) {
+	target := strings.TrimSuffix(redirectURI, oidcCallbackPath) + "/app/?auth_error=" + reason
+	if a.Kind == "native" {
+		target = oidcAppURL + "?error=" + reason
+	} else if a.Kind == "link" {
+		target = strings.TrimSuffix(redirectURI, oidcCallbackPath) + "/app/?link_error=oidc"
+		if a.Platform == "android" {
+			target = oidcAppURL + "?link_error=oidc"
+		}
+	}
+	http.Redirect(w, r, target, http.StatusFound)
+}
+
 func (h *Handler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 	if h.oidcGone(w) {
 		return
@@ -125,20 +138,20 @@ func (h *Handler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"invalid state"}`, 400)
 		return
 	}
+	if a.Kind != "web" && a.Kind != "native" && a.Kind != "link" {
+		http.Error(w, `{"error":"invalid state"}`, 400)
+		return
+	}
+	if r.URL.Query().Get("error") != "" || r.URL.Query().Get("code") == "" {
+		oidcFailure(w, r, a, attempt.RedirectURI, "oidc_failed")
+		return
+	}
 	info, err := h.oidc.Exchange(r.Context(), attempt.RedirectURI, r.URL.Query().Get("code"), a.Verifier, attempt.Nonce)
 	if err != nil {
-		if a.Kind == "link" && !errors.Is(err, auth.ErrOIDCUnavailable) {
-			target := strings.TrimSuffix(attempt.RedirectURI, oidcCallbackPath) + "/app/?link_error=oidc"
-			if a.Platform == "android" {
-				target = oidcAppURL + "?link_error=oidc"
-			}
-			http.Redirect(w, r, target, http.StatusFound)
-			return
-		}
 		if errors.Is(err, auth.ErrOIDCUnavailable) {
 			http.Error(w, `{"error":"oidc unavailable"}`, 503)
 		} else {
-			http.Error(w, `{"error":"oidc exchange failed"}`, 400)
+			oidcFailure(w, r, a, attempt.RedirectURI, "oidc_failed")
 		}
 		return
 	}
@@ -157,30 +170,30 @@ func (h *Handler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, target, 302)
 		return
 	}
-	if a.Kind != "web" && a.Kind != "native" {
-		http.Error(w, `{"error":"invalid state"}`, 400)
-		return
-	}
 	user, err := h.store.LinkOIDCIdentity(h.oidc.Issuer, info.Subject, info.Email, info.Name, info.EmailVerified)
 	if err != nil {
-		http.Error(w, `{"error":"account exists: sign in and connect from settings"}`, 403)
+		reason := "oidc_failed"
+		if errors.Is(err, store.ErrOIDCAccountExists) {
+			reason = "account_exists"
+		}
+		oidcFailure(w, r, a, attempt.RedirectURI, reason)
 		return
 	}
 	if a.Kind == "native" {
 		code, err := generateRandom(32)
 		if err != nil {
-			http.Error(w, `{"error":"internal error"}`, 500)
+			oidcFailure(w, r, a, attempt.RedirectURI, "oidc_failed")
 			return
 		}
 		if err = h.store.CreateOAuthAttempt(code, oidcCodeBinding, user.ID, a.Challenge, "", time.Now().Add(2*time.Minute)); err != nil {
-			http.Error(w, `{"error":"internal error"}`, 500)
+			oidcFailure(w, r, a, attempt.RedirectURI, "oidc_failed")
 			return
 		}
 		http.Redirect(w, r, oidcAppURL+"?code="+url.QueryEscape(code), 302)
 		return
 	}
 	if _, err = h.createSessionForUser(w, r, user, ""); err != nil {
-		http.Error(w, `{"error":"internal error"}`, 500)
+		oidcFailure(w, r, a, attempt.RedirectURI, "oidc_failed")
 		return
 	}
 	target := strings.TrimSuffix(attempt.RedirectURI, oidcCallbackPath)

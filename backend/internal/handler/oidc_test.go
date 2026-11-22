@@ -18,13 +18,35 @@ import (
 	"github.com/go-jose/go-jose/v4/jwt"
 )
 
+func TestOIDCCallbackInvalidStateAndDiscoveryFailure(t *testing.T) {
+	s := store.NewMemoryStore()
+	h := New(s)
+	h.SetOIDC(&auth.OIDC{Issuer: "http://127.0.0.1:1", ClientID: "client"})
+	r := httptest.NewRequest("GET", "/api/auth/oidc/callback?code=code&state=missing", nil)
+	w := httptest.NewRecorder()
+	h.OIDCCallback(w, r)
+	if w.Code != 400 {
+		t.Fatalf("invalid state: %d", w.Code)
+	}
+	if err := s.CreateOAuthAttempt("state", "binding", `{"Kind":"web","Verifier":"verifier"}`, "nonce", "https://app.example.com/api/auth/oidc/callback", time.Now().Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	r = httptest.NewRequest("GET", "/api/auth/oidc/callback?code=code&state=state", nil)
+	r.AddCookie(&http.Cookie{Name: oauthBindingCookie, Value: "binding"})
+	w = httptest.NewRecorder()
+	h.OIDCCallback(w, r)
+	if w.Code != 503 {
+		t.Fatalf("discovery failure: %d", w.Code)
+	}
+}
+
 func TestOIDCBrowserAndNative(t *testing.T) {
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var issuer, nonce, challenge string
-	var verified bool
+	var verified, failExchange bool
 	subject, email := "subject", "oidc@example.com"
 	mux := http.NewServeMux()
 	srv := httptest.NewServer(mux)
@@ -37,6 +59,10 @@ func TestOIDCBrowserAndNative(t *testing.T) {
 		json.NewEncoder(w).Encode(jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{Key: pub, KeyID: "test", Algorithm: "EdDSA", Use: "sig"}}})
 	})
 	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
+		if failExchange {
+			http.Error(w, "exchange failed", 400)
+			return
+		}
 		id, secret, ok := r.BasicAuth()
 		if !ok || id != "client" || secret != "secret" {
 			t.Error("basic auth missing")
@@ -128,10 +154,46 @@ func TestOIDCBrowserAndNative(t *testing.T) {
 	}
 	subject, email = "existing-subject", "existing@example.com"
 	cookie, state = start(false, "")
-	if w = callback(cookie, state); w.Code != 403 {
-		t.Fatalf("unverified existing email: %d", w.Code)
+	if w = callback(cookie, state); w.Code != 302 || w.Header().Get("Location") != "https://app.example.com/app/?auth_error=account_exists" {
+		t.Fatalf("unverified existing email: %d %s", w.Code, w.Header().Get("Location"))
 	}
 	verified = true
+	if err := s.SetPasswordCredential(existing.ID, "hash"); err != nil {
+		t.Fatal(err)
+	}
+	for _, native := range []bool{false, true} {
+		cookie, state = start(native, pkceChallengeS256(strings.Repeat("a", 43)))
+		w = callback(cookie, state)
+		want := "https://app.example.com/app/?auth_error=account_exists"
+		if native {
+			want = oidcAppURL + "?error=account_exists"
+		}
+		if w.Code != 302 || w.Header().Get("Location") != want {
+			t.Fatalf("password account: %d %s", w.Code, w.Header().Get("Location"))
+		}
+		cookie, state = start(native, pkceChallengeS256(strings.Repeat("a", 43)))
+		r := httptest.NewRequest("GET", "https://app.example.com/api/auth/oidc/callback?error=access_denied&state="+url.QueryEscape(state), nil)
+		r.AddCookie(cookie)
+		w = httptest.NewRecorder()
+		h.OIDCCallback(w, r)
+		want = "https://app.example.com/app/?auth_error=oidc_failed"
+		if native {
+			want = oidcAppURL + "?error=oidc_failed"
+		}
+		if w.Code != 302 || w.Header().Get("Location") != want {
+			t.Fatalf("cancel: %d %s", w.Code, w.Header().Get("Location"))
+		}
+		cookie, state = start(native, pkceChallengeS256(strings.Repeat("a", 43)))
+		failExchange = true
+		w = callback(cookie, state)
+		failExchange = false
+		if w.Code != 302 || w.Header().Get("Location") != want {
+			t.Fatalf("exchange failure: %d %s", w.Code, w.Header().Get("Location"))
+		}
+	}
+	if err := s.DeletePasswordCredential(existing.ID); err != nil {
+		t.Fatal(err)
+	}
 	cookie, state = start(false, "")
 	if w = callback(cookie, state); w.Code != 302 {
 		t.Fatalf("verified existing email: %d", w.Code)
@@ -212,6 +274,9 @@ func TestOIDCBrowserAndNative(t *testing.T) {
 		provider, err := url.Parse(w.Header().Get("Location"))
 		if err != nil || w.Code != 302 {
 			t.Fatalf("link redirect: %d", w.Code)
+		}
+		if provider.Query().Get("prompt") != "login" {
+			t.Fatal("link did not force provider login")
 		}
 		nonce, challenge = provider.Query().Get("nonce"), provider.Query().Get("code_challenge")
 		return callback(w.Result().Cookies()[0], provider.Query().Get("state"))

@@ -20,6 +20,7 @@ var (
 	ErrRoleNotChosen          = errors.New("role not chosen")
 	ErrShareInactive          = errors.New("share inactive")
 	ErrOnlySignInMethod       = errors.New("set up another sign-in method first")
+	ErrOIDCAccountExists      = errors.New("account exists: sign in and connect from settings")
 )
 
 // ReminderDeliveryLease is how long a crashed sender's claim stays exclusive.

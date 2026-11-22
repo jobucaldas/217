@@ -30,8 +30,8 @@ func (s *MemoryStore) LinkOIDCIdentity(issuer, subject, email, name string, veri
 		}
 	}
 	if u != nil {
-		if !verified {
-			return nil, fmt.Errorf("account exists: sign in and connect from settings")
+		if _, hasPassword := s.passwordCredentials[u.ID]; !verified || hasPassword {
+			return nil, ErrOIDCAccountExists
 		}
 		for identity, id := range s.oidcSubjects {
 			if identity.issuer == issuer && id == u.ID {

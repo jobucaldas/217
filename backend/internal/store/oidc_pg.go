@@ -40,7 +40,7 @@ func (s *PGStore) LinkOIDCIdentity(issuer, subject, email, name string, verified
 		return nil, fmt.Errorf("ambiguous email")
 	}
 	if count == 1 && !verified {
-		return nil, fmt.Errorf("account exists: sign in and connect from settings")
+		return nil, ErrOIDCAccountExists
 	}
 	if count == 1 {
 		u, err = s.scanUser(tx.QueryRow(`SELECT `+userColumns+` FROM users u WHERE u.email_index=$1 FOR UPDATE`, index))
@@ -52,6 +52,15 @@ func (s *PGStore) LinkOIDCIdentity(issuer, subject, email, name string, verified
 	}
 	if err != nil {
 		return nil, err
+	}
+	if count == 1 {
+		var hasPassword bool
+		if err := tx.QueryRow(`SELECT EXISTS (SELECT 1 FROM password_credentials WHERE user_id=$1)`, u.ID).Scan(&hasPassword); err != nil {
+			return nil, err
+		}
+		if hasPassword {
+			return nil, ErrOIDCAccountExists
+		}
 	}
 	if _, err = tx.Exec(`INSERT INTO oidc_identities(issuer,subject,user_id) VALUES ($1,$2,$3)`, issuer, subject, u.ID); err != nil {
 		return nil, err

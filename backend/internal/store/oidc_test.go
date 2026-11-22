@@ -16,6 +16,15 @@ func TestOIDCIdentityContract(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if err = s.SetPasswordCredential(existing.ID, "hash"); err != nil {
+				t.Fatal(err)
+			}
+			if _, err = s.LinkOIDCIdentity("issuer", "password-match", "oidc-existing@example.com", "", true); err == nil {
+				t.Fatal("verified email inherited password account")
+			}
+			if err = s.DeletePasswordCredential(existing.ID); err != nil {
+				t.Fatal(err)
+			}
 			if _, err = s.LinkOIDCIdentity("issuer", "unverified", "oidc-existing@example.com", "", false); err == nil {
 				t.Fatal("unverified email linked")
 			}
