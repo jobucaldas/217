@@ -153,6 +153,7 @@ class ApiClient {
   static const _apiBaseKey = 'api_base_url';
   static const _calendarInvalidatedKey = 'calendar_invalidated_user';
   static const _invalidatedCalendarMarker = 'invalidated';
+  static const _consentBlockedKey = 'consent_blocked_user';
 
   /// Loads the persisted server URL override, if any. Returns false when
   /// reading storage failed (distinct from "no override saved") and blocks
@@ -302,8 +303,12 @@ class ApiClient {
     await _local.clearAll();
     _calendarCacheBlocked = false;
     _consentBlocked = false;
+    _consentBlockedVersion = null;
     try {
       await _storage.delete(key: _calendarInvalidatedKey);
+    } catch (_) {}
+    try {
+      await _storage.delete(key: _consentBlockedKey);
     } catch (_) {}
   }
 
@@ -331,6 +336,7 @@ class ApiClient {
     int? expectedScope,
     String? expectedBase,
     int? expectedSessionRevision,
+    bool consentGranted = false,
   }) async {
     final decoded = jsonDecode(response.body) as Map<String, dynamic>;
     final snapshot = SessionSnapshot.fromJson(decoded);
@@ -344,7 +350,11 @@ class ApiClient {
           expectedSessionRevision != _sessionRevision) {
         throw const StaleAuthScopeException();
       }
-      shouldSync = await _applySessionLocked(decoded, snapshot);
+      shouldSync = await _applySessionLocked(
+        decoded,
+        snapshot,
+        consentGranted: consentGranted,
+      );
     });
     if (shouldSync) unawaited(syncPending());
     return snapshot;
@@ -352,8 +362,9 @@ class ApiClient {
 
   Future<bool> _applySessionLocked(
     Map<String, dynamic> decoded,
-    SessionSnapshot snapshot,
-  ) async {
+    SessionSnapshot snapshot, {
+    bool consentGranted = false,
+  }) async {
     final user = snapshot.user;
     if (user == null) return false;
     // Never mix two accounts' data on the device.
@@ -366,11 +377,23 @@ class ApiClient {
       ..remove('session_token')
       ..remove('device_key_id');
     final shouldSync = await _rememberLocked(user.id, jsonEncode(decoded));
+    final wasConsentBlocked = _consentBlocked;
     _role = user.role;
     _consentBlocked = snapshot.consentRequired;
+    _consentBlockedVersion = snapshot.consentRequired && snapshot.consentVersion > 0
+        ? snapshot.consentVersion
+        : null;
+    if (!snapshot.consentRequired) {
+      await _clearConsentBlockedFallbackLocked(user.id);
+    }
     _sessionRevision++;
-    _consentRevision++;
-    return shouldSync;
+    // Only invalidate in-flight 403s when consent was explicitly granted or
+    // cleared a prior consent block; a routine session refresh from before
+    // consent was withdrawn must not cause a newer 403 to be discarded.
+    if (!snapshot.consentRequired && (wasConsentBlocked || consentGranted)) {
+      _consentRevision++;
+    }
+    return shouldSync && !snapshot.consentRequired;
   }
 
   String? _role;
@@ -381,9 +404,11 @@ class ApiClient {
   bool _calendarCacheBlocked = false;
 
   /// True after an explicit `403 consent required` (or a cached session with
-  /// `consentRequired == true`); suppresses local calendar cache reads until
-  /// the server confirms consent again, while preserving local rows on disk.
+  /// `consentRequired == true`); suppresses local calendar cache reads and
+  /// outbox sync until the server confirms consent again, while preserving
+  /// local rows on disk.
   bool _consentBlocked = false;
+  int? _consentBlockedVersion;
 
   bool get _calendarReadBlocked => _calendarCacheBlocked || _consentBlocked;
 
@@ -395,9 +420,10 @@ class ApiClient {
   /// fallback cannot roll back a newer session, consent block, or share state.
   int _sessionRevision = 0;
 
-  /// Moves whenever a server session confirms consent state, so a late `403
-  /// consent required` from before consent was granted cannot re-persist the
-  /// block.
+  /// Moves whenever consent is explicitly granted or transitions from blocked
+  /// to confirmed, so a late `403 consent required` from before consent was
+  /// granted cannot re-persist the block without discarding denials raced with
+  /// routine session refreshes.
   int _consentRevision = 0;
 
   static String _calendarMarker(String role, ShareState? share) {
@@ -407,6 +433,27 @@ class ApiClient {
         ? '$ownerId:${share?.ownerEmail ?? ''}'
         : (share?.ownerEmail ?? '');
     return 'partner:${share?.status ?? 'none'}:$ownerSuffix';
+  }
+
+  Future<void> _markConsentBlockedFallbackLocked(
+    String userId,
+    int? version,
+  ) async {
+    try {
+      await _storage.write(
+        key: _consentBlockedKey,
+        value: '$userId:${version ?? 0}',
+      );
+    } catch (_) {}
+  }
+
+  Future<void> _clearConsentBlockedFallbackLocked(String userId) async {
+    try {
+      final raw = await _storage.read(key: _consentBlockedKey);
+      if (raw != null && raw.startsWith('$userId:')) {
+        await _storage.delete(key: _consentBlockedKey);
+      }
+    } catch (_) {}
   }
 
   Future<void> _markCalendarInvalidatedLocked(String userId) async {
@@ -524,8 +571,13 @@ class ApiClient {
 
   /// Reads the cached session from local storage without mutating any client
   /// fields; callers must validate their scope before adopting the result.
-  Future<({String userId, SessionSnapshot snapshot})?>
-      _readCachedSession() async {
+  Future<
+      ({
+        String userId,
+        SessionSnapshot snapshot,
+        bool consentBlockedInStorage,
+        int? consentBlockedVersion,
+      })?> _readCachedSession() async {
     final userId = await _local.readDoc(localGlobalUser, _lastUserDoc);
     if (userId == null || userId.isEmpty) return null;
     final body = await _local.readDoc(userId, _sessionDoc);
@@ -536,6 +588,16 @@ class ApiClient {
     final snapshot =
         SessionSnapshot.fromJson(jsonDecode(body) as Map<String, dynamic>);
     if (snapshot.user?.id != userId) return null;
+    var consentBlockedInStorage = false;
+    int? consentBlockedVersion;
+    try {
+      final rawBlocked = await _storage.read(key: _consentBlockedKey);
+      if (rawBlocked != null && rawBlocked.startsWith('$userId:')) {
+        consentBlockedInStorage = true;
+        final parsed = int.tryParse(rawBlocked.substring(userId.length + 1));
+        if (parsed != null && parsed > 0) consentBlockedVersion = parsed;
+      }
+    } catch (_) {}
     // A kept session is never a recent sign-in.
     return (
       userId: userId,
@@ -546,6 +608,8 @@ class ApiClient {
         consentVersion: snapshot.consentVersion,
         fromCache: true,
       ),
+      consentBlockedInStorage: consentBlockedInStorage,
+      consentBlockedVersion: consentBlockedVersion,
     );
   }
 
@@ -578,10 +642,32 @@ class ApiClient {
         cached.snapshot.user!.role,
         cached.snapshot.share,
       );
+      final inMemoryBlocked = _userId == cached.userId && _consentBlocked;
+      final effectiveConsentRequired = cached.snapshot.consentRequired ||
+          cached.consentBlockedInStorage ||
+          inMemoryBlocked;
+      final effectiveConsentVersion = effectiveConsentRequired
+          ? ((inMemoryBlocked ? _consentBlockedVersion : null) ??
+              cached.consentBlockedVersion ??
+              cached.snapshot.consentVersion)
+          : cached.snapshot.consentVersion;
       _userId = cached.userId;
       _role = cached.snapshot.user!.role;
-      _consentBlocked = cached.snapshot.consentRequired;
+      _consentBlocked = effectiveConsentRequired;
+      _consentBlockedVersion =
+          effectiveConsentRequired && effectiveConsentVersion > 0
+              ? effectiveConsentVersion
+              : null;
       await _countPending(cached.userId);
+      if (effectiveConsentRequired && !cached.snapshot.consentRequired) {
+        return SessionSnapshot(
+          user: cached.snapshot.user,
+          share: cached.snapshot.share,
+          consentRequired: true,
+          consentVersion: effectiveConsentVersion,
+          fromCache: true,
+        );
+      }
       return cached.snapshot;
     });
   }
@@ -785,7 +871,8 @@ class ApiClient {
   /// Marks the cached session as requiring consent so an offline restart after
   /// `403 consent required` keeps private calendar rows blocked until consent
   /// is confirmed again, without deleting the underlying local entries.
-  /// Returns false when the 403 belongs to a stale auth/consent revision.
+  /// Returns false when the 403 belongs to a stale auth/consent revision or
+  /// repeats an already-active block for the same consent version.
   Future<bool> _persistConsentRequired({
     int? expectedScope,
     required String expectedBase,
@@ -798,21 +885,44 @@ class ApiClient {
           return false;
         }
         if (expectedConsentRev != _consentRevision) return false;
+        final wasBlocked = _consentBlocked;
+        final prevBlockedVersion = _consentBlockedVersion;
         _consentBlocked = true;
+        if (consentVersion != null && consentVersion > 0) {
+          _consentBlockedVersion = consentVersion;
+        }
         final userId = _userId;
-        if (userId == null) return true;
+        final versionChanged = consentVersion != null &&
+            consentVersion > 0 &&
+            consentVersion != prevBlockedVersion;
+        if (userId == null) {
+          final newlyBlocked = !wasBlocked || versionChanged;
+          if (newlyBlocked) {
+            _calendarGeneration++;
+            _sessionRevision++;
+          }
+          return newlyBlocked;
+        }
         try {
           final raw = await _local.readDoc(userId, _sessionDoc);
           if (raw == null) {
-            _calendarGeneration++;
-            _sessionRevision++;
-            return true;
+            final newlyBlocked = !wasBlocked || versionChanged;
+            if (newlyBlocked) {
+              _calendarGeneration++;
+              _sessionRevision++;
+            }
+            await _markConsentBlockedFallbackLocked(userId, consentVersion);
+            return newlyBlocked;
           }
           final decoded = jsonDecode(raw);
           if (decoded is! Map<String, dynamic>) {
-            _calendarGeneration++;
-            _sessionRevision++;
-            return true;
+            final newlyBlocked = !wasBlocked || versionChanged;
+            if (newlyBlocked) {
+              _calendarGeneration++;
+              _sessionRevision++;
+            }
+            await _markConsentBlockedFallbackLocked(userId, consentVersion);
+            return newlyBlocked;
           }
           final prevConsent = decoded['consent'];
           final prevRequired =
@@ -822,21 +932,39 @@ class ApiClient {
                   ? (prevConsent['version'] as num).toInt()
                   : 0;
           final nextVersion = consentVersion ?? prevVersion;
-          if (prevRequired && prevVersion == nextVersion) return true;
+          if (nextVersion > 0) _consentBlockedVersion = nextVersion;
+          final newlyBlocked = !wasBlocked ||
+              (consentVersion != null &&
+                  consentVersion > 0 &&
+                  consentVersion != (prevBlockedVersion ?? prevVersion));
+          if (prevRequired && prevVersion == nextVersion) {
+            return newlyBlocked;
+          }
           decoded['consent'] = {
             'version': nextVersion,
             'required': true,
           };
-          _calendarGeneration++;
-          _sessionRevision++;
-          await _local.writeDoc(userId, _sessionDoc, jsonEncode(decoded));
+          if (newlyBlocked) {
+            _calendarGeneration++;
+            _sessionRevision++;
+          }
+          try {
+            await _local.writeDoc(userId, _sessionDoc, jsonEncode(decoded));
+          } catch (_) {
+            await _markConsentBlockedFallbackLocked(userId, nextVersion);
+          }
+          return newlyBlocked;
         } catch (_) {
           // Still advance revisions so a delayed 200 session cannot overwrite
           // this denial, and never turn a 403 into a storage/offline error.
-          _calendarGeneration++;
-          _sessionRevision++;
+          final newlyBlocked = !wasBlocked || versionChanged;
+          if (newlyBlocked) {
+            _calendarGeneration++;
+            _sessionRevision++;
+          }
+          await _markConsentBlockedFallbackLocked(userId, consentVersion);
+          return newlyBlocked;
         }
-        return true;
       });
 
   Future<http.Response> _sendOnce(
@@ -889,7 +1017,7 @@ class ApiClient {
       // Back online: send what waited (the queue's own requests land here
       // too, while it runs, and are skipped).
       offline.value = false;
-      if (pendingWrites.value > 0 && _syncing == null) {
+      if (pendingWrites.value > 0 && _syncing == null && !_consentBlocked) {
         unawaited(syncPending());
       }
     }
@@ -1139,6 +1267,7 @@ class ApiClient {
     String path, {
     Object? body,
     required String errorContext,
+    bool consentGranted = false,
   }) async {
     final scope = _scopeEpoch;
     final base = config.apiBaseUrl;
@@ -1157,6 +1286,7 @@ class ApiClient {
       response,
       expectedScope: scope,
       expectedBase: base,
+      consentGranted: consentGranted,
     );
   }
 
@@ -1166,6 +1296,7 @@ class ApiClient {
         '/api/account/consent',
         body: {'version': version},
         errorContext: 'consent',
+        consentGranted: true,
       );
 
   /// The web app's privacy notice in [language] (`en`, `pt`, `es`) on this
@@ -1656,11 +1787,12 @@ class ApiClient {
   Future<void> _drainQueue() async {
     do {
       _syncAgain = false;
+      if (_consentBlocked) return;
       final userId = _userId;
       if (userId == null) return;
       for (final write in await _local.pendingWrites(userId)) {
-        // Signed out or switched account meanwhile: not this account's turn.
-        if (_userId != userId) return;
+        // Signed out, switched account, or consent required meanwhile.
+        if (_userId != userId || _consentBlocked) return;
         try {
           final entry = write.entry;
           if (entry == null) {

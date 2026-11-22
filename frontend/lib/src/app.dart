@@ -575,17 +575,16 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     }
     final epoch = _accountEpoch;
     Future<void> run() async {
-      var staleRetries = 0;
-      while (true) {
+      var attempts = 0;
+      while (attempts < 4) {
+        attempts++;
         _sessionRecoveryAgain = false;
         try {
           await _refreshSession();
         } catch (err) {
           if (err is StaleAuthScopeException &&
               mounted &&
-              epoch == _accountEpoch &&
-              staleRetries < 3) {
-            staleRetries++;
+              epoch == _accountEpoch) {
             _sessionRecoveryAgain = true;
           }
         }

@@ -3271,6 +3271,427 @@ void main() {
     expect(persisted?.share?.ownerId, 'owner-b');
     expect(persisted?.user?.role, 'partner');
   });
+
+  test(
+      'routine 200 /api/auth/session from before withdrawal does not discard '
+      'a concurrent 403 consent required, while explicit acceptConsent still '
+      'discards older 403s', () async {
+    FlutterSecureStorage.setMockInitialValues({'session_token': 'tok'});
+    final local = MemoryLocalStore();
+    await local.writeDoc(localGlobalUser, 'last_user', 'u-owner');
+    await local.writeDoc(
+      'u-owner',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-owner',
+          'email': 'owner@example.com',
+          'role': 'owner',
+        },
+        'share': {'status': 'none'},
+        'consent': {'version': 1, 'required': false},
+      }),
+    );
+    await local.writeDoc('u-owner', 'calendar', 'own');
+    await local.replaceMonth('u-owner', 2026, 11, const [
+      Entry(date: '2026-11-15', taken: true, notes: 'owner private note'),
+    ]);
+
+    final entry403Gate = Completer<void>();
+    final stale403Gate = Completer<void>();
+    var entriesCalls = 0;
+    var offlineNow = false;
+    var consentCallbacks = 0;
+
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: local,
+      httpClient: MockClient((request) async {
+        if (request.url.path == '/api/auth/session') {
+          return http.Response(
+            jsonEncode({
+              'user': {
+                'id': 'u-owner',
+                'email': 'owner@example.com',
+                'role': 'owner',
+              },
+              'share': {'status': 'none'},
+              'consent': {'version': 1, 'required': false},
+            }),
+            200,
+          );
+        }
+        if (request.url.path == '/api/account/consent' &&
+            request.method == 'PUT') {
+          return http.Response(
+            jsonEncode({
+              'user': {
+                'id': 'u-owner',
+                'email': 'owner@example.com',
+                'role': 'owner',
+              },
+              'share': {'status': 'none'},
+              'consent': {'version': 2, 'required': false},
+            }),
+            200,
+          );
+        }
+        if (request.url.path == '/api/entries') {
+          entriesCalls++;
+          if (entriesCalls == 1) {
+            await entry403Gate.future;
+            return http.Response(
+              '{"error":"consent required","consent_version":2}',
+              403,
+            );
+          }
+          if (offlineNow) {
+            return http.Response('unavailable', 503);
+          }
+          await stale403Gate.future;
+          return http.Response(
+            '{"error":"consent required","consent_version":2}',
+            403,
+          );
+        }
+        return http.Response('{}', 200);
+      }),
+    )..onConsentRequired = () => consentCallbacks++;
+
+    expect((await api.cachedSession())?.consentRequired, isFalse);
+
+    // Start calendar request concurrently with a routine session refresh.
+    final concurrentEntries = api.listEntries(2026, 11);
+    final session = await api.currentSession();
+    expect(session.consentRequired, isFalse);
+
+    // The concurrent calendar request now returns 403 consent required.
+    entry403Gate.complete();
+    await expectLater(
+      concurrentEntries,
+      throwsA(isA<ApiException>()
+          .having((e) => e.message, 'message', 'consent required')),
+    );
+
+    // Routine session refresh must NOT have caused this 403 to be ignored.
+    expect(consentCallbacks, 1);
+    expect(await api.cachedMonth(2026, 11), isNull);
+    offlineNow = true;
+    await expectLater(
+      api.listEntries(2026, 11),
+      throwsA(isA<ApiException>().having((e) => e.statusCode, 'status', 503)),
+    );
+
+    // Now start another request that will arrive late with 403, then accept
+    // consent explicitly before releasing it: the late 403 must be ignored.
+    offlineNow = false;
+    final staleEntries = api.listEntries(2026, 11);
+    final accepted = await api.acceptConsent(2);
+    expect(accepted.consentRequired, isFalse);
+    stale403Gate.complete();
+    await expectLater(
+      staleEntries,
+      throwsA(isA<ApiException>()
+          .having((e) => e.message, 'message', 'consent required')),
+    );
+    expect(consentCallbacks, 1);
+    expect(
+      (await api.cachedMonth(2026, 11))?.single.notes,
+      'owner private note',
+    );
+  });
+
+  test(
+      'offline 503 recovery after failing to persist 403 consent required '
+      'keeps consent blocked and blocks offline calendar reads', () async {
+    FlutterSecureStorage.setMockInitialValues({'session_token': 'tok'});
+    final local = _FailingSessionWriteStore();
+    await local.writeDoc(localGlobalUser, 'last_user', 'u-owner');
+    await local.writeDoc(
+      'u-owner',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-owner',
+          'email': 'owner@example.com',
+          'role': 'owner',
+        },
+        'share': {'status': 'none'},
+        'consent': {'version': 1, 'required': false},
+      }),
+    );
+    await local.writeDoc('u-owner', 'calendar', 'own');
+    await local.replaceMonth('u-owner', 2026, 11, const [
+      Entry(date: '2026-11-15', taken: true, notes: 'owner private note'),
+    ]);
+    local.failSessionWrite = true;
+
+    var entriesOffline = false;
+    var sessionOffline = true;
+
+    ApiClient makeClient() => ApiClient(
+          AppConfig(
+            apiBaseUrl: 'https://api.example',
+            workosClientId: 'client',
+            redirectUri: 'com.caldasstudios.app217://auth/callback',
+          ),
+          localStore: local,
+          httpClient: MockClient((request) async {
+            if (request.url.path == '/api/entries') {
+              if (entriesOffline) return http.Response('unavailable', 503);
+              return http.Response(
+                '{"error":"consent required","consent_version":2}',
+                403,
+              );
+            }
+            if (request.url.path == '/api/auth/session') {
+              if (sessionOffline) return http.Response('unavailable', 503);
+              return http.Response(
+                jsonEncode({
+                  'user': {
+                    'id': 'u-owner',
+                    'email': 'owner@example.com',
+                    'role': 'owner',
+                  },
+                  'share': {'status': 'none'},
+                  'consent': {'version': 2, 'required': false},
+                }),
+                200,
+              );
+            }
+            return http.Response('{}', 200);
+          }),
+        );
+
+    final api = makeClient();
+    expect((await api.cachedSession())?.consentRequired, isFalse);
+
+    // 403 consent required arrives while persisting the session doc fails.
+    await expectLater(
+      api.listEntries(2026, 11),
+      throwsA(isA<ApiException>()
+          .having((e) => e.message, 'message', 'consent required')),
+    );
+
+    // Offline recovery (503) must NOT lift the consent block back to false.
+    final recovered = await api.currentSession();
+    expect(recovered.fromCache, isTrue);
+    expect(recovered.consentRequired, isTrue);
+    expect(recovered.consentVersion, 2);
+
+    // Subsequent offline calendar load must remain blocked.
+    entriesOffline = true;
+    expect(await api.cachedMonth(2026, 11), isNull);
+    await expectLater(
+      api.listEntries(2026, 11),
+      throwsA(isA<ApiException>().having((e) => e.statusCode, 'status', 503)),
+    );
+
+    // A fresh client restarting offline also observes the persisted fallback.
+    final restarted = makeClient();
+    final restartedSession = await restarted.cachedSession();
+    expect(restartedSession?.consentRequired, isTrue);
+    expect(restartedSession?.consentVersion, 2);
+    expect(await restarted.cachedMonth(2026, 11), isNull);
+
+    // Once disk writes heal and the server confirms consent again, the block
+    // clears and retained local rows become readable again.
+    local.failSessionWrite = false;
+    sessionOffline = false;
+    final confirmed = await restarted.currentSession();
+    expect(confirmed.consentRequired, isFalse);
+    expect(
+      (await restarted.cachedMonth(2026, 11))?.single.notes,
+      'owner private note',
+    );
+  });
+
+  testWidgets(
+      'pending outbox edit does not loop consent recovery when session '
+      'confirms consent required and flushes after consent is accepted',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(412, 915);
+    addTearDown(tester.view.reset);
+
+    FlutterSecureStorage.setMockInitialValues({'session_token': 'tok'});
+    final local = MemoryLocalStore();
+    await local.writeDoc(localGlobalUser, 'last_user', 'u-owner');
+    await local.writeDoc(
+      'u-owner',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-owner',
+          'email': 'owner@example.com',
+          'role': 'owner',
+        },
+        'share': {'status': 'none'},
+        'consent': {'version': 1, 'required': false},
+      }),
+    );
+    await local.writeDoc('u-owner', 'calendar', 'own');
+    await local.replaceMonth('u-owner', 2026, 11, const [
+      Entry(date: '2026-11-15', taken: true, notes: 'queued note'),
+    ]);
+    await local.enqueue(
+      'u-owner',
+      const PendingWrite(
+        date: '2026-11-15',
+        entry: Entry(date: '2026-11-15', taken: true, notes: 'queued note'),
+      ),
+    );
+
+    var consented = false;
+    var sessionCalls = 0;
+    var upsertEntryCalls = 0;
+
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: local,
+      httpClient: MockClient((request) async {
+        switch (request.url.path) {
+          case '/api/auth/config':
+            return http.Response(
+              jsonEncode({'authkit': true, 'privacy_contact': ''}),
+              200,
+            );
+          case '/api/auth/session':
+            sessionCalls++;
+            return http.Response(
+              jsonEncode({
+                'user': {
+                  'id': 'u-owner',
+                  'email': 'owner@example.com',
+                  'role': 'owner',
+                },
+                'share': {'status': 'none'},
+                'consent': {'version': 2, 'required': !consented},
+              }),
+              200,
+            );
+          case '/api/account/consent':
+            consented = true;
+            return http.Response(
+              jsonEncode({
+                'user': {
+                  'id': 'u-owner',
+                  'email': 'owner@example.com',
+                  'role': 'owner',
+                },
+                'share': {'status': 'none'},
+                'consent': {'version': 2, 'required': false},
+              }),
+              200,
+            );
+          case '/api/entries/2026-11-15':
+            if (request.method == 'POST') {
+              upsertEntryCalls++;
+              if (!consented) {
+                return http.Response(
+                  '{"error":"consent required","consent_version":2}',
+                  403,
+                );
+              }
+              return http.Response(
+                jsonEncode({
+                  'date': '2026-11-15',
+                  'taken': true,
+                  'notes': 'queued note',
+                  'period': false,
+                }),
+                200,
+              );
+            }
+            return http.Response('{}', 200);
+          case '/api/entries':
+            if (!consented) {
+              return http.Response(
+                '{"error":"consent required","consent_version":2}',
+                403,
+              );
+            }
+            return http.Response(
+              jsonEncode({
+                'subject_id': 'u-owner',
+                'entries': [
+                  {
+                    'date': '2026-11-15',
+                    'taken': true,
+                    'notes': 'queued note',
+                    'period': false,
+                  },
+                ],
+              }),
+              200,
+            );
+          case '/api/cycle':
+            if (!consented) {
+              return http.Response(
+                '{"error":"consent required","consent_version":2}',
+                403,
+              );
+            }
+            return http.Response(
+              jsonEncode({
+                'subject_id': 'u-owner',
+                'cycle_length': 28,
+                'period_length': 5,
+                'period_starts': [],
+                'predictions': [],
+              }),
+              200,
+            );
+          default:
+            return http.Response('{}', 200);
+        }
+      }),
+    );
+
+    await tester.pumpWidget(App217(
+      config: api.config,
+      api: api,
+      clock: () => DateTime(2026, 11, 15, 10, 0),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(ConsentScreen), findsOneWidget);
+    // Outbox sync must not run while consent is required, and session recovery
+    // must settle without looping.
+    expect(upsertEntryCalls, 0);
+    expect(sessionCalls, lessThanOrEqualTo(2));
+    expect((await local.pendingWrites('u-owner')).length, 1);
+
+    // Accepting consent resumes outbox sync and drains the queued edit.
+    final accept = find.byKey(const ValueKey('consent-accept'));
+    await tester.scrollUntilVisible(accept, 200);
+    await tester.tap(accept);
+    await tester.pumpAndSettle();
+
+    expect(find.byType(CalendarScreen), findsOneWidget);
+    expect(upsertEntryCalls, 1);
+    expect(await local.pendingWrites('u-owner'), isEmpty);
+  });
+}
+
+class _FailingSessionWriteStore extends MemoryLocalStore {
+  bool failSessionWrite = false;
+
+  @override
+  Future<void> writeDoc(String userId, String key, String value) async {
+    if (failSessionWrite && key == 'session') {
+      throw StateError('session doc write failed');
+    }
+    return super.writeDoc(userId, key, value);
+  }
 }
 
 class _FailingClearCalendarStore extends MemoryLocalStore {
