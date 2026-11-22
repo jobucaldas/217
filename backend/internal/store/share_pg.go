@@ -130,6 +130,7 @@ func (s *PGStore) buildShareState(user *model.User) (*model.ShareState, error) {
 		return nil, fmt.Errorf("loading partner share: %w", err)
 	}
 	state.Status = share.Status
+	state.OwnerID = share.OwnerID
 	state.CanEditCalendar = false
 	state.UnreadNotes = s.unreadMessages(user.ID)
 	if owner, err := s.GetUserByID(share.OwnerID); err == nil {

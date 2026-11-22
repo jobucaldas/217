@@ -20,6 +20,7 @@ import 'package:a217/src/offline/local_store_memory.dart';
 import 'package:a217/src/screens/auth_screen.dart';
 import 'package:a217/src/screens/calendar_screen.dart';
 import 'package:a217/src/screens/day_summary.dart';
+import 'package:a217/src/screens/privacy_screens.dart';
 import 'package:a217/src/screens/share_screens.dart';
 
 void main() {
@@ -1731,8 +1732,8 @@ void main() {
   });
 
   testWidgets(
-      '403 share inactive clears preloaded calendar, dismisses open overlay, '
-      'and wipes local cache while /api/auth/session is stalled',
+      'single-month 403 share inactive clears preloaded calendar, dismisses '
+      'open overlay, and wipes local cache while other months and session stall',
       (tester) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(412, 915);
@@ -1752,6 +1753,7 @@ void main() {
         },
         'share': {
           'status': 'active',
+          'owner_id': 'owner-a',
           'owner_email': 'owner-a@example.com',
           'owner_name': 'Owner A',
           'can_edit_calendar': false,
@@ -1761,7 +1763,7 @@ void main() {
     await local.writeDoc(
       'u-partner',
       'calendar',
-      'partner:active:owner-a@example.com',
+      'partner:active:owner-a:owner-a@example.com',
     );
     await local.replaceMonth('u-partner', 2026, 11, const [
       Entry(date: '2026-11-15', taken: true, notes: 'revoked private note'),
@@ -1771,7 +1773,9 @@ void main() {
 
     final sessionGate = Completer<void>();
     final configGate = Completer<void>();
-    final entriesGate = Completer<void>();
+    final novemberGate = Completer<void>();
+    final otherMonthsGate = Completer<void>();
+    final cycleGate = Completer<void>();
     final api = ApiClient(
       AppConfig(
         apiBaseUrl: 'https://api.example',
@@ -1788,9 +1792,27 @@ void main() {
             await configGate.future;
             return http.Response('unavailable', 503);
           case '/api/entries':
-            await entriesGate.future;
-            return http.Response('{"error":"share inactive"}', 403);
+            if (request.url.queryParameters['month'] == '11') {
+              await novemberGate.future;
+              return http.Response('{"error":"share inactive"}', 403);
+            }
+            await otherMonthsGate.future;
+            return http.Response(
+              jsonEncode({
+                'subject_id': 'owner-a',
+                'entries': [
+                  {
+                    'date': '2026-10-15',
+                    'taken': true,
+                    'notes': 'late stale note',
+                    'period': false,
+                  },
+                ],
+              }),
+              200,
+            );
           case '/api/cycle':
+            await cycleGate.future;
             return http.Response('{"error":"share inactive"}', 403);
           default:
             return http.Response('{}', 200);
@@ -1814,21 +1836,29 @@ void main() {
     expect(find.byType(ExpandableDaySheet), findsOneWidget);
     expect(find.text('revoked private note'), findsWidgets);
 
-    // /api/entries returns 403 share inactive while session is still pending.
-    entriesGate.complete();
+    // Only month=11 returns 403 share inactive; months 10 & 12, cycle, and
+    // session remain stalled. UI and disk cache must clear immediately.
+    novemberGate.complete();
     await tester.pump();
     await tester.pump();
     await tester.pump();
 
+    expect(otherMonthsGate.isCompleted, isFalse);
     expect(sessionGate.isCompleted, isFalse);
     expect(find.byType(ExpandableDaySheet), findsNothing);
     expect(find.text('revoked private note'), findsNothing);
     expect(find.text('Taken'), findsNothing);
     expect(await local.monthEntries('u-partner', 2026, 11), isNull);
 
+    // Late 200 responses from the other stalled months must not repopulate disk.
+    otherMonthsGate.complete();
+    cycleGate.complete();
     sessionGate.complete();
     configGate.complete();
     await tester.pump();
+    await tester.pump();
+    expect(await local.monthEntries('u-partner', 2026, 10), isNull);
+    expect(find.text('revoked private note'), findsNothing);
   });
 
   testWidgets(
@@ -1890,6 +1920,523 @@ void main() {
     expect(api.privacyContact, 'dpo@example.com');
     expect(find.byKey(const ValueKey('privacy-sign-in')), findsOneWidget);
     expect(find.textContaining('dpo@example.com'), findsOneWidget);
+  });
+
+  testWidgets(
+      'mismatched subject_id in /api/entries rejects new owner rows, clears '
+      'stale calendar and cache, cancels partner alerts, and recovers session',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(412, 915);
+    addTearDown(tester.view.reset);
+
+    FlutterSecureStorage.setMockInitialValues({'session_token': 'tok'});
+    final local = MemoryLocalStore();
+    await local.writeDoc(localGlobalUser, 'last_user', 'u-partner');
+    await local.writeDoc(
+      'u-partner',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-partner',
+          'email': 'partner@example.com',
+          'role': 'partner',
+        },
+        'share': {
+          'status': 'active',
+          'owner_id': 'owner-a',
+          'owner_email': 'owner-a@example.com',
+          'owner_name': 'Owner A',
+          'can_edit_calendar': false,
+        },
+      }),
+    );
+    await local.writeDoc(
+      'u-partner',
+      'calendar',
+      'partner:active:owner-a:owner-a@example.com',
+    );
+    await local.replaceMonth('u-partner', 2026, 11, const [
+      Entry(date: '2026-11-15', taken: true, notes: 'owner-a private note'),
+    ]);
+    await local.replaceMonth('u-partner', 2026, 10, const []);
+    await local.replaceMonth('u-partner', 2026, 12, const []);
+
+    final sessionGate = Completer<void>();
+    final novemberGate = Completer<void>();
+    final otherMonthsGate = Completer<void>();
+    final cycleGate = Completer<void>();
+    var sessionCalls = 0;
+    var cancelledAlerts = 0;
+
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: local,
+      httpClient: MockClient((request) async {
+        switch (request.url.path) {
+          case '/api/auth/config':
+            return http.Response('unavailable', 503);
+          case '/api/auth/session':
+            sessionCalls++;
+            await sessionGate.future;
+            return http.Response(
+              jsonEncode({
+                'user': {
+                  'id': 'u-partner',
+                  'email': 'partner@example.com',
+                  'role': 'partner',
+                },
+                'share': {
+                  'status': 'active',
+                  'owner_id': 'owner-b',
+                  'owner_email': 'owner-b@example.com',
+                  'owner_name': 'Owner B',
+                  'can_edit_calendar': false,
+                },
+              }),
+              200,
+            );
+          case '/api/entries':
+            if (request.url.queryParameters['month'] == '11') {
+              await novemberGate.future;
+              return http.Response(
+                jsonEncode({
+                  'subject_id': 'owner-b',
+                  'entries': [
+                    {
+                      'date': '2026-11-15',
+                      'taken': true,
+                      'notes': 'owner-b private note',
+                      'period': false,
+                    },
+                  ],
+                }),
+                200,
+              );
+            }
+            await otherMonthsGate.future;
+            return http.Response(
+              jsonEncode({'subject_id': 'owner-b', 'entries': []}),
+              200,
+            );
+          case '/api/cycle':
+            await cycleGate.future;
+            return http.Response(
+              jsonEncode({
+                'subject_id': 'owner-b',
+                'cycle_length': 0,
+                'period_length': 0,
+                'period_starts': [],
+                'predictions': [],
+              }),
+              200,
+            );
+          default:
+            return http.Response('{}', 200);
+        }
+      }),
+    );
+
+    await tester.pumpWidget(App217(
+      config: api.config,
+      api: api,
+      partnerAlertCanceller: () async => cancelledAlerts++,
+      clock: () => DateTime(2026, 11, 15, 10, 0),
+    ));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    // Open Owner A's day sheet while /api/auth/session stays stalled.
+    await tester.tap(find.byKey(const ValueKey('view-day-button')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byType(ExpandableDaySheet), findsOneWidget);
+    expect(find.text('owner-a private note'), findsWidgets);
+
+    // Month=11 returns 200 for Owner B (relinked on another device) while
+    // /api/auth/session and other months remain stalled.
+    novemberGate.complete();
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    expect(sessionGate.isCompleted, isFalse);
+    expect(otherMonthsGate.isCompleted, isFalse);
+    expect(find.byType(ExpandableDaySheet), findsNothing);
+    expect(find.text('owner-a private note'), findsNothing);
+    expect(find.text('owner-b private note'), findsNothing);
+    expect(await local.monthEntries('u-partner', 2026, 11), isNull);
+    expect(cancelledAlerts, greaterThanOrEqualTo(1));
+    // Scope recovery kicked off a session refresh.
+    expect(sessionCalls, greaterThanOrEqualTo(2));
+
+    // Complete session + remaining gates cleanly.
+    sessionGate.complete();
+    otherMonthsGate.complete();
+    cycleGate.complete();
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+    expect(
+      await local.readDoc('u-partner', 'calendar'),
+      'partner:active:owner-b:owner-b@example.com',
+    );
+  });
+
+  testWidgets(
+      '403 consent required persists consent block across offline restart '
+      'without deleting underlying local entries', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(412, 915);
+    addTearDown(tester.view.reset);
+
+    FlutterSecureStorage.setMockInitialValues({'session_token': 'tok'});
+    final local = MemoryLocalStore();
+    await local.writeDoc(localGlobalUser, 'last_user', 'u-owner');
+    await local.writeDoc(
+      'u-owner',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-owner',
+          'email': 'owner@example.com',
+          'role': 'owner',
+        },
+        'share': {'status': 'none'},
+        'consent': {'version': 1, 'required': false},
+      }),
+    );
+    await local.writeDoc('u-owner', 'calendar', 'own');
+    await local.replaceMonth('u-owner', 2026, 11, const [
+      Entry(date: '2026-11-15', taken: true, notes: 'owner private note'),
+    ]);
+    await local.replaceMonth('u-owner', 2026, 10, const []);
+    await local.replaceMonth('u-owner', 2026, 12, const []);
+
+    final entriesGate = Completer<void>();
+    final api1 = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: local,
+      httpClient: MockClient((request) async {
+        switch (request.url.path) {
+          case '/api/auth/session':
+          case '/api/auth/config':
+            return http.Response('unavailable', 503);
+          case '/api/entries':
+            await entriesGate.future;
+            return http.Response(
+              '{"error":"consent required","consent_version":2}',
+              403,
+            );
+          case '/api/cycle':
+            await entriesGate.future;
+            return http.Response(
+              '{"error":"consent required","consent_version":2}',
+              403,
+            );
+          default:
+            return http.Response('{}', 200);
+        }
+      }),
+    );
+
+    await tester.pumpWidget(App217(
+      config: api1.config,
+      api: api1,
+      clock: () => DateTime(2026, 11, 15, 10, 0),
+    ));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+    expect(find.byType(CalendarScreen), findsOneWidget);
+    expect(find.text('owner private note'), findsWidgets);
+
+    // Server refuses calendar reads with 403 consent required while
+    // /api/auth/session stays unavailable (503).
+    entriesGate.complete();
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.byType(ConsentScreen), findsOneWidget);
+    expect(find.byType(CalendarScreen), findsNothing);
+    expect(find.text('owner private note'), findsNothing);
+
+    // Restart the app completely offline (503 everywhere): ConsentScreen must
+    // still gate the app and private rows must stay hidden while intact on disk.
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+
+    final api2 = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: local,
+      httpClient: MockClient(
+        (_) async => http.Response('unavailable', 503),
+      ),
+    );
+    await tester.pumpWidget(App217(
+      config: api2.config,
+      api: api2,
+      clock: () => DateTime(2026, 11, 15, 10, 0),
+    ));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.byType(ConsentScreen), findsOneWidget);
+    expect(find.byType(CalendarScreen), findsNothing);
+    expect(find.text('owner private note'), findsNothing);
+
+    final kept = await local.monthEntries('u-owner', 2026, 11);
+    expect(kept, isNotNull);
+    expect(kept!.single.notes, 'owner private note');
+  });
+
+  test(
+      'stale offline session fallback paused reading secure storage cannot '
+      'roll back concurrent partner relink', () async {
+    final prevPlatform = FlutterSecureStoragePlatform.instance;
+    final tokenReadReached = Completer<void>();
+    final tokenReadGate = Completer<void>();
+    var pausedOnce = false;
+    FlutterSecureStoragePlatform.instance = _GatedTokenReadStorage(
+      {'session_token': 'tok'},
+      shouldPauseRead: (key, count) {
+        // Read #1: first currentSession() Bearer header.
+        // Read #2: first currentSession()'s _readCachedSession() after 503,
+        // AFTER it has already read Owner A's session doc from local storage.
+        if (key == 'session_token' && count == 2 && !pausedOnce) {
+          pausedOnce = true;
+          tokenReadReached.complete();
+          return tokenReadGate.future;
+        }
+        return null;
+      },
+    );
+    addTearDown(() => FlutterSecureStoragePlatform.instance = prevPlatform);
+
+    final local = MemoryLocalStore();
+    await local.writeDoc(localGlobalUser, 'last_user', 'u-partner');
+    await local.writeDoc(
+      'u-partner',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-partner',
+          'email': 'partner@example.com',
+          'role': 'partner',
+        },
+        'share': {
+          'status': 'active',
+          'owner_id': 'owner-a',
+          'owner_email': 'owner-a@example.com',
+        },
+      }),
+    );
+    await local.writeDoc(
+      'u-partner',
+      'calendar',
+      'partner:active:owner-a:owner-a@example.com',
+    );
+
+    var sessionCalls = 0;
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: local,
+      httpClient: MockClient((request) async {
+        if (request.url.path == '/api/auth/session') {
+          sessionCalls++;
+          if (sessionCalls == 1) {
+            return http.Response('unavailable', 503);
+          }
+          return http.Response(
+            jsonEncode({
+              'user': {
+                'id': 'u-partner',
+                'email': 'partner@example.com',
+                'role': 'partner',
+              },
+              'share': {
+                'status': 'active',
+                'owner_id': 'owner-b',
+                'owner_email': 'owner-b@example.com',
+              },
+            }),
+            200,
+          );
+        }
+        if (request.url.path == '/api/entries') {
+          return http.Response(
+            jsonEncode({
+              'subject_id': 'owner-b',
+              'entries': [
+                {
+                  'date': '2026-11-15',
+                  'taken': true,
+                  'notes': 'owner-b note',
+                  'period': false,
+                },
+              ],
+            }),
+            200,
+          );
+        }
+        return http.Response('{}', 200);
+      }),
+    );
+
+    // Start first currentSession(): gets 503, reads Owner A's cached session
+    // doc, and pauses on secure-storage token read.
+    final staleFallback = api.currentSession();
+    await tokenReadReached.future;
+
+    // Concurrent currentSession() commits Owner B and caches Owner B's month.
+    final relinked = await api.currentSession();
+    expect(relinked.share?.ownerId, 'owner-b');
+    await api.listEntries(2026, 11);
+    expect(
+      await local.readDoc('u-partner', 'calendar'),
+      'partner:active:owner-b:owner-b@example.com',
+    );
+    expect((await local.monthEntries('u-partner', 2026, 11))?.single.notes,
+        'owner-b note');
+
+    // Release the paused Owner A fallback: it must be rejected as stale and
+    // leave Owner B's calendar marker and cached month untouched.
+    tokenReadGate.complete();
+    await expectLater(staleFallback, throwsA(isA<StaleAuthScopeException>()));
+
+    expect(
+      await local.readDoc('u-partner', 'calendar'),
+      'partner:active:owner-b:owner-b@example.com',
+    );
+    expect(
+      (await local.monthEntries('u-partner', 2026, 11))?.single.notes,
+      'owner-b note',
+    );
+  });
+
+  testWidgets(
+      'session-confirmed partner revocation cancels partner alerts before '
+      'calendar endpoints respond', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(412, 915);
+    addTearDown(tester.view.reset);
+
+    FlutterSecureStorage.setMockInitialValues({'session_token': 'tok'});
+    final local = MemoryLocalStore();
+    await local.writeDoc(localGlobalUser, 'last_user', 'u-partner');
+    await local.writeDoc(
+      'u-partner',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-partner',
+          'email': 'partner@example.com',
+          'role': 'partner',
+        },
+        'share': {
+          'status': 'active',
+          'owner_id': 'owner-a',
+          'owner_email': 'owner-a@example.com',
+          'owner_name': 'Owner A',
+          'can_edit_calendar': false,
+        },
+      }),
+    );
+    await local.writeDoc(
+      'u-partner',
+      'calendar',
+      'partner:active:owner-a:owner-a@example.com',
+    );
+    await local.replaceMonth('u-partner', 2026, 11, const [
+      Entry(date: '2026-11-15', taken: true, notes: 'owner-a private note'),
+    ]);
+    await local.replaceMonth('u-partner', 2026, 10, const []);
+    await local.replaceMonth('u-partner', 2026, 12, const []);
+
+    final sessionGate = Completer<void>();
+    final entriesGate = Completer<void>();
+    var cancelledAlerts = 0;
+
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: local,
+      httpClient: MockClient((request) async {
+        switch (request.url.path) {
+          case '/api/auth/config':
+            return http.Response('unavailable', 503);
+          case '/api/auth/session':
+            await sessionGate.future;
+            return http.Response(
+              jsonEncode({
+                'user': {
+                  'id': 'u-partner',
+                  'email': 'partner@example.com',
+                  'role': 'partner',
+                },
+                'share': {'status': 'revoked'},
+              }),
+              200,
+            );
+          case '/api/entries':
+          case '/api/cycle':
+            await entriesGate.future;
+            return http.Response('{"error":"share inactive"}', 403);
+          default:
+            return http.Response('{}', 200);
+        }
+      }),
+    );
+
+    await tester.pumpWidget(App217(
+      config: api.config,
+      api: api,
+      partnerAlertCanceller: () async => cancelledAlerts++,
+      clock: () => DateTime(2026, 11, 15, 10, 0),
+    ));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.byType(CalendarScreen), findsOneWidget);
+    expect(cancelledAlerts, 0);
+
+    // /api/auth/session confirms revocation while /api/entries stays stalled:
+    // CalendarScreen unmounts and partner alerts MUST be cancelled.
+    sessionGate.complete();
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    expect(entriesGate.isCompleted, isFalse);
+    expect(find.byType(PartnerJoinScreen), findsOneWidget);
+    expect(find.byType(CalendarScreen), findsNothing);
+    expect(cancelledAlerts, greaterThanOrEqualTo(1));
+
+    entriesGate.complete();
+    await tester.pump();
   });
 }
 

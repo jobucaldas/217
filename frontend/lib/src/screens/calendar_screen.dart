@@ -435,13 +435,23 @@ class _CalendarScreenState extends State<CalendarScreen>
       final requestedNext = _nextMonth;
       final year = requested.year;
       final month = requested.month;
+      Future<List<Entry>> fetchMonth(int y, int m) async {
+        try {
+          return await widget.api.listEntries(y, m);
+        } catch (err) {
+          if (mounted && generation == _loadGeneration) {
+            _handleConsentFailure(err);
+          }
+          rethrow;
+        }
+      }
       final results = await Future.wait([
-        widget.api.listEntries(year, month),
-        widget.api.listEntries(
+        fetchMonth(year, month),
+        fetchMonth(
           month == 1 ? year - 1 : year,
           month == 1 ? 12 : month - 1,
         ),
-        widget.api.listEntries(
+        fetchMonth(
           month == 12 ? year + 1 : year,
           month == 12 ? 1 : month + 1,
         ),
@@ -514,6 +524,11 @@ class _CalendarScreenState extends State<CalendarScreen>
   }
 
   bool _handleConsentFailure(Object err, {bool closeDayEditor = false}) {
+    if (err is CalendarScopeMismatchException) {
+      _clearCalendarData();
+      if (closeDayEditor && mounted) Navigator.of(context).maybePop();
+      return true;
+    }
     if (err is! ApiException) return false;
     if (err.statusCode == 403 &&
         err.message == 'calendar owner consent required') {

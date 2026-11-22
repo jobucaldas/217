@@ -72,7 +72,8 @@ class App217 extends StatefulWidget {
 
 class _App217State extends State<App217> with WidgetsBindingObserver {
   late final ApiClient _api = (widget.api ?? ApiClient(widget.config))
-    ..onConsentRequired = _onOwnConsentRequired;
+    ..onConsentRequired = _onOwnConsentRequired
+    ..onCalendarScopeMismatch = _onCalendarScopeMismatch;
   late final AppearancePrefs _prefs = AppearancePrefs();
   late final http.Client _updateHttp = widget.updateClient ?? http.Client();
   final GlobalKey<NavigatorState> _navKey = GlobalKey<NavigatorState>();
@@ -139,7 +140,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     if (user == null || consentRequired || !user.hasRole) return null;
     if (user.isPartner) {
       if (!share.isActive) return null;
-      return '${user.id}:partner:${share.status}:${share.ownerEmail}';
+      return '${user.id}:partner:${share.status}:${share.ownerId}:${share.ownerEmail}';
     }
     return '${user.id}:owner';
   }
@@ -576,6 +577,24 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     unawaited(_recoverConsent());
   }
 
+  Future<void>? _scopeRecovery;
+
+  /// One session refresh at a time when a calendar endpoint reports a
+  /// different subject than the cached session expects.
+  Future<void> _recoverCalendarScope() => _scopeRecovery ??= _refreshSession()
+      .then<void>((_) {})
+      .catchError((Object _) {})
+      .whenComplete(() => _scopeRecovery = null);
+
+  void _onCalendarScopeMismatch() {
+    _clearInitialCalendarCache();
+    _sessionGeneration++;
+    _calendarScopeReset.value++;
+    _navKey.currentState?.popUntil((route) => route.isFirst);
+    if (_user?.isPartner == true) unawaited(_cancelPartnerAlerts());
+    unawaited(_recoverCalendarScope());
+  }
+
   /// Auth config and session asked together, so an unreachable server costs
   /// one request timeout instead of two. The config load never throws.
   Future<SessionSnapshot> _loadConfigAndSession() async {
@@ -628,6 +647,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
         _user?.stage != session.user?.stage;
     if (scopeChanged ||
         _share.status != nextShare.status ||
+        _share.ownerId != nextShare.ownerId ||
         _share.ownerEmail != nextShare.ownerEmail) {
       _clearInitialCalendarCache();
     }
@@ -688,8 +708,15 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
 
   void _cancelPartnerAlertsIfSessionLeavesPartner(SessionSnapshot session) {
     final nextUser = session.user;
-    if (_user?.isPartner == true &&
-        (nextUser == null || nextUser.id != _user!.id || !nextUser.isPartner)) {
+    final nextShare = session.share ?? const ShareState(status: 'none');
+    if (_user?.isPartner != true) return;
+    final leftPartner =
+        nextUser == null || nextUser.id != _user!.id || !nextUser.isPartner;
+    final calendarLostOrChanged = _share.isActive &&
+        (!nextShare.isActive ||
+            nextShare.ownerId != _share.ownerId ||
+            nextShare.ownerEmail != _share.ownerEmail);
+    if (leftPartner || calendarLostOrChanged || nextShare.isRevoked) {
       unawaited(_cancelPartnerAlerts());
     }
   }
@@ -1246,6 +1273,9 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
       onShareChanged: (share) {
         final nextKey = _calendarScopeKey(_user, share, _consentRequired);
         if (nextKey != calendarScopeKey) {
+          if (_user?.isPartner == true && _share.isActive) {
+            unawaited(_cancelPartnerAlerts());
+          }
           _calendarScopeReset.value++;
           _navKey.currentState?.popUntil((route) => route.isFirst);
         }

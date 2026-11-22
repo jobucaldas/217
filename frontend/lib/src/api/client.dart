@@ -53,6 +53,11 @@ class ApiClient {
   /// notice changed while the app was open), so any screen can recover.
   void Function()? onConsentRequired;
 
+  /// Called when a calendar response reports a different subject than the
+  /// cached session expects (e.g. partner relinked on another device while
+  /// `/api/auth/session` was slow), so the app refreshes the session.
+  void Function()? onCalendarScopeMismatch;
+
   /// True when [loadPersistedApiBase] failed to read the saved server URL or
   /// while [setApiBaseUrl] is clearing credentials for a server switch.
   /// Authenticated requests refuse to run until the server URL is resolved so
@@ -281,7 +286,10 @@ class ApiClient {
   Future<void> _dropLocalDataLocked() async {
     _userId = null;
     _role = null;
+    _calendarSubjectId = null;
     _calendarGeneration++;
+    _sessionRevision++;
+    _consentRevision++;
     pendingWrites.value = 0;
     await _local.clearAll();
   }
@@ -341,21 +349,46 @@ class ApiClient {
       ..remove('device_key_id');
     final shouldSync = await _rememberLocked(user.id, jsonEncode(decoded));
     _role = user.role;
+    _sessionRevision++;
+    _consentRevision++;
     return shouldSync;
   }
 
   String? _role;
+  String? _calendarSubjectId;
 
   /// Moves whenever the calendar kept on the device is cleared or changes.
   int _calendarGeneration = 0;
+
+  /// Moves whenever a server session, share mutation, consent block, or
+  /// calendar invalidation commits, so an in-flight offline fallback cannot
+  /// roll back a newer session or calendar marker.
+  int _sessionRevision = 0;
+
+  /// Moves whenever a server session confirms consent state, so a late `403
+  /// consent required` from before consent was granted cannot re-persist the
+  /// block.
+  int _consentRevision = 0;
+
+  static String _calendarMarker(String role, ShareState? share) {
+    if (role != 'partner') return 'own';
+    final ownerId = share?.ownerId ?? '';
+    final ownerSuffix = ownerId.isNotEmpty
+        ? '$ownerId:${share?.ownerEmail ?? ''}'
+        : (share?.ownerEmail ?? '');
+    return 'partner:${share?.status ?? 'none'}:$ownerSuffix';
+  }
 
   /// Months and predictions kept here belong to one calendar: the owner's
   /// own, or the one a partner follows. When that changes (joined another
   /// owner, share revoked, role switched) the old copy goes.
   Future<void> _calendarIs(String userId, String role, ShareState? share) async {
-    final calendar = role == 'partner'
-        ? 'partner:${share?.status ?? 'none'}:${share?.ownerEmail ?? ''}'
-        : 'own';
+    _calendarSubjectId = role == 'partner'
+        ? (share?.isActive == true && share!.ownerId.isNotEmpty
+            ? share.ownerId
+            : null)
+        : (role == 'owner' ? userId : null);
+    final calendar = _calendarMarker(role, share);
     final known = await _local.readDoc(userId, 'calendar');
     if (known == calendar) return;
     _calendarGeneration++;
@@ -378,6 +411,7 @@ class ApiClient {
       final role = _role;
       if (userId != null && role != null) {
         await _calendarIs(userId, role, share);
+        _sessionRevision++;
       }
     });
     return share;
@@ -426,8 +460,11 @@ class ApiClient {
     required int expectedScope,
     int? expectedServerEpoch,
     String? expectedBase,
+    int? expectedSessionRevision,
     required bool throwOnStale,
   }) async {
+    final readRevision = expectedSessionRevision ?? _sessionRevision;
+    final readCalendarGen = _calendarGeneration;
     final cached = await _readCachedSession();
     return _serializeAuth(() async {
       final stale = expectedBase != null
@@ -436,7 +473,9 @@ class ApiClient {
               (expectedServerEpoch != null &&
                   expectedServerEpoch != _serverEpoch) ||
               _apiBaseUnresolved;
-      if (stale) {
+      if (stale ||
+          readRevision != _sessionRevision ||
+          readCalendarGen != _calendarGeneration) {
         if (throwOnStale) throw const StaleAuthScopeException();
         return null;
       }
@@ -460,7 +499,9 @@ class ApiClient {
 
   /// The server could not be reached (vs. it answered with an error).
   static bool _unreachable(Object err) =>
-      err is! ApiException || err.statusCode >= 500 || err.statusCode == 429;
+      err is! CalendarScopeMismatchException &&
+      err is! StaleAuthScopeException &&
+      (err is! ApiException || err.statusCode >= 500 || err.statusCode == 429);
 
   /// [fromServer], or the device's copy when the server is out of reach.
   Future<T> _orCached<T>(
@@ -604,6 +645,7 @@ class ApiClient {
     final scope = expectedScope ?? (auth ? _scopeEpoch : null);
     final serverEpoch = expectedServerEpoch ?? _serverEpoch;
     final base = expectedBase ?? config.apiBaseUrl;
+    final consentRev = _consentRevision;
     bool isStale() => scope != null
         ? _scopeChanged(scope, base)
         : _serverChanged(serverEpoch, base);
@@ -635,10 +677,59 @@ class ApiClient {
     if (auth &&
         response.statusCode == 403 &&
         ApiException._errorField(response.body) == 'consent required') {
-      onConsentRequired?.call();
+      final applied = await _persistConsentRequired(
+        expectedScope: scope,
+        expectedBase: base,
+        expectedConsentRev: consentRev,
+        consentVersion: ApiException._consentVersionField(response.body),
+      );
+      if (applied) onConsentRequired?.call();
     }
     return response;
   }
+
+  /// Marks the cached session as requiring consent so an offline restart after
+  /// `403 consent required` keeps private calendar rows blocked until consent
+  /// is confirmed again, without deleting the underlying local entries.
+  /// Returns false when the 403 belongs to a stale auth/consent revision.
+  Future<bool> _persistConsentRequired({
+    int? expectedScope,
+    required String expectedBase,
+    required int expectedConsentRev,
+    int? consentVersion,
+  }) =>
+      _serializeAuth(() async {
+        if (expectedScope != null &&
+            _scopeChanged(expectedScope, expectedBase)) {
+          return false;
+        }
+        if (expectedConsentRev != _consentRevision) return false;
+        final userId = _userId;
+        if (userId == null) return true;
+        final raw = await _local.readDoc(userId, _sessionDoc);
+        if (raw == null) return true;
+        try {
+          final decoded = jsonDecode(raw);
+          if (decoded is! Map<String, dynamic>) return true;
+          final prevConsent = decoded['consent'];
+          final prevRequired =
+              prevConsent is Map && prevConsent['required'] == true;
+          final prevVersion =
+              prevConsent is Map && prevConsent['version'] is num
+                  ? (prevConsent['version'] as num).toInt()
+                  : 0;
+          final nextVersion = consentVersion ?? prevVersion;
+          if (prevRequired && prevVersion == nextVersion) return true;
+          decoded['consent'] = {
+            'version': nextVersion,
+            'required': true,
+          };
+          await _local.writeDoc(userId, _sessionDoc, jsonEncode(decoded));
+          _calendarGeneration++;
+          _sessionRevision++;
+        } catch (_) {}
+        return true;
+      });
 
   Future<http.Response> _sendOnce(
     String method,
@@ -748,6 +839,7 @@ class ApiClient {
   Future<SessionSnapshot> currentSession() async {
     final scope = _scopeEpoch;
     final base = config.apiBaseUrl;
+    final startRevision = _sessionRevision;
     http.Response response;
     try {
       response = await _send(
@@ -775,6 +867,7 @@ class ApiClient {
       final cached = await _adoptCachedSession(
         expectedScope: scope,
         expectedBase: base,
+        expectedSessionRevision: startRevision,
         throwOnStale: true,
       );
       if (cached != null) return cached;
@@ -785,6 +878,7 @@ class ApiClient {
       return await _adoptCachedSession(
             expectedScope: scope,
             expectedBase: base,
+            expectedSessionRevision: startRevision,
             throwOnStale: true,
           ) ??
           const SessionSnapshot(fromCache: true);
@@ -1145,9 +1239,10 @@ class ApiClient {
             await _clearCalendarIfAccessDenied(scope, response);
             throw ApiException('cycle', response);
           }
+          final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+          await _verifyCalendarSubject(scope, decoded['subject_id'] as String?);
           await _keepDoc(scope, 'cycle', response.body);
-          return CycleInfo.fromJson(
-              jsonDecode(response.body) as Map<String, dynamic>);
+          return CycleInfo.fromJson(decoded);
         },
         (userId) async {
           final body = await _local.readDoc(userId, 'cycle');
@@ -1159,19 +1254,49 @@ class ApiClient {
 
   /// Which account and calendar a request was sent for; taken before the
   /// request so a late answer is never kept for another one.
-  ({String? userId, int calendar}) get _scope =>
-      (userId: _userId, calendar: _calendarGeneration);
+  ({String? userId, int calendar, String? subjectId}) get _scope => (
+        userId: _userId,
+        calendar: _calendarGeneration,
+        subjectId: _calendarSubjectId,
+      );
 
-  bool _isCurrent(({String? userId, int calendar}) scope) =>
+  bool _isCurrent(({String? userId, int calendar, String? subjectId}) scope) =>
       scope.userId != null &&
       scope.userId == _userId &&
       scope.calendar == _calendarGeneration;
+
+  /// Rejects calendar responses whose server-supplied `subject_id` does not
+  /// match the session's active calendar owner (e.g. a partner relinked on
+  /// another device while `/api/auth/session` was slow), wiping stale cached
+  /// data so two owners' rows can never be mixed or saved under the wrong
+  /// marker. Older servers that omit `subject_id` keep working unchanged.
+  Future<void> _verifyCalendarSubject(
+    ({String? userId, int calendar, String? subjectId}) scope,
+    String? responseSubjectId,
+  ) async {
+    if (scope.userId == null ||
+        responseSubjectId == null ||
+        responseSubjectId.isEmpty) {
+      return;
+    }
+    if (responseSubjectId == scope.subjectId) return;
+    var fired = false;
+    await _serializeAuth(() async {
+      if (!_isCurrent(scope)) return;
+      _calendarGeneration++;
+      _sessionRevision++;
+      await _local.clearCalendar(scope.userId!);
+      fired = true;
+    });
+    if (fired) onCalendarScopeMismatch?.call();
+    throw const CalendarScopeMismatchException();
+  }
 
   /// Clears cached calendar months and predictions when the server denies
   /// calendar access (revoked share, withdrawn owner consent, missing role, or
   /// rejected session) so revoked data cannot survive an offline restart.
   Future<void> _clearCalendarIfAccessDenied(
-    ({String? userId, int calendar}) scope,
+    ({String? userId, int calendar, String? subjectId}) scope,
     http.Response response,
   ) async {
     final msg = response.statusCode == 403
@@ -1186,6 +1311,7 @@ class ApiClient {
     await _serializeAuth(() async {
       if (!_isCurrent(scope)) return;
       _calendarGeneration++;
+      _sessionRevision++;
       await _local.clearCalendar(scope.userId!);
     });
   }
@@ -1194,7 +1320,10 @@ class ApiClient {
   /// the device. Serialized with auth/calendar invalidation so a relink or
   /// logout cannot clear the cache between the check and the write.
   Future<void> _keepDoc(
-          ({String? userId, int calendar}) scope, String key, String body) =>
+    ({String? userId, int calendar, String? subjectId}) scope,
+    String key,
+    String body,
+  ) =>
       _serializeAuth(() async {
         if (_isCurrent(scope)) await _local.writeDoc(scope.userId!, key, body);
       });
@@ -1257,6 +1386,7 @@ class ApiClient {
             throw ApiException('list entries', response);
           }
           final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+          await _verifyCalendarSubject(scope, decoded['subject_id'] as String?);
           final entries = (decoded['entries'] as List<dynamic>? ?? const [])
               .map((e) => Entry.fromJson(e as Map<String, dynamic>))
               .toList();
@@ -1515,6 +1645,16 @@ class StaleAuthScopeException implements Exception {
 
   @override
   String toString() => 'stale auth scope';
+}
+
+/// Thrown when a calendar response reports a different owner `subject_id` than
+/// the session's active calendar scope (for example after a partner relinks on
+/// another device while `/api/auth/session` is still pending).
+class CalendarScopeMismatchException implements Exception {
+  const CalendarScopeMismatchException();
+
+  @override
+  String toString() => 'calendar scope mismatch';
 }
 
 /// Non-success API response. [message] is the server's `error` field, if any.

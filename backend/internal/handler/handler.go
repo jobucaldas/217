@@ -627,9 +627,10 @@ func (h *Handler) ListEntries(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := model.MonthEntries{
-		Year:    year,
-		Month:   month,
-		Entries: entries,
+		Year:      year,
+		Month:     month,
+		SubjectID: subjectID,
+		Entries:   entries,
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

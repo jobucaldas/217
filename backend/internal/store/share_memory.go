@@ -235,6 +235,7 @@ func (s *MemoryStore) shareStateLocked(user *model.User) *model.ShareState {
 			return state
 		}
 		state.Status = latest.Status
+		state.OwnerID = latest.OwnerID
 		state.UnreadNotes = s.unreadMessagesLocked(user.ID)
 		if owner := s.findUserLocked(latest.OwnerID); owner != nil {
 			state.OwnerName = owner.PublicName()
@@ -244,6 +245,7 @@ func (s *MemoryStore) shareStateLocked(user *model.User) *model.ShareState {
 		return state
 	}
 	state.Status = live.Status
+	state.OwnerID = live.OwnerID
 	state.CanEditCalendar = false
 	state.UnreadNotes = s.unreadMessagesLocked(user.ID)
 	if owner := s.findUserLocked(live.OwnerID); owner != nil {

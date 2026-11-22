@@ -101,7 +101,7 @@ func (h *Handler) GetCycle(w http.ResponseWriter, r *http.Request) {
 	case "perimenopause":
 		note = "pms_counted_perimenopause"
 	}
-	out := map[string]any{"stage": owner.Stage, "period_starts": info.PeriodStarts, "cycle_length": info.CycleLength, "period_length": info.PeriodLength, "estimated": info.Estimated, "predictions": info.Predictions, "note": note}
+	out := map[string]any{"subject_id": subjectID, "stage": owner.Stage, "period_starts": info.PeriodStarts, "cycle_length": info.CycleLength, "period_length": info.PeriodLength, "estimated": info.Estimated, "predictions": info.Predictions, "note": note}
 	// The stage suggestion is for the owner only, never her partner.
 	if subjectID == getUserID(r) && owner.EffectiveRole() == model.RoleOwner {
 		suggested, err := h.suggestStage(owner, days, today)

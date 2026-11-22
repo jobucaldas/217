@@ -62,6 +62,7 @@ class ShareState {
     this.inviteUrl = '',
     this.partnerEmail = '',
     this.partnerName = '',
+    this.ownerId = '',
     this.ownerName = '',
     this.ownerEmail = '',
     this.canEditCalendar = true,
@@ -75,6 +76,7 @@ class ShareState {
   final String inviteUrl;
   final String partnerEmail;
   final String partnerName;
+  final String ownerId;
   final String ownerName;
   final String ownerEmail;
   final bool canEditCalendar;
@@ -87,6 +89,7 @@ class ShareState {
         inviteUrl: inviteUrl,
         partnerEmail: partnerEmail,
         partnerName: partnerName,
+        ownerId: ownerId,
         ownerName: ownerName,
         ownerEmail: ownerEmail,
         canEditCalendar: canEditCalendar,
@@ -108,6 +111,7 @@ class ShareState {
       inviteUrl: (json['invite_url'] as String?) ?? '',
       partnerEmail: (json['partner_email'] as String?) ?? '',
       partnerName: (json['partner_name'] as String?) ?? '',
+      ownerId: (json['owner_id'] as String?) ?? '',
       ownerName: (json['owner_name'] as String?) ?? '',
       ownerEmail: (json['owner_email'] as String?) ?? '',
       canEditCalendar: json['can_edit_calendar'] as bool? ?? true,
