@@ -2,8 +2,8 @@
 // listing. Not part of `flutter test` (it lives outside test/); run it through
 // ../render-screenshots.sh, which passes --update-goldens.
 //
-// The sample data is relative to today's date, so the calendars always show a
-// full previous month and upcoming predictions.
+// The sample data is relative to a pinned date (1 December 2026), so the
+// calendars always show a full previous month and upcoming predictions.
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -24,7 +24,8 @@ import 'package:a217/src/theme/app_theme.dart';
 String _key(DateTime d) =>
     '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
-final _now = DateTime.now();
+// Pinned so the store screenshots always show the same date.
+final _now = DateTime(2026, 12, 1, 12);
 final _today = DateTime(_now.year, _now.month, _now.day);
 DateTime _ago(int d) => _today.subtract(Duration(days: d));
 DateTime _ahead(int d) => _today.add(Duration(days: d));
@@ -216,6 +217,7 @@ void main() {
             user: u,
             share: s,
             strings: strings,
+            clock: () => _now,
             onOpenSettings: () {},
           );
 
