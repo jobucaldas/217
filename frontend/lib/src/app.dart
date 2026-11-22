@@ -619,8 +619,9 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
       final linkError = params.remove('link_error');
       final linked = params.remove('linked');
       if (authError != null || linkError != null || linked != null) {
-        final query = Uri(queryParameters: params).query;
-        replaceWebPath(uri.replace(query: query).toString());
+        replaceWebPath(params.isEmpty
+            ? uri.path
+            : uri.replace(queryParameters: params).toString());
         final message = authError == 'account_exists'
             ? _strings.oidcAccountExists
             : authError != null ? _strings.oidcFailed
