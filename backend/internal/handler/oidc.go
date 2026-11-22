@@ -77,7 +77,9 @@ func (h *Handler) oidcStart(w http.ResponseWriter, r *http.Request, a oidcAttemp
 		http.Error(w, `{"error":"internal error"}`, 500)
 		return "", false
 	}
-	http.SetCookie(w, h.oauthBindingCookieValue(binding, expires))
+	cookie := h.oauthBindingCookieValue(binding, expires)
+	cookie.Path = oidcCallbackPath
+	http.SetCookie(w, cookie)
 	w.Header().Set("Cache-Control", "no-store")
 	return authURL, true
 }
@@ -127,7 +129,9 @@ func (h *Handler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"invalid state"}`, 400)
 		return
 	}
-	http.SetCookie(w, h.clearOAuthBindingCookie())
+	clear := h.clearOAuthBindingCookie()
+	clear.Path = oidcCallbackPath
+	http.SetCookie(w, clear)
 	attempt, err := h.store.ConsumeOAuthAttempt(r.URL.Query().Get("state"), cookie.Value)
 	if err != nil {
 		http.Error(w, `{"error":"invalid state"}`, 400)

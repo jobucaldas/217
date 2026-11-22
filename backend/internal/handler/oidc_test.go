@@ -124,6 +124,9 @@ func TestOIDCBrowserAndNative(t *testing.T) {
 		if q.Get("code_challenge_method") != "S256" {
 			t.Fatal("missing pkce")
 		}
+		if c := w.Result().Cookies()[0]; c.Path != oidcCallbackPath {
+			t.Fatalf("binding cookie path %q never reaches the callback", c.Path)
+		}
 		return w.Result().Cookies()[0], q.Get("state")
 	}
 	callback := func(cookie *http.Cookie, state string) *httptest.ResponseRecorder {
