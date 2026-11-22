@@ -54,6 +54,15 @@ func (w *wrapped) CreateEmailVerification(userID, code string, expiresAt time.Ti
 	return err
 }
 
+func (w *wrapped) RefreshEmailVerification(userID, code string, expiresAt time.Time) (bool, error) {
+	defer w.hub.Invalidate(userID)
+	refreshed, err := w.Store.RefreshEmailVerification(userID, code, expiresAt)
+	if err == nil && refreshed {
+		w.hub.Bump("a:" + userID)
+	}
+	return refreshed, err
+}
+
 func (w *wrapped) ConsumeEmailVerification(userID, code string) (bool, error) {
 	defer w.hub.Invalidate(userID)
 	consumed, err := w.Store.ConsumeEmailVerification(userID, code)

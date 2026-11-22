@@ -65,6 +65,15 @@ func (s *PGStore) CreateEmailVerification(userID, code string, expiresAt time.Ti
 	return nil
 }
 
+func (s *PGStore) RefreshEmailVerification(userID, code string, expiresAt time.Time) (bool, error) {
+	res, err := s.db.Exec(`UPDATE email_verifications SET code_hash = $2, expires_at = $3 WHERE user_id = $1`, userID, hashString(code), expiresAt)
+	if err != nil {
+		return false, fmt.Errorf("refreshing email verification: %w", err)
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
+}
+
 func (s *PGStore) HasEmailVerification(userID string) (bool, error) {
 	// A pending verification gates sign-in however old it is: an expired
 	// code still means the address was never verified (resend renews it).

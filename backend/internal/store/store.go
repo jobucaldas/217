@@ -111,6 +111,8 @@ type Store interface {
 	// CreateEmailVerification stores a single-use code forcing the user to
 	// verify the address before the next password login (mail configured).
 	CreateEmailVerification(userID, code string, expiresAt time.Time) error
+	// RefreshEmailVerification replaces a pending code without creating one.
+	RefreshEmailVerification(userID, code string, expiresAt time.Time) (bool, error)
 	// HasEmailVerification reports a pending verification for userID,
 	// however old: it is what blocks a password login until the address
 	// is verified (resend renews it; only a consumed code clears it).

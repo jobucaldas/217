@@ -42,6 +42,57 @@ func TestPasswordSignupAndLogin(t *testing.T) {
 	}
 }
 
+func TestPasswordOriginsAndSessionToken(t *testing.T) {
+	h, _ := newTestHandler(t)
+	h.SetAllowedOrigins([]string{"https://extra.example.com"})
+	body := `{"email":"origin@example.com","password":"long-enough-password"}`
+	for _, fn := range []func(http.ResponseWriter, *http.Request){h.SignupPassword, h.LoginPassword} {
+		for _, origin := range []string{"https://evil.example.com", "null", ""} {
+			r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+			r.Header["Origin"] = []string{origin}
+			r.Header.Set("Content-Type", "text/plain")
+			w := httptest.NewRecorder()
+			fn(w, r)
+			if w.Code != http.StatusForbidden || len(w.Result().Cookies()) != 0 {
+				t.Fatalf("origin %q accepted: %d", origin, w.Code)
+			}
+		}
+	}
+	r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+	r.Header.Set("Origin", "https://extra.example.com")
+	w := httptest.NewRecorder()
+	h.SignupPassword(w, r)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("signup: %d", w.Code)
+	}
+	for _, origin := range []string{"http://localhost:8080", "https://extra.example.com", ""} {
+		r = httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+		if origin != "" {
+			r.Header.Set("Origin", origin)
+		}
+		w = httptest.NewRecorder()
+		h.LoginPassword(w, r)
+		if w.Code != http.StatusOK || len(w.Result().Cookies()) == 0 {
+			t.Fatalf("login %q: %d", origin, w.Code)
+		}
+		if strings.Contains(w.Body.String(), `"session_token"`) != (origin == "") {
+			t.Fatalf("token exposure for %q", origin)
+		}
+	}
+}
+
+func TestPasswordEndpointsDisabled(t *testing.T) {
+	h, _ := newTestHandler(t)
+	h.SetPasswordEnabled(false)
+	for _, fn := range []func(http.ResponseWriter, *http.Request){h.ChangePassword, h.VerifyEmail, h.ResendVerificationEmail} {
+		w := httptest.NewRecorder()
+		fn(w, httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{}`)))
+		if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "password authentication is disabled") {
+			t.Fatalf("disabled: %d %s", w.Code, w.Body.String())
+		}
+	}
+}
+
 func TestPasswordSignupRefusesExistingEmail(t *testing.T) {
 	h, s := newTestHandler(t)
 	if _, err := s.CreateUser("taken@example.com", "Taken", "password123"); err != nil {

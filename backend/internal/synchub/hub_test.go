@@ -29,7 +29,7 @@ var (
 		"UpsertPartnerAlerts", "UpsertReminderPreference",
 		"RecordConsent", "SetRole", "EnableShare", "RevokeShare", "AcceptShare", "DeleteUser",
 		"DeleteSession", "DeleteSessionAndDevice", "DeleteAllSessionsForUser", "CreateDeviceKey", "LinkWorkOSIdentity",
-		"SetPasswordCredential", "DeletePasswordCredential", "CreateEmailVerification", "ConsumeEmailVerification",
+		"SetPasswordCredential", "DeletePasswordCredential", "CreateEmailVerification", "RefreshEmailVerification", "ConsumeEmailVerification",
 	}
 )
 
@@ -91,6 +91,10 @@ func TestPasswordWritesInvalidateSession(t *testing.T) {
 	}{
 		{"set credential", func() error { return f.s.SetPasswordCredential(f.owner.ID, "hash") }},
 		{"create verification", func() error { return f.s.CreateEmailVerification(f.owner.ID, "123456", time.Now().Add(time.Hour)) }},
+		{"refresh verification", func() error {
+			_, err := f.s.RefreshEmailVerification(f.owner.ID, "123456", time.Now().Add(time.Hour))
+			return err
+		}},
 		{"consume verification", func() error { _, err := f.s.ConsumeEmailVerification(f.owner.ID, "123456"); return err }},
 		{"delete credential", func() error { return f.s.DeletePasswordCredential(f.owner.ID) }},
 	}

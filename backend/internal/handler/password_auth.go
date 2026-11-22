@@ -22,6 +22,9 @@ func (h *Handler) SignupPassword(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "password authentication is disabled"})
 		return
 	}
+	if !h.passwordOriginAllowed(w, r) {
+		return
+	}
 	if !h.signupLimiter.allow(ipKey("signup:", r)) {
 		http.Error(w, `{"error":"rate limited"}`, http.StatusTooManyRequests)
 		return
@@ -80,6 +83,9 @@ func (h *Handler) LoginPassword(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "password authentication is disabled"})
 		return
 	}
+	if !h.passwordOriginAllowed(w, r) {
+		return
+	}
 	email, password, deviceKey, ok := h.parseLoginBody(w, r)
 	if !ok {
 		return
@@ -132,9 +138,29 @@ func (h *Handler) LoginPassword(w http.ResponseWriter, r *http.Request) {
 	h.issueSession(w, r, user, deviceKey)
 }
 
+func (h *Handler) passwordOriginAllowed(w http.ResponseWriter, r *http.Request) bool {
+	origins := r.Header.Values("Origin")
+	if len(origins) == 0 {
+		return true
+	}
+	if len(origins) == 1 {
+		for _, allowed := range h.browserOrigins() {
+			if origins[0] == allowed {
+				return true
+			}
+		}
+	}
+	writeJSON(w, http.StatusForbidden, map[string]string{"error": "origin not allowed"})
+	return false
+}
+
 // ChangePassword sets the password for the signed-in account (initial set or
 // change; the current password is required once one exists).
 func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
+	if !h.passwordAuthEnabled() {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "password authentication is disabled"})
+		return
+	}
 	var body struct {
 		CurrentPassword string `json:"current_password"`
 		NewPassword     string `json:"new_password"`
@@ -241,6 +267,10 @@ func (h *Handler) parseLoginBody(w http.ResponseWriter, r *http.Request) (string
 // codes count against the per-IP lockout. Unknown emails get the same
 // response as a wrong code.
 func (h *Handler) VerifyEmail(w http.ResponseWriter, r *http.Request) {
+	if !h.passwordAuthEnabled() {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "password authentication is disabled"})
+		return
+	}
 	var body struct {
 		Email string `json:"email"`
 		Code  string `json:"code"`
@@ -277,6 +307,10 @@ func (h *Handler) VerifyEmail(w http.ResponseWriter, r *http.Request) {
 // ResendVerificationEmail re-sends the verification code for an address;
 // rate limited per IP, and the response never says whether the account exists.
 func (h *Handler) ResendVerificationEmail(w http.ResponseWriter, r *http.Request) {
+	if !h.passwordAuthEnabled() {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "password authentication is disabled"})
+		return
+	}
 	if !h.verifyResendLimiter.allow("resend:" + clientIP(r)) {
 		http.Error(w, `{"error":"rate limited"}`, http.StatusTooManyRequests)
 		return
@@ -288,8 +322,17 @@ func (h *Handler) ResendVerificationEmail(w http.ResponseWriter, r *http.Request
 		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
 		return
 	}
-	if userID, ok := h.lookupUserIDByEmail(strings.ToLower(strings.TrimSpace(body.Email))); ok && h.mail != nil {
-		if err := h.deliverVerificationEmail(userID, strings.ToLower(strings.TrimSpace(body.Email))); err != nil {
+	email := strings.ToLower(strings.TrimSpace(body.Email))
+	if userID, ok := h.lookupUserIDByEmail(email); ok && h.mail != nil {
+		code, err := passwordauth.NewVerificationCode()
+		if err == nil {
+			var refreshed bool
+			refreshed, err = h.store.RefreshEmailVerification(userID, code, time.Now().UTC().Add(24*time.Hour))
+			if err == nil && refreshed {
+				err = h.mail.SendVerification(email, code)
+			}
+		}
+		if err != nil {
 			log.Printf("resending verification: %v", err)
 		}
 	}

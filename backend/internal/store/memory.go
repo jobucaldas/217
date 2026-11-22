@@ -317,6 +317,9 @@ func (s *MemoryStore) LinkWorkOSIdentity(subject, verifiedEmail, name string, au
 		if !authoritative {
 			return nil, fmt.Errorf("legacy account requires independent ownership proof")
 		}
+		if _, ok := s.passwordCredentials[matchingUser.ID]; ok {
+			return nil, fmt.Errorf("account has a password credential")
+		}
 		for _, userID := range s.workosSubjects {
 			if userID == matchingUser.ID {
 				return nil, fmt.Errorf("account already linked to another workos subject")

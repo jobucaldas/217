@@ -62,6 +62,16 @@ func (s *MemoryStore) CreateEmailVerification(userID, code string, expiresAt tim
 	return nil
 }
 
+func (s *MemoryStore) RefreshEmailVerification(userID, code string, expiresAt time.Time) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.emailVerifications[userID]; !ok {
+		return false, nil
+	}
+	s.emailVerifications[userID] = memoryVerification{codeHash: hashString(code), expiresAt: expiresAt}
+	return true, nil
+}
+
 func (s *MemoryStore) HasEmailVerification(userID string) (bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

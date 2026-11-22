@@ -147,6 +147,38 @@ func TestPasswordVerifyExpiredCode(t *testing.T) {
 	}
 }
 
+func TestPasswordResendOnlyPending(t *testing.T) {
+	h, _ := newTestHandler(t)
+	mail := &fakeMailer{}
+	h.SetMailer(mail)
+	signup := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"email":"resend@example.com","password":"long-enough-password"}`))
+	h.SignupPassword(httptest.NewRecorder(), signup)
+	resend := func(email string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		h.ResendVerificationEmail(w, httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"email":"`+email+`"}`)))
+		return w
+	}
+	pending := resend("resend@example.com")
+	if pending.Code != http.StatusOK || len(mail.codes) != 2 {
+		t.Fatalf("pending resend: %d, emails %d", pending.Code, len(mail.codes))
+	}
+	verify := httptest.NewRecorder()
+	h.VerifyEmail(verify, httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"email":"resend@example.com","code":"`+mail.codes[1]+`"}`)))
+	if verify.Code != http.StatusOK {
+		t.Fatalf("verify: %d", verify.Code)
+	}
+	verified := resend("resend@example.com")
+	unknown := resend("unknown@example.com")
+	if verified.Code != pending.Code || unknown.Body.String() != verified.Body.String() || len(mail.codes) != 2 {
+		t.Fatalf("verified or unknown resend differs: %d %s, emails %d", verified.Code, verified.Body.String(), len(mail.codes))
+	}
+	login := httptest.NewRecorder()
+	h.LoginPassword(login, httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"email":"resend@example.com","password":"long-enough-password"}`)))
+	if login.Code != http.StatusOK {
+		t.Fatalf("login after resend: %d", login.Code)
+	}
+}
+
 func TestPasswordResendRateLimited(t *testing.T) {
 	h, _ := newTestHandler(t)
 	mail := &fakeMailer{}
@@ -216,10 +248,21 @@ func TestPasswordRemoveCredential(t *testing.T) {
 		t.Fatalf("only method must be refused with 409, got %d", w.Code)
 	}
 
-	// Link a WorkOS identity so another method remains.
+	// An existing WorkOS account can add a password and later remove it.
+	hash, err := s.GetPasswordCredential(userRec.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeletePasswordCredential(userRec.ID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.LinkWorkOSIdentity("subject-remove", "remove@example.com", "Remove", true); err != nil {
 		t.Fatal(err)
 	}
+	if err := s.SetPasswordCredential(userRec.ID, hash); err != nil {
+		t.Fatal(err)
+	}
+	h.SetPasswordEnabled(false)
 	req = authedRequest(http.MethodDelete, "/api/account/password", cookie, nil)
 	w = httptest.NewRecorder()
 	h.AuthMiddleware(h.RemovePasswordCredential)(w, req)
@@ -227,6 +270,7 @@ func TestPasswordRemoveCredential(t *testing.T) {
 		t.Fatalf("expected 204 with another method, got %d: %s", w.Code, w.Body.String())
 	}
 
+	h.SetPasswordEnabled(true)
 	// The old password no longer signs in.
 	req = httptest.NewRequest(http.MethodPost, "/api/auth/password/login",
 		strings.NewReader(`{"email":"remove@example.com","password":"long-enough-password"}`))
@@ -253,7 +297,17 @@ func TestPasswordRemoveCredentialWorkOSDisabled(t *testing.T) {
 	if err != nil || userRec == nil {
 		t.Fatal("signed-up user not found")
 	}
+	hash, err := s.GetPasswordCredential(userRec.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeletePasswordCredential(userRec.ID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.LinkWorkOSIdentity("subject-noworkos", "noworkos@example.com", "NoWorkOS", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetPasswordCredential(userRec.ID, hash); err != nil {
 		t.Fatal(err)
 	}
 	cookie := sessionCookie(t, s, userRec.ID)

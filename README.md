@@ -65,6 +65,13 @@ services:
       APP_ALLOWED_ORIGINS: ${APP_ALLOWED_ORIGINS:-}
       WORKOS_CLIENT_ID: ${WORKOS_CLIENT_ID:?set WORKOS_CLIENT_ID in .env}
       WORKOS_API_KEY: ${WORKOS_API_KEY:-}
+      AUTH_PASSWORD_ENABLED: "${AUTH_PASSWORD_ENABLED:-true}"
+      AUTH_WORKOS_ENABLED: "${AUTH_WORKOS_ENABLED:-true}"
+      SMTP_HOST: "${SMTP_HOST:-}"
+      SMTP_PORT: "${SMTP_PORT:-587}"
+      SMTP_USER: "${SMTP_USER:-}"
+      SMTP_PASS: "${SMTP_PASS:-}"
+      SMTP_FROM: "${SMTP_FROM:-}"
       PRIVACY_CONTACT: ${PRIVACY_CONTACT:-}
     volumes:
       - certs:/certs:ro

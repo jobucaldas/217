@@ -167,7 +167,9 @@ func (h *Handler) issueSession(w http.ResponseWriter, r *http.Request, user *mod
 		http.Error(w, `{"error":"cannot create session"}`, http.StatusInternalServerError)
 		return
 	}
-	payload["session_token"] = token
+	if r.Header.Get("Origin") == "" {
+		payload["session_token"] = token
+	}
 	if deviceKeyID != "" {
 		payload["device_key_id"] = deviceKeyID
 	}
