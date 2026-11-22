@@ -101,7 +101,11 @@ func (h *Handler) DeviceSession(w http.ResponseWriter, r *http.Request) {
 	// Consumed whatever the outcome: a challenge is good for one try.
 	userID, der, err := h.store.ConsumeDeviceChallenge(body.KeyID, body.Challenge)
 	if err != nil {
-		deviceNotRecognized(w)
+		if errors.Is(err, store.ErrDeviceKeyNotFound) || errors.Is(err, store.ErrDeviceChallengeInvalid) {
+			deviceNotRecognized(w)
+		} else {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "service unavailable"})
+		}
 		return
 	}
 	pub, err := x509.ParsePKIXPublicKey(der)
@@ -113,7 +117,11 @@ func (h *Handler) DeviceSession(w http.ResponseWriter, r *http.Request) {
 	}
 	user, err := h.store.GetUserByID(userID)
 	if err != nil {
-		deviceNotRecognized(w)
+		if errors.Is(err, store.ErrUserNotFound) {
+			deviceNotRecognized(w)
+		} else {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "service unavailable"})
+		}
 		return
 	}
 	token, err := h.createSessionForUser(w, r, user, body.KeyID)
@@ -122,7 +130,10 @@ func (h *Handler) DeviceSession(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"cannot create session"}`, http.StatusInternalServerError)
 		return
 	}
-	payload := h.sessionPayload(user)
+	payload := h.sessionPayload(w, user)
+	if payload == nil {
+		return
+	}
 	payload["session_token"] = token
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, payload)

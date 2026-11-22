@@ -47,7 +47,7 @@ func TestReminderNotifierRunsOnlyAfterSuccessfulMutation(t *testing.T) {
 		{"role", "PUT", `{"role":"partner"}`, (*Handler).SetRole, 200, 500},
 		{"consent", "PUT", fmt.Sprintf(`{"version":%d}`, model.ConsentVersion), (*Handler).RecordConsent, 200, 500},
 		{"withdraw", "DELETE", ``, (*Handler).WithdrawConsent, 200, 500},
-		{"account", "DELETE", ``, (*Handler).DeleteAccount, 204, 500},
+		{"account", "DELETE", ``, (*Handler).DeleteAccount, 204, 503},
 		{"invite", "POST", ``, (*Handler).AcceptShare, 200, 500},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -76,14 +76,14 @@ func (s *PGStore) ConsumeDeviceChallenge(keyID, challenge string) (string, []byt
 		keyID, time.Now().Add(-model.DeviceKeyIdleRetention)).
 		Scan(&userID, &publicKey, &hash, &expires)
 	if err == sql.ErrNoRows {
-		return "", nil, fmt.Errorf("device key not found")
+		return "", nil, ErrDeviceKeyNotFound
 	}
 	if err != nil {
 		return "", nil, fmt.Errorf("consuming device challenge: %w", err)
 	}
 	if !hash.Valid || !expires.Valid || !time.Now().UTC().Before(expires.Time) ||
 		subtle.ConstantTimeCompare([]byte(hash.String), []byte(hashString(challenge))) != 1 {
-		return "", nil, fmt.Errorf("invalid or expired challenge")
+		return "", nil, ErrDeviceChallengeInvalid
 	}
 	return userID, publicKey, nil
 }

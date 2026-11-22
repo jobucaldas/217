@@ -218,7 +218,7 @@ func (s *MemoryStore) DeleteEntry(userID, date string) error {
 	defer s.mu.Unlock()
 	key := entryKey(userID, date)
 	if _, ok := s.entries[key]; !ok {
-		return fmt.Errorf("entry not found")
+		return ErrEntryNotFound
 	}
 	delete(s.entries, key)
 	return nil

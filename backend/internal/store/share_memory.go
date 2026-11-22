@@ -35,7 +35,7 @@ func (s *MemoryStore) GetUserByID(userID string) (*model.User, error) {
 			return sanitizeUser(u), nil
 		}
 	}
-	return nil, fmt.Errorf("user not found")
+	return nil, ErrUserNotFound
 }
 
 func (s *MemoryStore) WorkOSSubject(userID string) (string, error) {
@@ -61,7 +61,7 @@ func (s *MemoryStore) DeleteUser(userID string) error {
 		}
 	}
 	if apiKey == "" {
-		return fmt.Errorf("user not found")
+		return ErrUserNotFound
 	}
 
 	delete(s.users, apiKey)
@@ -361,17 +361,17 @@ func (s *MemoryStore) CalendarSubjectID(userID string) (string, error) {
 	defer s.mu.RUnlock()
 	user := s.findUserLocked(userID)
 	if user == nil {
-		return "", fmt.Errorf("user not found")
+		return "", ErrUserNotFound
 	}
 	switch model.NormalizeRole(user.Role) {
 	case model.RoleOwner:
 		return userID, nil
 	case "":
-		return "", fmt.Errorf("role not chosen")
+		return "", ErrRoleNotChosen
 	}
 	live := s.liveShareForPartnerLocked(userID)
 	if live == nil || live.Status != model.ShareActive {
-		return "", fmt.Errorf("share inactive")
+		return "", ErrShareInactive
 	}
 	return live.OwnerID, nil
 }

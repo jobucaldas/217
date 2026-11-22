@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"strings"
@@ -11,15 +12,18 @@ import (
 
 	"217/backend/internal/cycle"
 	"217/backend/internal/model"
+	"217/backend/internal/store"
 )
 
 // writeCalendarSubjectError explains why the caller has no calendar to read.
 func writeCalendarSubjectError(w http.ResponseWriter, err error) {
-	msg := "share inactive"
-	if strings.Contains(err.Error(), "role not chosen") {
-		msg = "role not chosen"
+	if errors.Is(err, store.ErrRoleNotChosen) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "role not chosen"})
+	} else if errors.Is(err, store.ErrShareInactive) || errors.Is(err, store.ErrUserNotFound) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "share inactive"})
+	} else {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "service unavailable"})
 	}
-	writeJSON(w, http.StatusForbidden, map[string]string{"error": msg})
 }
 
 // SetRole lets a user pick owner (logs the pill) or partner (follows a calendar).
@@ -46,7 +50,7 @@ func (h *Handler) SetRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.notifyReminders()
-	writeJSON(w, http.StatusOK, h.sessionPayload(user))
+	h.writeSession(w, user)
 }
 
 // GetCycle returns logged period starts and the next predicted periods/PMS
@@ -149,7 +153,11 @@ func (h *Handler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r)
 	user, err := h.store.GetUserByID(userID)
 	if err != nil {
-		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		if errors.Is(err, store.ErrUserNotFound) {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		} else {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "service unavailable"})
+		}
 		return
 	}
 	if body.DisplayName != nil {
@@ -178,7 +186,7 @@ func (h *Handler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, h.sessionPayload(updated))
+	h.writeSession(w, updated)
 }
 
 func validDisplayName(name string) bool {
@@ -216,6 +224,10 @@ func (h *Handler) SetStage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user, err := h.store.GetUserByID(getUserID(r))
+	if err != nil && !errors.Is(err, store.ErrUserNotFound) {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "service unavailable"})
+		return
+	}
 	if err != nil || user.EffectiveRole() != model.RoleOwner {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "only owners may set stage"})
 		return
@@ -226,18 +238,25 @@ func (h *Handler) SetStage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, h.sessionPayload(updated))
+	h.writeSession(w, updated)
 }
 
-func (h *Handler) isPartner(userID string) bool {
+func (h *Handler) isPartner(w http.ResponseWriter, userID string) bool {
 	user, err := h.store.GetUserByID(userID)
-	return err == nil && user.EffectiveRole() == model.RolePartner
+	if err != nil && !errors.Is(err, store.ErrUserNotFound) {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "service unavailable"})
+		return false
+	}
+	if err != nil || user.EffectiveRole() != model.RolePartner {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "only partners have partner alerts"})
+		return false
+	}
+	return true
 }
 
 func (h *Handler) GetPartnerAlerts(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r)
-	if !h.isPartner(userID) {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "only partners have partner alerts"})
+	if !h.isPartner(w, userID) {
 		return
 	}
 	pref, err := h.store.GetPartnerAlerts(userID)
@@ -256,8 +275,7 @@ func validClock(v string) bool {
 
 func (h *Handler) UpsertPartnerAlerts(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r)
-	if !h.isPartner(userID) {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "only partners have partner alerts"})
+	if !h.isPartner(w, userID) {
 		return
 	}
 	// Pre-fill defaults so older clients that omit newer fields (e.g.

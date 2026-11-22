@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"net/url"
@@ -11,16 +12,15 @@ import (
 
 	"217/backend/internal/auth"
 	"217/backend/internal/model"
+	"217/backend/internal/store"
 )
 
-func (h *Handler) sessionPayload(user *model.User) map[string]interface{} {
+func (h *Handler) sessionPayload(w http.ResponseWriter, user *model.User) map[string]interface{} {
 	share, err := h.store.GetShareState(user.ID)
 	if err != nil {
 		log.Printf("share state error: %v", err)
-		share = &model.ShareState{
-			Status:          model.ShareNone,
-			CanEditCalendar: user.EffectiveRole() == model.RoleOwner,
-		}
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "service unavailable"})
+		return nil
 	}
 	user.Role = user.EffectiveRole()
 	return map[string]interface{}{
@@ -30,6 +30,12 @@ func (h *Handler) sessionPayload(user *model.User) map[string]interface{} {
 			"version":  model.ConsentVersion,
 			"required": !user.HasConsent(),
 		},
+	}
+}
+
+func (h *Handler) writeSession(w http.ResponseWriter, user *model.User) {
+	if payload := h.sessionPayload(w, user); payload != nil {
+		writeJSON(w, http.StatusOK, payload)
 	}
 }
 
@@ -56,7 +62,7 @@ func (h *Handler) RecordConsent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.notifyReminders()
-	writeJSON(w, http.StatusOK, h.sessionPayload(user))
+	h.writeSession(w, user)
 }
 
 // WithdrawConsent revokes the user's agreement to the privacy notice: data
@@ -70,7 +76,7 @@ func (h *Handler) WithdrawConsent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.notifyReminders()
-	writeJSON(w, http.StatusOK, h.sessionPayload(user))
+	h.writeSession(w, user)
 }
 
 // ExportAccount returns everything stored about the caller as a JSON file.
@@ -78,7 +84,11 @@ func (h *Handler) ExportAccount(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r)
 	user, err := h.store.GetUserByID(userID)
 	if err != nil {
-		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		if errors.Is(err, store.ErrUserNotFound) {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		} else {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "service unavailable"})
+		}
 		return
 	}
 	out := model.AccountExport{ExportedAt: time.Now().UTC(), User: user}
@@ -185,11 +195,11 @@ func (h *Handler) deleteAccount(ctx context.Context, userID string) (int, string
 	}
 
 	if err := h.store.DeleteUser(userID); err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, store.ErrUserNotFound) {
 			return http.StatusNotFound, "user not found"
 		}
 		log.Printf("delete account error: %v", err)
-		return http.StatusInternalServerError, "failed to delete local account data"
+		return http.StatusServiceUnavailable, "service unavailable"
 	}
 	h.notifyReminders()
 	return 0, ""
@@ -314,12 +324,12 @@ func (h *Handler) MarkInboxNoteRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.store.MarkMessageRead(getUserID(r), id); err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, store.ErrMessageNotFound) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "note not found"})
 			return
 		}
 		log.Printf("mark message read: %v", err)
-		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "service unavailable"})
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -330,10 +340,15 @@ func (h *Handler) calendarSubject(userID string) (string, error) {
 	return h.store.CalendarSubjectID(userID)
 }
 
-func (h *Handler) requireCalendarEdit(userID string) bool {
+func (h *Handler) requireCalendarEdit(w http.ResponseWriter, userID string) bool {
 	state, err := h.store.GetShareState(userID)
 	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "service unavailable"})
 		return false
 	}
-	return state.CanEditCalendar
+	if !state.CanEditCalendar {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "calendar is read-only"})
+		return false
+	}
+	return true
 }

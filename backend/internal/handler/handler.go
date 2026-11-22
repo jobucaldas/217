@@ -297,6 +297,10 @@ func (h *Handler) AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		}
 		user, err := h.store.GetUserBySession(token)
 		if err != nil {
+			if !errors.Is(err, store.ErrSessionNotFound) {
+				writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "service unavailable"})
+				return
+			}
 			http.SetCookie(w, h.clearSessionCookie())
 			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 			return
@@ -338,7 +342,10 @@ func (h *Handler) CurrentSession(w http.ResponseWriter, r *http.Request) {
 	if token, ok := h.sessionTokenFromRequest(r); ok {
 		user, err := h.store.GetUserBySession(token)
 		if err == nil {
-			payload := h.sessionPayload(user)
+			payload := h.sessionPayload(w, user)
+			if payload == nil {
+				return
+			}
 			// Browsers need a fresh sign-in before an export, withdrawal or
 			// deletion (RecentBrowserSignIn); the privacy pages ask first.
 			payload["recent_sign_in"] = h.browserSessionIsFresh(r)
@@ -364,7 +371,11 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 		// An expired Bearer session no longer leads to its device key: answer
 		// 401 so the app renews with the key and logs out again, revoking it.
 		if _, err := h.store.GetUserBySession(token); err != nil && cookieErr != nil {
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			if errors.Is(err, store.ErrSessionNotFound) {
+				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			} else {
+				writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "service unavailable"})
+			}
 			return
 		}
 		// A device key ends with the session: signing out means signing in again.
@@ -614,7 +625,10 @@ func (h *Handler) ExchangeWorkOS(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"cannot create session"}`, http.StatusInternalServerError)
 		return
 	}
-	payload := h.sessionPayload(user)
+	payload := h.sessionPayload(w, user)
+	if payload == nil {
+		return
+	}
 	payload["session_token"] = sessionToken
 	if deviceKeyID != "" {
 		payload["device_key_id"] = deviceKeyID
@@ -692,8 +706,7 @@ func (h *Handler) GetEntry(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) UpsertEntry(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r)
-	if !h.requireCalendarEdit(userID) {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "calendar is read-only"})
+	if !h.requireCalendarEdit(w, userID) {
 		return
 	}
 	date := r.PathValue("date")
@@ -724,8 +737,7 @@ func (h *Handler) UpsertEntry(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) DeleteEntry(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r)
-	if !h.requireCalendarEdit(userID) {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "calendar is read-only"})
+	if !h.requireCalendarEdit(w, userID) {
 		return
 	}
 	date := r.PathValue("date")
@@ -738,12 +750,12 @@ func (h *Handler) DeleteEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.store.DeleteEntry(userID, date); err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, store.ErrEntryNotFound) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "entry not found"})
 			return
 		}
 		log.Printf("delete entry error: %v", err)
-		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "service unavailable"})
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

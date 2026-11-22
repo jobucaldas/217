@@ -299,7 +299,7 @@ func (s *PGStore) DeleteEntry(userID, date string) error {
 		return fmt.Errorf("deleting entry rows: %w", err)
 	}
 	if n == 0 {
-		return fmt.Errorf("entry not found")
+		return ErrEntryNotFound
 	}
 	return nil
 }

@@ -13,7 +13,12 @@ var (
 	// ErrDeviceKeyNotFound indicates a missing or inactive device key.
 	ErrDeviceKeyNotFound = errors.New("device key not found")
 	// ErrEntryNotFound indicates no calendar entry exists for the requested date.
-	ErrEntryNotFound = errors.New("entry not found")
+	ErrEntryNotFound          = errors.New("entry not found")
+	ErrUserNotFound           = errors.New("user not found")
+	ErrMessageNotFound        = errors.New("message not found")
+	ErrDeviceChallengeInvalid = errors.New("invalid or expired challenge")
+	ErrRoleNotChosen          = errors.New("role not chosen")
+	ErrShareInactive          = errors.New("share inactive")
 )
 
 // ReminderDeliveryLease is how long a crashed sender's claim stays exclusive.

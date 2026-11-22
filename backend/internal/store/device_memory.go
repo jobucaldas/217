@@ -90,14 +90,14 @@ func (s *MemoryStore) ConsumeDeviceChallenge(keyID, challenge string) (string, [
 	defer s.mu.Unlock()
 	now := time.Now()
 	if !s.deviceKeyActive(keyID, now) {
-		return "", nil, fmt.Errorf("device key not found")
+		return "", nil, ErrDeviceKeyNotFound
 	}
 	key := s.deviceKeys[keyID]
 	hash, expires := key.ChallengeHash, key.ChallengeExpires
 	key.ChallengeHash, key.ChallengeExpires = "", time.Time{}
 	if hash == "" || !now.Before(expires) ||
 		subtle.ConstantTimeCompare([]byte(hash), []byte(hashString(challenge))) != 1 {
-		return "", nil, fmt.Errorf("invalid or expired challenge")
+		return "", nil, ErrDeviceChallengeInvalid
 	}
 	return key.UserID, append([]byte(nil), key.PublicKey...), nil
 }
