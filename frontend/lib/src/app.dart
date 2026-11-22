@@ -43,6 +43,7 @@ class App217 extends StatefulWidget {
     this.updateClient,
     this.installedVersion,
     this.clock = DateTime.now,
+    this.webPage,
   });
 
   final AppConfig config;
@@ -61,6 +62,9 @@ class App217 extends StatefulWidget {
 
   /// Current time; only tests replace it.
   final DateTime Function() clock;
+
+  /// Standalone privacy page override; only tests replace it.
+  final WebPage? webPage;
 
   @override
   State<App217> createState() => _App217State();
@@ -109,7 +113,8 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
 
   /// Web opened on one of the standalone privacy pages (`/app/privacy`,
   /// `/app/account/delete`): shown instead of the app, signed in or not.
-  final WebPage? _webPage = kIsWeb ? webPageFor(Uri.base) : null;
+  late final WebPage? _webPage =
+      widget.webPage ?? (kIsWeb ? webPageFor(Uri.base) : null);
 
   /// Changes only when the signed-in account does (logout, deletion, server
   /// switch, sign-in), so a late session refresh cannot restore the old one.
@@ -384,7 +389,11 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
         if (session != null) _clearRemindersIfConsentRequired(session);
       } else {
         final probeEpoch = _accountEpoch;
-        unawaited(_loadConfigAndSession()
+        unawaited(_api.loadAuthConfig().then((_) {
+          if (mounted && probeEpoch == _accountEpoch) setState(() {});
+        }));
+        unawaited(_api
+            .currentSession()
             .then<void>((fresh) => _applyBootstrapSession(fresh, probeEpoch))
             .catchError((Object _) {}));
       }

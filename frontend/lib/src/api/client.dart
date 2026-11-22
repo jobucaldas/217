@@ -332,12 +332,15 @@ class ApiClient {
     if (user == null) return false;
     // Never mix two accounts' data on the device.
     if (_userId != null && _userId != user.id) await _dropLocalDataLocked();
+    // Invalidate any previous calendar before persisting the new session so a
+    // crash between writes cannot pair the new session with the old owner's
+    // cached months or cycle predictions.
+    await _calendarIs(user.id, user.role, snapshot.share);
     decoded
       ..remove('session_token')
       ..remove('device_key_id');
     final shouldSync = await _rememberLocked(user.id, jsonEncode(decoded));
     _role = user.role;
-    await _calendarIs(user.id, user.role, snapshot.share);
     return shouldSync;
   }
 
@@ -356,7 +359,7 @@ class ApiClient {
     final known = await _local.readDoc(userId, 'calendar');
     if (known == calendar) return;
     _calendarGeneration++;
-    if (known != null) await _local.clearCalendar(userId);
+    if (known != null || role == 'partner') await _local.clearCalendar(userId);
     await _local.writeDoc(userId, 'calendar', calendar);
   }
 
@@ -438,6 +441,11 @@ class ApiClient {
         return null;
       }
       if (cached == null) return null;
+      await _calendarIs(
+        cached.userId,
+        cached.snapshot.user!.role,
+        cached.snapshot.share,
+      );
       _userId = cached.userId;
       _role = cached.snapshot.user!.role;
       await _countPending(cached.userId);
@@ -1134,6 +1142,7 @@ class ApiClient {
           final response =
               await _send('GET', _uri('/api/cycle', {'today': today}));
           if (response.statusCode != 200) {
+            await _clearCalendarIfAccessDenied(scope, response);
             throw ApiException('cycle', response);
           }
           await _keepDoc(scope, 'cycle', response.body);
@@ -1157,6 +1166,29 @@ class ApiClient {
       scope.userId != null &&
       scope.userId == _userId &&
       scope.calendar == _calendarGeneration;
+
+  /// Clears cached calendar months and predictions when the server denies
+  /// calendar access (revoked share, withdrawn owner consent, missing role, or
+  /// rejected session) so revoked data cannot survive an offline restart.
+  Future<void> _clearCalendarIfAccessDenied(
+    ({String? userId, int calendar}) scope,
+    http.Response response,
+  ) async {
+    final msg = response.statusCode == 403
+        ? ApiException._errorField(response.body)
+        : null;
+    final denied = response.statusCode == 401 ||
+        (response.statusCode == 403 &&
+            (msg == 'share inactive' ||
+                msg == 'calendar owner consent required' ||
+                msg == 'role not chosen'));
+    if (!denied) return;
+    await _serializeAuth(() async {
+      if (!_isCurrent(scope)) return;
+      _calendarGeneration++;
+      await _local.clearCalendar(scope.userId!);
+    });
+  }
 
   /// Saves a server answer, if it is still for the account and calendar on
   /// the device. Serialized with auth/calendar invalidation so a relink or
@@ -1221,6 +1253,7 @@ class ApiClient {
             }),
           );
           if (response.statusCode != 200) {
+            await _clearCalendarIfAccessDenied(scope, response);
             throw ApiException('list entries', response);
           }
           final decoded = jsonDecode(response.body) as Map<String, dynamic>;

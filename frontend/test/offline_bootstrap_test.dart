@@ -1594,6 +1594,321 @@ void main() {
     // Owner A's response must NOT survive in the local cache after relink.
     expect(await api.cachedMonth(2026, 11), isNull);
   });
+
+  testWidgets(
+      'interrupted relink clears previous owner calendar before persisting '
+      'session and never hydrates a mismatched cached calendar',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(412, 915);
+    addTearDown(tester.view.reset);
+
+    // Part A: live relink clears Owner A's calendar strictly before persisting
+    // Owner B's session doc.
+    FlutterSecureStorage.setMockInitialValues({'session_token': 'tok'});
+    final ops = <String>[];
+    final recordingStore = _RecordingLocalStore(onOp: ops.add);
+    await recordingStore.writeDoc(localGlobalUser, 'last_user', 'u-partner');
+    await recordingStore.writeDoc(
+      'u-partner',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-partner',
+          'email': 'partner@example.com',
+          'role': 'partner',
+        },
+        'share': {
+          'status': 'active',
+          'owner_email': 'owner-a@example.com',
+          'owner_name': 'Owner A',
+        },
+      }),
+    );
+    await recordingStore.writeDoc(
+      'u-partner',
+      'calendar',
+      'partner:active:owner-a@example.com',
+    );
+    await recordingStore.replaceMonth('u-partner', 2026, 11, const [
+      Entry(date: '2026-11-15', taken: true, notes: 'owner-a secret'),
+    ]);
+    final relinkApi = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: recordingStore,
+      httpClient: MockClient((request) async {
+        if (request.url.path == '/api/auth/session') {
+          return http.Response(
+            jsonEncode({
+              'user': {
+                'id': 'u-partner',
+                'email': 'partner@example.com',
+                'role': 'partner',
+              },
+              'share': {
+                'status': 'active',
+                'owner_email': 'owner-b@example.com',
+                'owner_name': 'Owner B',
+              },
+            }),
+            200,
+          );
+        }
+        return http.Response('{}', 200);
+      }),
+    );
+    expect((await relinkApi.cachedSession())?.share?.ownerEmail,
+        'owner-a@example.com');
+    ops.clear();
+    await relinkApi.currentSession();
+
+    final clearIdx = ops.indexOf('clearCalendar:u-partner');
+    final sessionWriteIdx = ops.indexOf('writeDoc:u-partner:session');
+    expect(clearIdx, greaterThanOrEqualTo(0));
+    expect(sessionWriteIdx, greaterThan(clearIdx));
+    expect(await recordingStore.monthEntries('u-partner', 2026, 11), isNull);
+
+    // Part B: even if an older crash left Owner B's session alongside Owner A's
+    // calendar scope on disk, an offline start clears Owner A's data before
+    // preloading the calendar.
+    final mismatched = MemoryLocalStore();
+    await mismatched.writeDoc(localGlobalUser, 'last_user', 'u-partner');
+    await mismatched.writeDoc(
+      'u-partner',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-partner',
+          'email': 'partner@example.com',
+          'role': 'partner',
+        },
+        'share': {
+          'status': 'active',
+          'owner_email': 'owner-b@example.com',
+          'owner_name': 'Owner B',
+        },
+      }),
+    );
+    await mismatched.writeDoc(
+      'u-partner',
+      'calendar',
+      'partner:active:owner-a@example.com',
+    );
+    await mismatched.replaceMonth('u-partner', 2026, 11, const [
+      Entry(date: '2026-11-15', taken: true, notes: 'owner-a secret'),
+    ]);
+    await mismatched.replaceMonth('u-partner', 2026, 10, const []);
+    await mismatched.replaceMonth('u-partner', 2026, 12, const []);
+
+    final offlineApi = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: mismatched,
+      httpClient: MockClient(
+        (_) async => http.Response('unavailable', 503),
+      ),
+    );
+    await tester.pumpWidget(App217(
+      config: offlineApi.config,
+      api: offlineApi,
+      clock: () => DateTime(2026, 11, 15, 10, 0),
+    ));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.byType(CalendarScreen), findsOneWidget);
+    expect(find.text('owner-a secret'), findsNothing);
+    expect(find.text('Taken'), findsNothing);
+    expect(await mismatched.monthEntries('u-partner', 2026, 11), isNull);
+  });
+
+  testWidgets(
+      '403 share inactive clears preloaded calendar, dismisses open overlay, '
+      'and wipes local cache while /api/auth/session is stalled',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(412, 915);
+    addTearDown(tester.view.reset);
+
+    FlutterSecureStorage.setMockInitialValues({'session_token': 'tok'});
+    final local = MemoryLocalStore();
+    await local.writeDoc(localGlobalUser, 'last_user', 'u-partner');
+    await local.writeDoc(
+      'u-partner',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-partner',
+          'email': 'partner@example.com',
+          'role': 'partner',
+        },
+        'share': {
+          'status': 'active',
+          'owner_email': 'owner-a@example.com',
+          'owner_name': 'Owner A',
+          'can_edit_calendar': false,
+        },
+      }),
+    );
+    await local.writeDoc(
+      'u-partner',
+      'calendar',
+      'partner:active:owner-a@example.com',
+    );
+    await local.replaceMonth('u-partner', 2026, 11, const [
+      Entry(date: '2026-11-15', taken: true, notes: 'revoked private note'),
+    ]);
+    await local.replaceMonth('u-partner', 2026, 10, const []);
+    await local.replaceMonth('u-partner', 2026, 12, const []);
+
+    final sessionGate = Completer<void>();
+    final configGate = Completer<void>();
+    final entriesGate = Completer<void>();
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: local,
+      httpClient: MockClient((request) async {
+        switch (request.url.path) {
+          case '/api/auth/session':
+            await sessionGate.future;
+            return http.Response('unavailable', 503);
+          case '/api/auth/config':
+            await configGate.future;
+            return http.Response('unavailable', 503);
+          case '/api/entries':
+            await entriesGate.future;
+            return http.Response('{"error":"share inactive"}', 403);
+          case '/api/cycle':
+            return http.Response('{"error":"share inactive"}', 403);
+          default:
+            return http.Response('{}', 200);
+        }
+      }),
+    );
+
+    await tester.pumpWidget(App217(
+      config: api.config,
+      api: api,
+      clock: () => DateTime(2026, 11, 15, 10, 0),
+    ));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    // Open Owner A's read-only day sheet while /api/auth/session stays stalled.
+    await tester.tap(find.byKey(const ValueKey('view-day-button')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byType(ExpandableDaySheet), findsOneWidget);
+    expect(find.text('revoked private note'), findsWidgets);
+
+    // /api/entries returns 403 share inactive while session is still pending.
+    entriesGate.complete();
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    expect(sessionGate.isCompleted, isFalse);
+    expect(find.byType(ExpandableDaySheet), findsNothing);
+    expect(find.text('revoked private note'), findsNothing);
+    expect(find.text('Taken'), findsNothing);
+    expect(await local.monthEntries('u-partner', 2026, 11), isNull);
+
+    sessionGate.complete();
+    configGate.complete();
+    await tester.pump();
+  });
+
+  testWidgets(
+      'standalone privacy page updates with auth config even when '
+      '/api/auth/session fails during background bootstrap', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(412, 2400);
+    addTearDown(tester.view.reset);
+
+    FlutterSecureStorage.setMockInitialValues({});
+    final configGate = Completer<void>();
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: MemoryLocalStore(),
+      httpClient: MockClient((request) async {
+        switch (request.url.path) {
+          case '/api/auth/config':
+            await configGate.future;
+            return http.Response(
+              jsonEncode({
+                'authkit': true,
+                'privacy_contact': 'dpo@example.com',
+                'workos_user_deletion': true,
+              }),
+              200,
+            );
+          case '/api/auth/session':
+            throw http.ClientException('session endpoint unreachable');
+          default:
+            return http.Response('{}', 200);
+        }
+      }),
+    );
+
+    await tester.pumpWidget(App217(
+      config: api.config,
+      api: api,
+      webPage: WebPage.deleteAccount,
+      clock: () => DateTime(2026, 11, 15, 10, 0),
+    ));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    // Before config completes, sign-in is unavailable and no contact is shown.
+    expect(find.byKey(const ValueKey('privacy-sign-in')), findsNothing);
+    expect(find.textContaining('dpo@example.com'), findsNothing);
+
+    // Config completes while /api/auth/session threw: page must still rebuild.
+    configGate.complete();
+    await tester.pump();
+    await tester.pump();
+
+    expect(api.authkit, isTrue);
+    expect(api.privacyContact, 'dpo@example.com');
+    expect(find.byKey(const ValueKey('privacy-sign-in')), findsOneWidget);
+    expect(find.textContaining('dpo@example.com'), findsOneWidget);
+  });
+}
+
+class _RecordingLocalStore extends MemoryLocalStore {
+  _RecordingLocalStore({required this.onOp});
+
+  final void Function(String op) onOp;
+
+  @override
+  Future<void> writeDoc(String userId, String key, String value) {
+    onOp('writeDoc:$userId:$key');
+    return super.writeDoc(userId, key, value);
+  }
+
+  @override
+  Future<void> clearCalendar(String userId) {
+    onOp('clearCalendar:$userId');
+    return super.clearCalendar(userId);
+  }
 }
 
 class _GatedPendingWritesStore extends MemoryLocalStore {

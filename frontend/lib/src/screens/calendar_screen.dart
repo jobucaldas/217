@@ -514,16 +514,25 @@ class _CalendarScreenState extends State<CalendarScreen>
   }
 
   bool _handleConsentFailure(Object err, {bool closeDayEditor = false}) {
-    if (err is! ApiException || err.statusCode != 403) return false;
-    if (err.message == 'calendar owner consent required') {
+    if (err is! ApiException) return false;
+    if (err.statusCode == 403 &&
+        err.message == 'calendar owner consent required') {
       _clearCalendarData(
         error: widget.strings.sharedCalendarOwnerConsentRequired,
       );
       if (closeDayEditor && mounted) Navigator.of(context).maybePop();
       return true;
     }
-    if (err.message == 'consent required') {
+    if (err.statusCode == 403 && err.message == 'consent required') {
       _clearCalendarData(cancelPartnerAlerts: false);
+      if (closeDayEditor && mounted) Navigator.of(context).maybePop();
+      return true;
+    }
+    if ((err.statusCode == 403 &&
+            (err.message == 'share inactive' ||
+                err.message == 'role not chosen')) ||
+        err.statusCode == 401) {
+      _clearCalendarData(error: friendlyError(widget.strings, err));
       if (closeDayEditor && mounted) Navigator.of(context).maybePop();
       return true;
     }
