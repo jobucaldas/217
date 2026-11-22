@@ -151,6 +151,8 @@ class ApiClient {
   static const _lastUserDoc = 'last_user';
   static const _sessionDoc = 'session';
   static const _apiBaseKey = 'api_base_url';
+  static const _calendarInvalidatedKey = 'calendar_invalidated_user';
+  static const _invalidatedCalendarMarker = 'invalidated';
 
   /// Loads the persisted server URL override, if any. Returns false when
   /// reading storage failed (distinct from "no override saved") and blocks
@@ -299,6 +301,10 @@ class ApiClient {
     pendingWrites.value = 0;
     await _local.clearAll();
     _calendarCacheBlocked = false;
+    _consentBlocked = false;
+    try {
+      await _storage.delete(key: _calendarInvalidatedKey);
+    } catch (_) {}
   }
 
   Future<void> _forgetDeviceLocked() async {
@@ -361,6 +367,7 @@ class ApiClient {
       ..remove('device_key_id');
     final shouldSync = await _rememberLocked(user.id, jsonEncode(decoded));
     _role = user.role;
+    _consentBlocked = snapshot.consentRequired;
     _sessionRevision++;
     _consentRevision++;
     return shouldSync;
@@ -372,6 +379,13 @@ class ApiClient {
   /// True when a calendar invalidation failed to delete local rows from disk;
   /// suppresses local calendar cache reads until a subsequent clear succeeds.
   bool _calendarCacheBlocked = false;
+
+  /// True after an explicit `403 consent required` (or a cached session with
+  /// `consentRequired == true`); suppresses local calendar cache reads until
+  /// the server confirms consent again, while preserving local rows on disk.
+  bool _consentBlocked = false;
+
+  bool get _calendarReadBlocked => _calendarCacheBlocked || _consentBlocked;
 
   /// Moves whenever the calendar kept on the device is cleared or changes.
   int _calendarGeneration = 0;
@@ -395,6 +409,30 @@ class ApiClient {
     return 'partner:${share?.status ?? 'none'}:$ownerSuffix';
   }
 
+  Future<void> _markCalendarInvalidatedLocked(String userId) async {
+    _calendarCacheBlocked = true;
+    try {
+      await _local.writeDoc(userId, 'calendar', _invalidatedCalendarMarker);
+    } catch (_) {}
+    try {
+      await _storage.write(key: _calendarInvalidatedKey, value: userId);
+    } catch (_) {}
+  }
+
+  Future<void> _clearCalendarOrPersistInvalidationLocked(String userId) async {
+    try {
+      await _local.clearCalendar(userId);
+      _calendarCacheBlocked = false;
+      try {
+        if (await _storage.read(key: _calendarInvalidatedKey) == userId) {
+          await _storage.delete(key: _calendarInvalidatedKey);
+        }
+      } catch (_) {}
+    } catch (_) {
+      await _markCalendarInvalidatedLocked(userId);
+    }
+  }
+
   /// Months and predictions kept here belong to one calendar: the owner's
   /// own, or the one a partner follows. When that changes (joined another
   /// owner, share revoked, role switched) the old copy goes.
@@ -406,11 +444,31 @@ class ApiClient {
         : (role == 'owner' ? userId : null);
     final calendar = _calendarMarker(role, share);
     final known = await _local.readDoc(userId, 'calendar');
-    if (known == calendar && !_calendarCacheBlocked) return;
+    var invalidatedInStorage = false;
+    try {
+      invalidatedInStorage =
+          await _storage.read(key: _calendarInvalidatedKey) == userId;
+    } catch (_) {}
+    if (known == calendar && !_calendarCacheBlocked && !invalidatedInStorage) {
+      return;
+    }
     _calendarGeneration++;
-    if (known != null || role == 'partner' || _calendarCacheBlocked) {
-      await _local.clearCalendar(userId);
-      _calendarCacheBlocked = false;
+    if (known != null ||
+        role == 'partner' ||
+        _calendarCacheBlocked ||
+        invalidatedInStorage) {
+      try {
+        await _local.clearCalendar(userId);
+        _calendarCacheBlocked = false;
+        if (invalidatedInStorage) {
+          try {
+            await _storage.delete(key: _calendarInvalidatedKey);
+          } catch (_) {}
+        }
+      } catch (_) {
+        await _markCalendarInvalidatedLocked(userId);
+        return;
+      }
     }
     await _local.writeDoc(userId, 'calendar', calendar);
   }
@@ -522,6 +580,7 @@ class ApiClient {
       );
       _userId = cached.userId;
       _role = cached.snapshot.user!.role;
+      _consentBlocked = cached.snapshot.consentRequired;
       await _countPending(cached.userId);
       return cached.snapshot;
     });
@@ -739,6 +798,7 @@ class ApiClient {
           return false;
         }
         if (expectedConsentRev != _consentRevision) return false;
+        _consentBlocked = true;
         final userId = _userId;
         if (userId == null) return true;
         try {
@@ -1294,7 +1354,7 @@ class ApiClient {
           return CycleInfo.fromJson(decoded);
         },
         (userId) async {
-          if (_calendarCacheBlocked) return null;
+          if (_calendarReadBlocked) return null;
           final body = await _local.readDoc(userId, 'cycle');
           return body == null
               ? null
@@ -1336,14 +1396,7 @@ class ApiClient {
       _calendarGeneration++;
       _sessionRevision++;
       fired = true;
-      try {
-        await _local.clearCalendar(scope.userId!);
-        _calendarCacheBlocked = false;
-      } catch (_) {
-        // Never let a disk-cleanup failure turn a confirmed mismatch into an
-        // unreachable-server cache fallback; suppress cached calendar reads.
-        _calendarCacheBlocked = true;
-      }
+      await _clearCalendarOrPersistInvalidationLocked(scope.userId!);
     });
     if (fired) onCalendarScopeMismatch?.call();
     throw const CalendarScopeMismatchException();
@@ -1374,14 +1427,7 @@ class ApiClient {
       _calendarGeneration++;
       _sessionRevision++;
       fired = true;
-      try {
-        await _local.clearCalendar(scope.userId!);
-        _calendarCacheBlocked = false;
-      } catch (_) {
-        // Never let a disk-cleanup failure turn a confirmed denial into an
-        // unreachable-server cache fallback; suppress cached calendar reads.
-        _calendarCacheBlocked = true;
-      }
+      await _clearCalendarOrPersistInvalidationLocked(scope.userId!);
     });
     if (fired) {
       onCalendarAccessDenied?.call(refreshSession: refreshSession);
@@ -1465,7 +1511,7 @@ class ApiClient {
           if (userId == null) return entries;
           return _serializeAuth(() async {
             if (!_isCurrent(scope)) return entries;
-            if (writes != _queueChanges) {
+            if (writes != _queueChanges && !_calendarReadBlocked) {
               // An edit was queued or sent meanwhile: this answer may predate
               // it. The device's copy has every edit; the next load refreshes.
               final local = await _local.monthEntries(userId, year, month);
@@ -1488,7 +1534,7 @@ class ApiClient {
           });
         },
         (userId) async {
-          if (_calendarCacheBlocked) return null;
+          if (_calendarReadBlocked) return null;
           return _local.monthEntries(userId, year, month);
         },
       );
@@ -1497,7 +1543,7 @@ class ApiClient {
   /// was never read here. Lets a month swiped into view draw at once.
   Future<List<Entry>?> cachedMonth(int year, int month) async {
     final userId = _userId;
-    if (userId == null || _calendarCacheBlocked) return null;
+    if (userId == null || _calendarReadBlocked) return null;
     return _local.monthEntries(userId, year, month);
   }
 
@@ -1506,7 +1552,7 @@ class ApiClient {
   /// once, before the fresh answer arrives.
   Future<CycleInfo?> cachedCycle() async {
     final userId = _userId;
-    if (userId == null || _calendarCacheBlocked) return null;
+    if (userId == null || _calendarReadBlocked) return null;
     final body = await _local.readDoc(userId, 'cycle');
     return body == null
         ? null

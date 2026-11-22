@@ -2741,9 +2741,14 @@ void main() {
     await tester.pump();
   });
 
-  test(
+  testWidgets(
       'failing clearCalendar on 403 denial or subject_id mismatch preserves '
-      'the denial and blocks cached calendar fallback', () async {
+      'the denial and blocks cached calendar fallback across offline restarts',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(412, 915);
+    addTearDown(tester.view.reset);
+
     FlutterSecureStorage.setMockInitialValues({'session_token': 'tok'});
 
     Future<(_FailingClearCalendarStore, ApiClient)> makeClient(
@@ -2799,8 +2804,9 @@ void main() {
     }
 
     // Case A: 403 share inactive when clearCalendar throws must still throw
-    // ApiException(403) instead of returning stale cached entries.
-    final (_, api403) = await makeClient(
+    // ApiException(403) instead of returning stale cached entries, AND a fresh
+    // ApiClient + App217 offline restart over the same store must stay blocked.
+    final (store403, api403) = await makeClient(
       MockClient((request) async {
         if (request.url.path == '/api/entries') {
           return http.Response('{"error":"share inactive"}', 403);
@@ -2817,9 +2823,50 @@ void main() {
     expect(await api403.cachedMonth(2026, 11), isNull);
     expect(await api403.cachedCycle(), isNull);
 
+    // Offline restart with a brand-new ApiClient over the same failing store:
+    // revoked rows must NOT preload or serve from _orCached.
+    final restartedApi = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: store403,
+      httpClient: MockClient((_) async => http.Response('unavailable', 503)),
+    );
+    await tester.pumpWidget(App217(
+      config: restartedApi.config,
+      api: restartedApi,
+      clock: () => DateTime(2026, 11, 15, 10, 0),
+    ));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('owner-a secret'), findsNothing);
+    expect(find.text('Taken'), findsNothing);
+    expect(await restartedApi.cachedMonth(2026, 11), isNull);
+    expect(await restartedApi.cachedCycle(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+
+    // Once disk clearing recovers, a fresh client wipes the stale rows cleanly.
+    store403.failClear = false;
+    final healedApi = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: store403,
+      httpClient: MockClient((_) async => http.Response('unavailable', 503)),
+    );
+    await healedApi.cachedSession();
+    expect(await store403.monthEntries('u-partner', 2026, 11), isNull);
+
     // Case B: subject_id mismatch when clearCalendar throws must still throw
-    // CalendarScopeMismatchException instead of returning stale cached cycle.
-    final (_, apiMismatch) = await makeClient(
+    // CalendarScopeMismatchException and stay blocked on a fresh client.
+    FlutterSecureStorage.setMockInitialValues({'session_token': 'tok'});
+    final (storeMismatch, apiMismatch) = await makeClient(
       MockClient((request) async {
         if (request.url.path == '/api/cycle') {
           return http.Response(
@@ -2842,6 +2889,298 @@ void main() {
     );
     expect(await apiMismatch.cachedCycle(), isNull);
     expect(await apiMismatch.cachedMonth(2026, 11), isNull);
+
+    final restartedMismatchApi = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: storeMismatch,
+      httpClient: MockClient((_) async => http.Response('unavailable', 503)),
+    );
+    await restartedMismatchApi.cachedSession();
+    expect(await restartedMismatchApi.cachedMonth(2026, 11), isNull);
+    expect(await restartedMismatchApi.cachedCycle(), isNull);
+  });
+
+  testWidgets(
+      'offline 503 calendar load after 403 consent required cannot redraw '
+      'retained rows while consent recovery is still pending', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(412, 915);
+    addTearDown(tester.view.reset);
+
+    FlutterSecureStorage.setMockInitialValues({'session_token': 'tok'});
+    final local = MemoryLocalStore();
+    await local.writeDoc(localGlobalUser, 'last_user', 'u-owner');
+    await local.writeDoc(
+      'u-owner',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-owner',
+          'email': 'owner@example.com',
+          'role': 'owner',
+        },
+        'share': {'status': 'none'},
+        'consent': {'version': 1, 'required': false},
+      }),
+    );
+    await local.writeDoc('u-owner', 'calendar', 'own');
+    await local.replaceMonth('u-owner', 2026, 11, const [
+      Entry(date: '2026-11-15', taken: true, notes: 'owner private note'),
+    ]);
+    await local.replaceMonth('u-owner', 2026, 10, const []);
+    await local.replaceMonth('u-owner', 2026, 12, const []);
+
+    final sessionGate = Completer<void>();
+    final firstEntriesGate = Completer<void>();
+    var entriesDeniedOnce = false;
+
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: local,
+      httpClient: MockClient((request) async {
+        switch (request.url.path) {
+          case '/api/auth/config':
+            return http.Response('unavailable', 503);
+          case '/api/auth/session':
+            await sessionGate.future;
+            return http.Response(
+              jsonEncode({
+                'user': {
+                  'id': 'u-owner',
+                  'email': 'owner@example.com',
+                  'role': 'owner',
+                },
+                'share': {'status': 'none'},
+                'consent': {'version': 2, 'required': false},
+              }),
+              200,
+            );
+          case '/api/entries':
+            if (!entriesDeniedOnce &&
+                request.url.queryParameters['month'] == '11') {
+              entriesDeniedOnce = true;
+              await firstEntriesGate.future;
+              return http.Response(
+                '{"error":"consent required","consent_version":2}',
+                403,
+              );
+            }
+            // Subsequent loads hit 503 while consent recovery is still pending.
+            return http.Response('unavailable', 503);
+          default:
+            return http.Response('unavailable', 503);
+        }
+      }),
+    );
+
+    await tester.pumpWidget(App217(
+      config: api.config,
+      api: api,
+      clock: () => DateTime(2026, 11, 15, 10, 0),
+    ));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('owner private note'), findsWidgets);
+
+    // Deliver 403 consent required while /api/auth/session remains stalled.
+    firstEntriesGate.complete();
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    expect(sessionGate.isCompleted, isFalse);
+    expect(find.text('owner private note'), findsNothing);
+    expect(find.text('Taken'), findsNothing);
+
+    // An offline 503 read or month navigation must NOT redraw retained rows.
+    await expectLater(
+      api.listEntries(2026, 11),
+      throwsA(isA<ApiException>().having((e) => e.statusCode, 'statusCode', 503)),
+    );
+    expect(await api.cachedMonth(2026, 11), isNull);
+
+    await tester.tap(find.byIcon(Icons.chevron_right));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+    await tester.tap(find.byIcon(Icons.chevron_left));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+    expect(find.text('owner private note'), findsNothing);
+    expect(find.text('Taken'), findsNothing);
+
+    // Once the server confirms consent again, the retained local month is
+    // readable without having been deleted.
+    sessionGate.complete();
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+    expect((await api.cachedMonth(2026, 11))?.single.notes,
+        'owner private note');
+  });
+
+  testWidgets(
+      'repeated invalidation during in-flight session recovery retries '
+      'recovery so the new calendar scope loads', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(412, 915);
+    addTearDown(tester.view.reset);
+
+    FlutterSecureStorage.setMockInitialValues({'session_token': 'tok'});
+    final local = MemoryLocalStore();
+    await local.writeDoc(localGlobalUser, 'last_user', 'u-partner');
+    await local.writeDoc(
+      'u-partner',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-partner',
+          'email': 'partner@example.com',
+          'role': 'partner',
+        },
+        'share': {
+          'status': 'active',
+          'owner_id': 'owner-a',
+          'owner_email': 'owner-a@example.com',
+          'owner_name': 'Owner A',
+          'can_edit_calendar': false,
+        },
+      }),
+    );
+    await local.writeDoc(
+      'u-partner',
+      'calendar',
+      'partner:active:owner-a:owner-a@example.com',
+    );
+    await local.replaceMonth('u-partner', 2026, 11, const [
+      Entry(date: '2026-11-15', taken: true, notes: 'owner-a private note'),
+    ]);
+    await local.replaceMonth('u-partner', 2026, 10, const []);
+    await local.replaceMonth('u-partner', 2026, 12, const []);
+
+    final recovery1Reached = Completer<void>();
+    final recovery1Gate = Completer<void>();
+    var sessionCalls = 0;
+
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: local,
+      httpClient: MockClient((request) async {
+        switch (request.url.path) {
+          case '/api/auth/config':
+            return http.Response('unavailable', 503);
+          case '/api/auth/session':
+            sessionCalls++;
+            if (sessionCalls == 1) {
+              // Initial startup revalidation fails so mismatch drives recovery.
+              return http.Response('unavailable', 503);
+            }
+            if (sessionCalls == 2) {
+              if (!recovery1Reached.isCompleted) recovery1Reached.complete();
+              await recovery1Gate.future;
+            }
+            return http.Response(
+              jsonEncode({
+                'user': {
+                  'id': 'u-partner',
+                  'email': 'partner@example.com',
+                  'role': 'partner',
+                },
+                'share': {
+                  'status': 'active',
+                  'owner_id': 'owner-b',
+                  'owner_email': 'owner-b@example.com',
+                  'owner_name': 'Owner B',
+                  'can_edit_calendar': false,
+                },
+              }),
+              200,
+            );
+          case '/api/entries':
+            if (request.url.queryParameters['month'] == '11') {
+              return http.Response(
+                jsonEncode({
+                  'subject_id': 'owner-b',
+                  'entries': [
+                    {
+                      'date': '2026-11-15',
+                      'taken': true,
+                      'notes': 'owner-b recovered note',
+                      'period': false,
+                    },
+                  ],
+                }),
+                200,
+              );
+            }
+            return http.Response(
+              jsonEncode({'subject_id': 'owner-b', 'entries': []}),
+              200,
+            );
+          case '/api/cycle':
+            return http.Response(
+              jsonEncode({
+                'subject_id': 'owner-b',
+                'cycle_length': 28,
+                'period_length': 5,
+                'period_starts': [],
+                'predictions': [],
+              }),
+              200,
+            );
+          default:
+            return http.Response('{}', 200);
+        }
+      }),
+    );
+
+    await tester.pumpWidget(App217(
+      config: api.config,
+      api: api,
+      clock: () => DateTime(2026, 11, 15, 10, 0),
+    ));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    // Mismatch #1 triggered recovery #1, which is now in flight.
+    await recovery1Reached.future;
+    expect(sessionCalls, 2);
+
+    // A second mismatch arrives while recovery #1 is still in flight,
+    // advancing _sessionRevision so recovery #1's 200 will be rejected.
+    await expectLater(
+      api.getCycle('2026-11-15'),
+      throwsA(isA<CalendarScopeMismatchException>()),
+    );
+
+    // Release recovery #1: even though its 200 is superseded by the second
+    // invalidation, _recoverSession must automatically run recovery #2 and
+    // transition cleanly to Owner B's calendar.
+    recovery1Gate.complete();
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    expect(sessionCalls, greaterThanOrEqualTo(3));
+    expect(
+      await local.readDoc('u-partner', 'calendar'),
+      'partner:active:owner-b:owner-b@example.com',
+    );
+    expect(find.text('owner-b recovered note'), findsWidgets);
   });
 
   testWidgets(
@@ -2935,9 +3274,12 @@ void main() {
 }
 
 class _FailingClearCalendarStore extends MemoryLocalStore {
+  bool failClear = true;
+
   @override
   Future<void> clearCalendar(String userId) async {
-    throw StateError('disk clear failed');
+    if (failClear) throw StateError('disk clear failed');
+    return super.clearCalendar(userId);
   }
 }
 

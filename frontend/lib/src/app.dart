@@ -220,7 +220,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
       return;
     }
     _privacyPageOpened = false;
-    await _recoverConsent();
+    await _recoverSession();
   }
 
   /// Tells the background worker whether the app is in the foreground (it
@@ -562,13 +562,45 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     });
   }
 
-  Future<void>? _consentRecovery;
+  Future<void>? _sessionRecovery;
+  bool _sessionRecoveryAgain = false;
 
-  /// One session refresh at a time, however many requests were refused.
-  Future<void> _recoverConsent() => _consentRecovery ??= _refreshSession()
-      .then<void>((_) {})
-      .catchError((Object _) {})
-      .whenComplete(() => _consentRecovery = null);
+  /// One recovery refresh at a time; if a newer invalidation arrives while
+  /// one is in flight (or rejects it via [StaleAuthScopeException]), run a
+  /// follow-up refresh once it finishes so recovery can never stall.
+  Future<void> _recoverSession() {
+    if (_sessionRecovery != null) {
+      _sessionRecoveryAgain = true;
+      return _sessionRecovery!;
+    }
+    final epoch = _accountEpoch;
+    Future<void> run() async {
+      var staleRetries = 0;
+      while (true) {
+        _sessionRecoveryAgain = false;
+        try {
+          await _refreshSession();
+        } catch (err) {
+          if (err is StaleAuthScopeException &&
+              mounted &&
+              epoch == _accountEpoch &&
+              staleRetries < 3) {
+            staleRetries++;
+            _sessionRecoveryAgain = true;
+          }
+        }
+        if (!mounted || epoch != _accountEpoch || !_sessionRecoveryAgain) {
+          break;
+        }
+      }
+    }
+
+    late final Future<void> task;
+    task = run().whenComplete(() {
+      if (identical(_sessionRecovery, task)) _sessionRecovery = null;
+    });
+    return _sessionRecovery = task;
+  }
 
   void _onOwnConsentRequired() {
     _clearInitialCalendarCache();
@@ -576,17 +608,8 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     _calendarScopeReset.value++;
     unawaited(_cancelDailyReminder());
     unawaited(_cancelPartnerAlerts());
-    unawaited(_recoverConsent());
+    unawaited(_recoverSession());
   }
-
-  Future<void>? _scopeRecovery;
-
-  /// One session refresh at a time when a calendar endpoint reports a
-  /// different subject than the cached session expects.
-  Future<void> _recoverCalendarScope() => _scopeRecovery ??= _refreshSession()
-      .then<void>((_) {})
-      .catchError((Object _) {})
-      .whenComplete(() => _scopeRecovery = null);
 
   void _onCalendarScopeMismatch() {
     _clearInitialCalendarCache();
@@ -594,7 +617,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     _calendarScopeReset.value++;
     _navKey.currentState?.popUntil((route) => route.isFirst);
     if (_user?.isPartner == true) unawaited(_cancelPartnerAlerts());
-    unawaited(_recoverCalendarScope());
+    unawaited(_recoverSession());
   }
 
   void _onCalendarAccessDenied({required bool refreshSession}) {
@@ -604,7 +627,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     if (refreshSession) {
       _sessionGeneration++;
       _navKey.currentState?.popUntil((route) => route.isFirst);
-      unawaited(_recoverCalendarScope());
+      unawaited(_recoverSession());
     }
   }
 
