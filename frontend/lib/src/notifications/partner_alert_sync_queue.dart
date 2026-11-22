@@ -5,13 +5,19 @@ typedef PartnerAlertScheduler = Future<LocalReminderSyncStatus> Function(
 
 /// Serializes partner alert plans with safety cancellations across screens.
 class PartnerAlertSyncQueue {
+  /// [permissionScheduler] runs plans marked `requestPermission` (explicit
+  /// user actions, which may show the system permission prompt); it falls
+  /// back to [scheduler].
   PartnerAlertSyncQueue({
     required PartnerAlertScheduler scheduler,
+    PartnerAlertScheduler? permissionScheduler,
     Future<void> Function()? canceller,
   })  : _scheduler = scheduler,
+        _permissionScheduler = permissionScheduler,
         _canceller = canceller;
 
   final PartnerAlertScheduler _scheduler;
+  final PartnerAlertScheduler? _permissionScheduler;
   final Future<void> Function()? _canceller;
   Future<void> _tail = Future<void>.value();
   int _revision = 0;
@@ -33,22 +39,30 @@ class PartnerAlertSyncQueue {
 
   /// Applies a plan initiated by the user.
   Future<LocalReminderSyncStatus?> scheduleUserIntent(
-    List<PlannedAlert> alerts,
-  ) {
+    List<PlannedAlert> alerts, {
+    bool requestPermission = false,
+  }) {
     final revision = beginIntent();
-    return scheduleIfCurrent(revision: revision, alerts: alerts).whenComplete(
+    return scheduleIfCurrent(
+      revision: revision,
+      alerts: alerts,
+      requestPermission: requestPermission,
+    ).whenComplete(
       () => finishIntent(revision),
     );
   }
 
   /// Replaces the queued plan when its read generation is still current.
+  /// [requestPermission] is for plans an explicit user action asked for.
   Future<LocalReminderSyncStatus?> scheduleIfCurrent({
     required int revision,
     required List<PlannedAlert> alerts,
+    bool requestPermission = false,
   }) {
     return _enqueue(
       revision: revision,
       alerts: alerts,
+      requestPermission: requestPermission,
     );
   }
 
@@ -83,6 +97,7 @@ class PartnerAlertSyncQueue {
     bool runEvenIfSuperseded = false,
     bool cancellation = false,
     bool background = false,
+    bool requestPermission = false,
   }) {
     final operation = _tail.then((_) async {
       if (!runEvenIfSuperseded && !isCurrent(revision)) return null;
@@ -91,7 +106,9 @@ class PartnerAlertSyncQueue {
         await _canceller();
         return LocalReminderSyncStatus.cancelled;
       }
-      return _scheduler(alerts);
+      final scheduler =
+          (requestPermission ? _permissionScheduler : null) ?? _scheduler;
+      return scheduler(alerts);
     });
     _tail = operation.then<void>((_) {}, onError: (Object _) {});
     return operation;

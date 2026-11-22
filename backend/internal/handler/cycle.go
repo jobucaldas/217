@@ -45,6 +45,7 @@ func (h *Handler) SetRole(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	h.notifyReminders()
 	writeJSON(w, http.StatusOK, h.sessionPayload(user))
 }
 

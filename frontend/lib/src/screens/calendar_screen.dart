@@ -11,6 +11,7 @@ import '../errors.dart';
 import '../i18n.dart';
 import '../models.dart';
 import '../notifications/local_reminders.dart';
+import '../notifications/message_worker.dart';
 import '../notifications/partner_alert_sync_queue.dart';
 import '../stage_suggestion.dart';
 import '../theme/app_theme.dart';
@@ -28,6 +29,8 @@ class CalendarScreen extends StatefulWidget {
     required this.strings,
     required this.onOpenSettings,
     this.cycleRefreshSignal,
+    this.calendarSyncSignal,
+    this.onPartnerAlertPrefs,
     this.share = const ShareState(status: 'none'),
     this.onShareChanged,
     this.onInboxSynced,
@@ -54,6 +57,14 @@ class CalendarScreen extends StatefulWidget {
   final Strings strings;
   final VoidCallback onOpenSettings;
   final Listenable? cycleRefreshSignal;
+
+  /// Fires when the server says the calendar or the alert settings changed
+  /// (e.g. the owner logged her pill): reloads and replans partner alerts.
+  final Listenable? calendarSyncSignal;
+
+  /// Partner only: the alert settings just used to plan alerts, so the app
+  /// can keep what the background worker needs.
+  final ValueChanged<PartnerAlertPreference>? onPartnerAlertPrefs;
   final ValueChanged<ShareState>? onShareChanged;
 
   /// The messages screen loaded (and marked read) these messages.
@@ -300,6 +311,7 @@ class _CalendarScreenState extends State<CalendarScreen>
       });
     WidgetsBinding.instance.addObserver(this);
     widget.cycleRefreshSignal?.addListener(_onCycleRefresh);
+    widget.calendarSyncSignal?.addListener(_onCalendarSync);
     widget.scopeResetSignal?.addListener(_onScopeReset);
     if (widget.initialMonths != null) {
       for (final entry in widget.initialMonths!.entries) {
@@ -332,6 +344,10 @@ class _CalendarScreenState extends State<CalendarScreen>
       oldWidget.scopeResetSignal?.removeListener(_onScopeReset);
       widget.scopeResetSignal?.addListener(_onScopeReset);
     }
+    if (oldWidget.calendarSyncSignal != widget.calendarSyncSignal) {
+      oldWidget.calendarSyncSignal?.removeListener(_onCalendarSync);
+      widget.calendarSyncSignal?.addListener(_onCalendarSync);
+    }
     // Share revoked (or otherwise inactive): the day card must go.
     if (oldWidget.share.isActive && !widget.share.isActive) {
       _dismissOverlays();
@@ -363,6 +379,15 @@ class _CalendarScreenState extends State<CalendarScreen>
 
   void _onCycleRefresh() {
     if (mounted) _loadCycle();
+  }
+
+  /// The server reported a change: reload everything and replan alerts even
+  /// when today's inputs look the same (the alert settings may be what
+  /// changed).
+  void _onCalendarSync() {
+    if (!mounted) return;
+    _alertSyncKey = null;
+    _load();
   }
 
   /// Back in the foreground: her calendar may have changed (and partner
@@ -418,6 +443,7 @@ class _CalendarScreenState extends State<CalendarScreen>
     WidgetsBinding.instance.removeObserver(this);
     widget.cycleRefreshSignal?.removeListener(_onCycleRefresh);
     widget.scopeResetSignal?.removeListener(_onScopeReset);
+    widget.calendarSyncSignal?.removeListener(_onCalendarSync);
     _wheelIdle?.cancel();
     _midnight?.cancel();
     _loadDebounce?.cancel();
@@ -581,6 +607,7 @@ class _CalendarScreenState extends State<CalendarScreen>
   }
 
   Future<LocalReminderSyncStatus> _cancelPartnerAlerts() async {
+    unawaited(schedulePartnerPrecheck(null));
     final queue = widget.partnerAlertSyncQueue;
     if (queue != null) {
       return await queue.cancel() ?? LocalReminderSyncStatus.cancelled;
@@ -693,6 +720,11 @@ class _CalendarScreenState extends State<CalendarScreen>
           await (widget.partnerAlertScheduler ?? syncPartnerAlerts)(alerts);
         }
       }
+      widget.onPartnerAlertPrefs?.call(pref);
+      // One extra background look just before today's pill alert, so a pill
+      // logged right before it cancels the alert before it fires.
+      unawaited(schedulePartnerPrecheck(
+          partnerPrecheckAt(widget.clock(), pref, todayLogged)));
       if (mounted &&
           generation == _alertSyncGeneration &&
           _isCurrentSession(sessionGeneration)) {

@@ -12,9 +12,16 @@ typedef DailyReminderScheduler = Future<LocalReminderSyncResult> Function({
 
 /// Serializes local daily reminder operations and invalidates stale restores.
 class DailyReminderSyncQueue {
-  DailyReminderSyncQueue(this._scheduler);
+  /// [permissionScheduler] runs operations marked `requestPermission`
+  /// (explicit user actions, which may show the system permission prompt);
+  /// it falls back to [_scheduler].
+  DailyReminderSyncQueue(
+    this._scheduler, {
+    DailyReminderScheduler? permissionScheduler,
+  }) : _permissionScheduler = permissionScheduler;
 
   final DailyReminderScheduler _scheduler;
+  final DailyReminderScheduler? _permissionScheduler;
   Future<void> _tail = Future<void>.value();
   int _revision = 0;
 
@@ -37,6 +44,7 @@ class DailyReminderSyncQueue {
     bool repeatEnabled = false,
     int repeatMinutes = 15,
     bool todayLogged = false,
+    bool requestPermission = false,
   }) {
     final revision = beginIntent();
     return _enqueue(
@@ -48,10 +56,12 @@ class DailyReminderSyncQueue {
       repeatEnabled: repeatEnabled,
       repeatMinutes: repeatMinutes,
       todayLogged: todayLogged,
+      requestPermission: requestPermission,
     );
   }
 
   /// Schedule a value read asynchronously only if no newer intent appeared.
+  /// [requestPermission] is for operations an explicit user action asked for.
   Future<LocalReminderSyncResult?> scheduleIfCurrent({
     required int revision,
     required bool enabled,
@@ -61,6 +71,7 @@ class DailyReminderSyncQueue {
     bool repeatEnabled = false,
     int repeatMinutes = 15,
     bool todayLogged = false,
+    bool requestPermission = false,
   }) =>
       _enqueue(
         revision: revision,
@@ -71,6 +82,7 @@ class DailyReminderSyncQueue {
         repeatEnabled: repeatEnabled,
         repeatMinutes: repeatMinutes,
         todayLogged: todayLogged,
+        requestPermission: requestPermission,
       );
 
   /// Consent, logout, or account changes invalidate pending restores first.
@@ -99,10 +111,13 @@ class DailyReminderSyncQueue {
     int repeatMinutes = 15,
     bool todayLogged = false,
     bool runEvenIfSuperseded = false,
+    bool requestPermission = false,
   }) {
     final operation = _tail.then((_) async {
       if (!runEvenIfSuperseded && !isCurrent(revision)) return null;
-      return _scheduler(
+      final scheduler =
+          (requestPermission ? _permissionScheduler : null) ?? _scheduler;
+      return scheduler(
         enabled: enabled,
         timeHhMm: timeHhMm,
         title: title,

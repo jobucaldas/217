@@ -103,12 +103,22 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
   /// Local "new message" notifications (Android); on unless turned off.
   bool _messageNotifs = true;
 
-  /// No server push: messages are checked on open/resume and every
-  /// [_messagePollEvery] while the app is in the foreground.
+  /// No server push: what changed is asked on open/resume and every
+  /// [_messagePollEvery] while the app is in the foreground. The ask is one
+  /// conditional request the server answers without touching its database
+  /// when nothing changed; only what did change is then read.
   static const _messagePollEvery = Duration(minutes: 2);
   Timer? _messagePoll;
   bool _foreground = true;
   Future<void> _messageChain = Future.value();
+  bool _syncChecking = false;
+
+  /// Moves when the server says the calendar or the alert settings changed;
+  /// the calendar reloads (and a partner's alerts are replanned).
+  final ValueNotifier<int> _calendarChanges = ValueNotifier(0);
+
+  /// Background worker changes, one after another.
+  Future<void> _workerChain = Future.value();
 
   /// Whether the daily reminder is on; null until known (no bubble then).
   bool? _remindersOn;
@@ -162,15 +172,46 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
   final ValueNotifier<int> _stageChanges = ValueNotifier(0);
   final ValueNotifier<int> _calendarScopeReset = ValueNotifier(0);
   late final StageSuggestion _stageSuggestion = StageSuggestion(prefs: _prefs);
+  // Automatic replans never prompt for the notification permission (the
+  // default); only plans the user asked for do, through the second scheduler.
   late final DailyReminderSyncQueue _dailyReminderSyncQueue =
       DailyReminderSyncQueue(
     widget.dailyReminderScheduler ?? syncLocalDailyReminder,
+    permissionScheduler:
+        widget.dailyReminderScheduler ?? _dailyReminderWithPrompt,
   );
   late final PartnerAlertSyncQueue _partnerAlertSyncQueue =
       PartnerAlertSyncQueue(
     scheduler: widget.partnerAlertScheduler ?? syncPartnerAlerts,
+    permissionScheduler:
+        widget.partnerAlertScheduler ?? _partnerAlertsWithPrompt,
     canceller: widget.partnerAlertCanceller,
   );
+
+  static Future<LocalReminderSyncResult> _dailyReminderWithPrompt({
+    required bool enabled,
+    required String timeHhMm,
+    required String title,
+    required String body,
+    bool repeatEnabled = false,
+    int repeatMinutes = 15,
+    bool todayLogged = false,
+  }) =>
+      syncLocalDailyReminder(
+        enabled: enabled,
+        timeHhMm: timeHhMm,
+        title: title,
+        body: body,
+        repeatEnabled: repeatEnabled,
+        repeatMinutes: repeatMinutes,
+        todayLogged: todayLogged,
+        requestPermission: true,
+      );
+
+  static Future<LocalReminderSyncStatus> _partnerAlertsWithPrompt(
+    List<PlannedAlert> alerts,
+  ) =>
+      syncPartnerAlerts(alerts, requestPermission: true);
 
   Strings get _strings => Strings(_language);
 
@@ -187,7 +228,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _messagePoll = Timer.periodic(_messagePollEvery, (_) {
       _markForeground();
-      _checkMessages();
+      _checkSync();
     });
     _markForeground();
     _bootstrap();
@@ -198,7 +239,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     _foreground = state == AppLifecycleState.resumed;
     _markForeground();
     if (!_foreground) return;
-    unawaited(_checkMessages());
+    unawaited(_checkSync());
     // Back from the privacy page (browser): consent may have been withdrawn
     // or the account deleted there. Re-checked on every resume until this
     // account's session ends, so an offline return (cached session) retries.
@@ -235,20 +276,171 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
         .catchError((Object _) {}));
   }
 
-  /// Fetches the inbox: refreshes the unread badge and notifies messages
-  /// that arrived since the last check. Best effort, silent on failure.
-  Future<void> _checkMessages() async {
+  /// Asks the server what changed (`/api/sync/status`) and reads only that:
+  /// the inbox, the calendar (the open calendar reloads and a partner's
+  /// alerts are replanned) or the session. Nothing changed (304): nothing is
+  /// read, and the server does no database work. Older servers without the
+  /// endpoint get the inbox read like before. The app keeps its own saved
+  /// state ([AppearancePrefs.appSyncState]) so a background worker advancing
+  /// its ETag never causes the live app to skip refreshing on resume; once
+  /// handled, both baselines move forward. With [seedOnly], records the
+  /// initial baseline right after bootstrap without triggering redundant
+  /// refreshes. Best effort, silent on transient failure; a terminal 401
+  /// refreshes the session.
+  Future<void> _checkSync({bool seedOnly = false}) async {
     final user = _user;
     if (!mounted || !_foreground || user == null || !user.hasRole) return;
-    if (_consentRequired || (user.isPartner && !_share.isActive)) return;
+    if (_consentRequired || _syncChecking) return;
+    _syncChecking = true;
+    final epoch = _accountEpoch;
+    final server = _api.config.apiBaseUrl;
+    try {
+      final saved = await _prefs.appSyncState();
+      final baseline = saved != null &&
+              saved.server == server &&
+              saved.status.userId == user.id
+          ? saved.status
+          : null;
+      final result =
+          await _api.syncStatus(etag: seedOnly ? null : baseline?.etag);
+      if (!mounted || epoch != _accountEpoch || _user?.id != user.id) return;
+      if (result.notModified) return;
+      final status = result.status;
+      if (status == null) {
+        if (!seedOnly) await _checkMessages();
+        return;
+      }
+      if (seedOnly) {
+        await _prefs.saveAppSyncState(server, status);
+        if (await _prefs.syncState() == null) {
+          await _prefs.saveSyncState(server, status);
+        }
+        return;
+      }
+      bool changed(String Function(SyncTags tags) tag) =>
+          baseline == null || tag(status.tags) != tag(baseline.tags);
+      var handled = true;
+      if (changed((t) => t.account)) {
+        try {
+          await _refreshSession();
+        } catch (_) {
+          handled = false;
+        }
+        if (!mounted || epoch != _accountEpoch) return;
+      }
+      if (changed((t) => t.inbox) && !await _checkMessages()) handled = false;
+      if (changed((t) => t.calendar) || changed((t) => t.prefs)) {
+        _calendarChanges.value++;
+      }
+      if (handled && mounted && epoch == _accountEpoch) {
+        await _prefs.saveAppSyncState(server, status);
+        await _prefs.saveSyncState(server, status);
+      }
+    } on ApiException catch (e) {
+      if (e.statusCode == 401 && mounted && epoch == _accountEpoch) {
+        unawaited(_recoverSession());
+      }
+    } catch (_) {
+      // Offline or refused: the next check tries again.
+    } finally {
+      _syncChecking = false;
+    }
+  }
+
+  /// Fetches the inbox: refreshes the unread badge and notifies messages
+  /// that arrived since the last check. Best effort, silent on failure;
+  /// false only when the read itself failed.
+  Future<bool> _checkMessages() async {
+    final user = _user;
+    if (!mounted || !_foreground || user == null || !user.hasRole) return true;
+    if (_consentRequired || (user.isPartner && !_share.isActive)) return true;
     // An open conversation refreshes (and marks read) on its own.
-    if (InboxScreen.isOpen) return;
+    if (InboxScreen.isOpen) return true;
     final epoch = _accountEpoch;
     try {
       final messages = await _api.listInbox();
-      if (!mounted || epoch != _accountEpoch || _user?.id != user.id) return;
+      if (!mounted || epoch != _accountEpoch || _user?.id != user.id) {
+        return true;
+      }
       await _onMessagesSynced(user.id, messages, notify: true);
-    } catch (_) {}
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Registers or removes the background worker (Android) for what is true
+  /// now: see [shouldRunBackgroundWorker]. Changes apply one after another.
+  /// [off] removes it whatever the state (sign-out, server change).
+  Future<void> _syncBackgroundWorker({bool off = false}) =>
+      _workerChain = _workerChain.then((_) async {
+        final id = _user?.id;
+        var partnerAlertsOn = false;
+        if (!off && id != null) {
+          try {
+            partnerAlertsOn = await _prefs.partnerAlertsEnabled(id);
+          } catch (_) {}
+        }
+        final user = _user;
+        await syncMessageWorker(
+          enabled: !off &&
+              shouldRunBackgroundWorker(
+                signedIn: user != null,
+                consentRequired: _consentRequired,
+                hasRole: user?.hasRole ?? false,
+                isOwner: user?.isOwner ?? false,
+                isPartner: user?.isPartner ?? false,
+                shareActive: _share.isActive,
+                messageNotifications: _messageNotifs,
+                partnerAlertsOn: partnerAlertsOn,
+              ),
+        );
+      }).catchError((Object _) {});
+
+  /// What the background worker and the next sync keep per account is dropped
+  /// when the account goes (sign-out, deletion, server change). Also reads
+  /// any user ID persisted in saved sync state so cold-start sign-out clears
+  /// partner caches even before [_user] was populated.
+  void _forgetSyncState() {
+    final id = _user?.id;
+    unawaited(() async {
+      try {
+        final ids = <String>{if (id != null) id};
+        final workerSaved = await _prefs.syncState();
+        if (workerSaved != null && workerSaved.status.userId.isNotEmpty) {
+          ids.add(workerSaved.status.userId);
+        }
+        final appSaved = await _prefs.appSyncState();
+        if (appSaved != null && appSaved.status.userId.isNotEmpty) {
+          ids.add(appSaved.status.userId);
+        }
+        await _prefs.clearSyncState();
+        for (final uid in ids) {
+          await _prefs.clearPartnerCache(uid);
+        }
+      } catch (_) {}
+    }());
+  }
+
+  /// A partner's alert settings were used to plan alerts: keep what the
+  /// background worker needs (the owner's name, whether any alert is on, and
+  /// today's plan date) and re-evaluate whether it should run.
+  void _onPartnerAlertPrefs(PartnerAlertPreference pref) {
+    final user = _user;
+    if (user == null || !user.isPartner) return;
+    final ownerName = _share.ownerName;
+    final now = DateTime.now();
+    final today =
+        '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+    unawaited(() async {
+      try {
+        await _prefs.savePartnerAlertsEnabled(
+            user.id, pref.pmsEnabled || pref.pillEnabled);
+        await _prefs.savePartnerOwnerName(user.id, ownerName);
+        await _prefs.savePartnerLastPlanDate(user.id, today);
+      } catch (_) {}
+      await _syncBackgroundWorker();
+    }());
   }
 
   /// One sync at a time, so the same message is never announced twice.
@@ -289,7 +481,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
   Future<void> _setMessageNotifs(bool enabled) async {
     setState(() => _messageNotifs = enabled);
     await _prefs.saveMessageNotifications(enabled);
-    await syncMessageWorker(enabled: enabled);
+    await _syncBackgroundWorker();
     if (enabled) await requestNotificationPermission();
   }
 
@@ -303,6 +495,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _messagePoll?.cancel();
+    _calendarChanges.dispose();
     _changes.dispose();
     _stageChanges.dispose();
     _calendarScopeReset.dispose();
@@ -355,8 +548,6 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
       _autoUpdate = autoUpdate;
       _messageNotifs = messageNotifs;
     });
-    // Re-registers each launch so an updated app runs its own worker.
-    unawaited(syncMessageWorker(enabled: messageNotifs));
     // Web invite link (`/app/?invite=CODE`): keep the code across sign-in.
     // Tracked so _offerPendingInvite and _signIn wait for it before reading
     // or navigating away, without blocking cold starts that have no invite.
@@ -415,6 +606,8 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
       _setConsent(session);
       _loading = false;
     });
+    // Re-register only after the account is known.
+    unawaited(_syncBackgroundWorker());
     // The web wait above already has the server's answer; only a session
     // that came from the device's copy is revalidated against the server.
     if (session != null && !sessionFromWebServer && apiBaseResolved) {
@@ -432,6 +625,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
       unawaited(_loadRemindersState());
       unawaited(_maybeCheckForUpdate());
       unawaited(_checkMessages());
+      unawaited(_checkSync(seedOnly: true));
       await _offerPendingInvite();
     }
   }
@@ -511,6 +705,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
       unawaited(_loadRemindersState());
       unawaited(_maybeCheckForUpdate());
       unawaited(_checkMessages());
+      unawaited(_checkSync(seedOnly: true));
       await _offerPendingInvite();
     }
   }
@@ -658,9 +853,16 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     final session = await _api.currentSession();
     if (!mounted || epoch != _accountEpoch) return null;
     if (keepWhenOffline && session.fromCache) return null;
+    final switchedAccount =
+        _user != null && session.user != null && session.user!.id != _user!.id;
     _cancelOwnerReminderIfSessionLeavesOwner(session);
     _cancelPartnerAlertsIfSessionLeavesPartner(session);
     if (session.user == null) unawaited(_cancelAllNotifications());
+    if (switchedAccount) {
+      _accountEpoch++;
+      unawaited(cancelMessageNotification());
+      _forgetSyncState();
+    }
     // Signed out meanwhile (e.g. account deleted on the privacy page): a
     // message shown for this account must not outlive its session.
     if (_user != null && session.user == null) {
@@ -698,6 +900,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
       _setConsent(session);
     });
     if (stageChanged) _stageChanges.value++;
+    unawaited(_syncBackgroundWorker());
     return session;
   }
 
@@ -726,6 +929,10 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     unawaited(_cancelDailyReminder());
     // A message shown for this account must not outlive its session.
     unawaited(cancelMessageNotification());
+    // Nothing left to check for: no background work, no saved sync state or
+    // partner details of this account.
+    unawaited(_syncBackgroundWorker(off: true));
+    _forgetSyncState();
     return _cancelPartnerAlerts();
   }
 
@@ -754,10 +961,18 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
             nextShare.ownerEmail != _share.ownerEmail);
     if (leftPartner || calendarLostOrChanged || nextShare.isRevoked) {
       unawaited(_cancelPartnerAlerts());
+      if (_user != null && !nextShare.isActive) {
+        unawaited(_prefs
+            .savePartnerOwnerName(_user!.id, '')
+            .catchError((Object _) {}));
+      }
     }
   }
 
   Future<void> _cancelPartnerAlerts() async {
+    // The pre-check only matters while a pill alert is planned. Cancelling
+    // the alerts also clears the quiet "pill logged" note.
+    unawaited(schedulePartnerPrecheck(null));
     await _partnerAlertSyncQueue.cancel();
   }
 
@@ -979,6 +1194,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
       _share = session.share ?? const ShareState(status: 'none');
       if (session.user != null) _setConsent(session);
     });
+    unawaited(_syncBackgroundWorker());
   }
 
   void _onStageChanged(SessionSnapshot session) {
@@ -1090,6 +1306,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
           _setConsent(session);
           _loading = false;
         });
+        unawaited(_syncBackgroundWorker());
         if (!_consentRequired) {
           unawaited(_loadRemindersState());
           unawaited(_maybeCheckForUpdate());
@@ -1185,6 +1402,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
             onRemindersToggled: _user == null ? null : _onRemindersToggled,
             dailyReminderSyncQueue: _dailyReminderSyncQueue,
             partnerAlertSyncQueue: _partnerAlertSyncQueue,
+            onPartnerAlertsChanged: _onPartnerAlertPrefs,
             consentPending: _consentRequired,
             onPrivacyPageOpened: () => _privacyPageOpened = true,
             autoUpdate: _autoUpdate,
@@ -1265,6 +1483,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
               _consentRequired = true;
               _consentVersion = version;
             });
+            unawaited(_syncBackgroundWorker());
           }
         },
         onDecline: _logout,
@@ -1305,6 +1524,8 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
       palette: _palette,
       onOpenSettings: _openSettings,
       cycleRefreshSignal: _stageChanges,
+      calendarSyncSignal: _calendarChanges,
+      onPartnerAlertPrefs: _onPartnerAlertPrefs,
       scopeResetSignal: _calendarScopeReset,
       onShareChanged: (share) {
         final nextKey = _calendarScopeKey(_user, share, _consentRequired);

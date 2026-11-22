@@ -125,4 +125,51 @@ void main() {
     await Future.wait([restore, cancel]);
     expect(calls, [true, false]);
   });
+
+  test('only user-requested operations use the permission scheduler',
+      () async {
+    final calls = <String>[];
+    DailyReminderScheduler recorder(String name) => ({
+          required enabled,
+          required timeHhMm,
+          required title,
+          required body,
+          repeatEnabled = false,
+          repeatMinutes = 15,
+          todayLogged = false,
+        }) async {
+          calls.add(name);
+          return const LocalReminderSyncResult(
+              LocalReminderSyncStatus.scheduled);
+        };
+    final queue = DailyReminderSyncQueue(
+      recorder('quiet'),
+      permissionScheduler: recorder('prompt'),
+    );
+
+    await queue.scheduleIfCurrent(
+      revision: queue.beginIntent(),
+      enabled: true,
+      timeHhMm: '07:35',
+      title: '217',
+      body: 'Record today',
+    );
+    await queue.scheduleIfCurrent(
+      revision: queue.beginIntent(),
+      enabled: true,
+      timeHhMm: '07:35',
+      title: '217',
+      body: 'Record today',
+      requestPermission: true,
+    );
+    await queue.scheduleUserIntent(
+      enabled: true,
+      timeHhMm: '07:35',
+      title: '217',
+      body: 'Record today',
+      requestPermission: true,
+    );
+    await queue.cancel(title: '217', body: 'Record today');
+    expect(calls, ['quiet', 'prompt', 'prompt', 'quiet']);
+  });
 }

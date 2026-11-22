@@ -14,6 +14,19 @@ import '../models.dart';
 import '../offline/local_store.dart';
 import 'platform_http.dart';
 
+enum SyncStatusKind { notModified, changed, unsupported }
+
+/// Answer to [ApiClient.syncStatus]; [status] is set only when [changed].
+class SyncStatusResult {
+  const SyncStatusResult(this.kind, [this.status]);
+
+  final SyncStatusKind kind;
+  final SyncStatus? status;
+
+  bool get notModified => kind == SyncStatusKind.notModified;
+  bool get unsupported => kind == SyncStatusKind.unsupported;
+}
+
 class ApiClient {
   ApiClient(this.config,
       {http.Client? httpClient,
@@ -877,6 +890,7 @@ class ApiClient {
     Uri uri, {
     Object? body,
     bool auth = true,
+    Map<String, String>? headers,
     int? expectedScope,
     int? expectedServerEpoch,
     String? expectedBase,
@@ -893,6 +907,7 @@ class ApiClient {
       uri,
       body: body,
       auth: auth,
+      headers: headers,
       expectedScope: scope,
       expectedServerEpoch: serverEpoch,
       expectedBase: base,
@@ -907,6 +922,7 @@ class ApiClient {
         uri,
         body: body,
         auth: auth,
+        headers: headers,
         expectedScope: scope,
         expectedServerEpoch: serverEpoch,
         expectedBase: base,
@@ -1033,6 +1049,7 @@ class ApiClient {
     Uri uri, {
     Object? body,
     bool auth = true,
+    Map<String, String>? headers,
     int? expectedScope,
     int? expectedServerEpoch,
     String? expectedBase,
@@ -1043,7 +1060,10 @@ class ApiClient {
     bool isStale() => scope != null
         ? _scopeChanged(scope, base)
         : _serverChanged(serverEpoch, base);
-    final headers = <String, String>{'Content-Type': 'application/json'};
+    final requestHeaders = <String, String>{
+      'Content-Type': 'application/json',
+      ...?headers,
+    };
     if (auth) {
       final token = await _serializeAuth(() async {
         if (_apiBaseUnresolved) {
@@ -1055,10 +1075,10 @@ class ApiClient {
         return readSessionToken();
       });
       if (token != null && token.isNotEmpty) {
-        headers['Authorization'] = 'Bearer $token';
+        requestHeaders['Authorization'] = 'Bearer $token';
       }
     }
-    final request = http.Request(method, uri)..headers.addAll(headers);
+    final request = http.Request(method, uri)..headers.addAll(requestHeaders);
     if (body != null) {
       request.body = jsonEncode(body);
     }
@@ -1481,6 +1501,33 @@ class ApiClient {
     return (decoded['notes'] as List<dynamic>? ?? const [])
         .map((e) => InboxMessage.fromJson(e as Map<String, dynamic>))
         .toList();
+  }
+
+  /// Asks what changed since [etag] (`GET /api/sync/status`). A 304 costs the
+  /// server no database work, so this is what the periodic checks send
+  /// instead of reading the inbox or the calendar. An older server without
+  /// the endpoint answers [SyncStatusKind.unsupported]; offline, 401 after a
+  /// failed renewal and 403 throw like any other call.
+  Future<SyncStatusResult> syncStatus({String? etag}) async {
+    final response = await _send(
+      'GET',
+      _uri('/api/sync/status'),
+      headers: {
+        if (etag != null && etag.isNotEmpty) 'If-None-Match': '"$etag"',
+      },
+    );
+    switch (response.statusCode) {
+      case 304:
+        return const SyncStatusResult(SyncStatusKind.notModified);
+      case 404:
+        return const SyncStatusResult(SyncStatusKind.unsupported);
+      case 200:
+        return SyncStatusResult(
+          SyncStatusKind.changed,
+          SyncStatus.fromJson(jsonDecode(response.body) as Map<String, dynamic>),
+        );
+    }
+    throw ApiException('sync status', response);
   }
 
   /// Sends a message to the other person of the active share.
