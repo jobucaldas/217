@@ -2,12 +2,14 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"strings"
 	"time"
 
 	"217/backend/internal/passwordauth"
+	"217/backend/internal/store"
 )
 
 // First-party email+password sign-in. Passwords are Argon2id-hashed; the
@@ -204,13 +206,16 @@ func (h *Handler) setCredentialPassword(userID, password string) error {
 // for good. The WorkOS identity counts as that other method only while WorkOS
 // sign-in is actually enabled (AUTH_WORKOS_ENABLED=false answers 410 there).
 func (h *Handler) RemovePasswordCredential(w http.ResponseWriter, r *http.Request) {
-	if h.workosDisabled || !h.authkitEnabled() || !h.workosLinked(r) {
-		writeJSON(w, http.StatusConflict, map[string]string{
-			"error": "set up another sign-in method first",
-		})
+	issuer := ""
+	if h.oidc.Enabled() {
+		issuer = h.oidc.Issuer
+	}
+	err := h.store.RemoveSignInMethod(getUserID(r), issuer, true, h.passwordAuthEnabled(), !h.workosDisabled && h.authkitEnabled())
+	if errors.Is(err, store.ErrOnlySignInMethod) {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "set up another sign-in method first"})
 		return
 	}
-	if err := h.store.DeletePasswordCredential(getUserID(r)); err != nil {
+	if err != nil {
 		log.Printf("remove password credential: %v", err)
 		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
 		return

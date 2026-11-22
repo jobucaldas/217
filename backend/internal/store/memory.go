@@ -42,6 +42,7 @@ type MemoryStore struct {
 	subscriptions  map[string]*model.PushSubscription
 	deliveries     map[string]memoryDelivery
 	workosSubjects map[string]string // subject -> userID
+	oidcSubjects   map[oidcIdentity]string
 	oauthAttempts  map[string]memoryOAuthAttempt
 	sessions       map[string]memorySession // keyed by hashed session id (sha256 hex)
 	shares         map[string]*model.CalendarShare
@@ -61,6 +62,7 @@ func NewMemoryStore() *MemoryStore {
 		subscriptions:       make(map[string]*model.PushSubscription),
 		deliveries:          make(map[string]memoryDelivery),
 		workosSubjects:      make(map[string]string),
+		oidcSubjects:        make(map[oidcIdentity]string),
 		oauthAttempts:       make(map[string]memoryOAuthAttempt),
 		sessions:            make(map[string]memorySession),
 		shares:              make(map[string]*model.CalendarShare),

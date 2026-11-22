@@ -4,10 +4,13 @@ go 1.26.0
 
 require (
 	github.com/SherClockHolmes/webpush-go v1.4.0
+	github.com/coreos/go-oidc/v3 v3.12.0
+	github.com/go-jose/go-jose/v4 v4.0.2
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/workos/workos-go/v10 v10.5.0
 	golang.org/x/crypto v0.51.0
+	golang.org/x/oauth2 v0.21.0
 )
 
 require (

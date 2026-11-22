@@ -255,6 +255,44 @@ func (w *wrapped) CreateDeviceKey(userID string, publicKey []byte) (string, erro
 	return w.Store.CreateDeviceKey(userID, publicKey)
 }
 
+func (w *wrapped) RemoveSignInMethod(userID, issuer string, password, passwordEnabled, workosEnabled bool) error {
+	err := w.Store.RemoveSignInMethod(userID, issuer, password, passwordEnabled, workosEnabled)
+	if err == nil {
+		w.hub.Bump("a:" + userID)
+		w.hub.Invalidate(userID)
+	}
+	return err
+}
+
+func (w *wrapped) LinkOIDCIdentity(issuer, subject, email, name string, verified bool) (*model.User, error) {
+	u, err := w.Store.LinkOIDCIdentity(issuer, subject, email, name, verified)
+	if err != nil || u == nil {
+		w.hub.Flush()
+	} else {
+		w.hub.Bump("a:" + u.ID)
+		w.hub.Invalidate(u.ID)
+	}
+	return u, err
+}
+
+func (w *wrapped) AttachOIDCIdentity(userID, issuer, subject string) error {
+	err := w.Store.AttachOIDCIdentity(userID, issuer, subject)
+	if err == nil {
+		w.hub.Bump("a:" + userID)
+		w.hub.Invalidate(userID)
+	}
+	return err
+}
+
+func (w *wrapped) DeleteOIDCIdentity(userID, issuer string) error {
+	err := w.Store.DeleteOIDCIdentity(userID, issuer)
+	if err == nil {
+		w.hub.Bump("a:" + userID)
+		w.hub.Invalidate(userID)
+	}
+	return err
+}
+
 func (w *wrapped) LinkWorkOSIdentity(subject, verifiedEmail, name string, authoritative bool) (*model.User, error) {
 	u, err := w.Store.LinkWorkOSIdentity(subject, verifiedEmail, name, authoritative)
 	if err != nil || u == nil {

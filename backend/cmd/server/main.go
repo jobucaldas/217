@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"217/backend/db"
+	"217/backend/internal/auth"
 	"217/backend/internal/fieldcrypt"
 	"217/backend/internal/mailer"
 	"217/backend/internal/server"
@@ -23,6 +24,7 @@ func main() {
 	dbURL := flag.String("db", "", "postgres connection string (DATABASE_URL)")
 	runMigrations := flag.Bool("migrate", true, "run database migrations on startup")
 	migrateOnly := flag.Bool("migrate-only", false, "run migrations and exit")
+	resetEmail := flag.String("reset-password", "", "reset an account password from stdin and exit")
 	initTLS := flag.String("init-tls", "", "write internal TLS certificates to this directory and exit")
 	postgresUID := flag.Int("postgres-uid", 70, "owner of the PostgreSQL key written by -init-tls (70 in postgres:*-alpine)")
 	backendUID := flag.Int("backend-uid", 10001, "owner of the API key written by -init-tls (the backend image's uid)")
@@ -74,6 +76,22 @@ func main() {
 	if *migrateOnly {
 		return
 	}
+	if *resetEmail != "" {
+		if dsn == "" {
+			log.Fatal("DATABASE_URL or -db is required to reset a password")
+		}
+		s, err := store.NewPGStore(dsn, keyring)
+		if err != nil {
+			log.Fatalf("opening database: %v", err)
+		}
+		if err := s.Prepare(); err != nil {
+			log.Fatalf("preparing database: %v", err)
+		}
+		if err := resetPassword(s, *resetEmail, os.Stdin, os.Stdout); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 
 	log.Fatal(server.Run(server.Config{
 		Addr:           *addr,
@@ -90,6 +108,7 @@ func main() {
 			ClientID:   os.Getenv("WORKOS_CLIENT_ID"),
 			AppBaseURL: os.Getenv("APP_BASE_URL"),
 		},
+		OIDC:           &auth.OIDC{Issuer: os.Getenv("OIDC_ISSUER"), ClientID: os.Getenv("OIDC_CLIENT_ID"), ClientSecret: os.Getenv("OIDC_CLIENT_SECRET"), Name: os.Getenv("OIDC_NAME")},
 		Keyring:        keyring,
 		PrivacyContact: os.Getenv("PRIVACY_CONTACT"),
 		TLSCertFile:    os.Getenv("TLS_CERT_FILE"),

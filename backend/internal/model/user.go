@@ -16,6 +16,7 @@ type User struct {
 	// HasPassword reports a first-party email+password credential (set by
 	// the handler when building a session payload; not a stored column).
 	HasPassword  bool      `json:"has_password,omitempty"`
+	OIDCLinked   bool      `json:"oidc_linked"`
 	PasswordHash string    `json:"-"`
 	APIKey       string    `json:"api_key,omitempty"`
 	CreatedAt    time.Time `json:"created_at"`

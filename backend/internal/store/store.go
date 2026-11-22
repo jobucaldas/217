@@ -19,6 +19,7 @@ var (
 	ErrDeviceChallengeInvalid = errors.New("invalid or expired challenge")
 	ErrRoleNotChosen          = errors.New("role not chosen")
 	ErrShareInactive          = errors.New("share inactive")
+	ErrOnlySignInMethod       = errors.New("set up another sign-in method first")
 )
 
 // ReminderDeliveryLease is how long a crashed sender's claim stays exclusive.
@@ -30,6 +31,11 @@ type Store interface {
 	GetUserByID(userID string) (*model.User, error)
 	LinkWorkOSIdentity(subject, verifiedEmail, name string, authoritative bool) (*model.User, error)
 	WorkOSSubject(userID string) (string, error)
+	LinkOIDCIdentity(issuer, subject, email, name string, verified bool) (*model.User, error)
+	AttachOIDCIdentity(userID, issuer, subject string) error
+	DeleteOIDCIdentity(userID, issuer string) error
+	OIDCIdentities(userID string) ([]model.OIDCIdentity, error)
+	RemoveSignInMethod(userID, issuer string, password, passwordEnabled, workosEnabled bool) error
 	// DeleteUser removes the account and everything it owns; a share it
 	// followed as partner is revoked so the owner can invite someone else.
 	DeleteUser(userID string) error

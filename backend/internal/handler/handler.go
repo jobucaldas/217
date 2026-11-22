@@ -56,6 +56,7 @@ type Handler struct {
 	sessionCookie   string
 	sessionDuration time.Duration
 	oauthProvider   auth.OAuthProvider
+	oidc            *auth.OIDC
 	appBaseURL      string
 	allowedOrigins  []string
 	authLimiter     *ipRateLimiter
@@ -119,6 +120,7 @@ func (h *Handler) SetRateLimit(limit int) {
 	h.authLimiter = newIPRateLimiter(limit, time.Minute)
 }
 func (h *Handler) SetOAuthProvider(p auth.OAuthProvider) { h.oauthProvider = p }
+func (h *Handler) SetOIDC(p *auth.OIDC)                  { h.oidc = p }
 
 // SetReminderNotifier wires the schedule refresh hook before serving requests.
 func (h *Handler) SetReminderNotifier(fn func()) { h.reminderNotify = fn }
@@ -228,6 +230,13 @@ func (h *Handler) AuthConfig(w http.ResponseWriter, r *http.Request) {
 		"signup":   h.passwordAuthEnabled(), // open sign-up for new accounts
 		"mail":     h.mail != nil,           // address verification configured
 		"workos":   !h.workosDisabled,
+	}
+	if h.oidc.Enabled() {
+		name := h.oidc.Name
+		if name == "" {
+			name = "Single sign-on"
+		}
+		body["oidc"] = map[string]string{"name": name}
 	}
 	if reporter, ok := h.oauthProvider.(auth.ClientIDReporter); ok {
 		body["workos_client_id"] = reporter.ClientID()

@@ -82,6 +82,11 @@ func (s *MemoryStore) DeleteUser(userID string) error {
 			delete(s.workosSubjects, subject)
 		}
 	}
+	for identity, uid := range s.oidcSubjects {
+		if uid == userID {
+			delete(s.oidcSubjects, identity)
+		}
+	}
 	for k, sess := range s.sessions {
 		if sess.UserID == userID {
 			delete(s.sessions, k)

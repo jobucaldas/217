@@ -11,6 +11,12 @@ const ConsentVersion = 1
 // calendar) is kept before it is purged.
 const RetentionAfterRevoke = 30 * 24 * time.Hour
 
+// OIDCIdentity identifies a linked OpenID Connect account.
+type OIDCIdentity struct {
+	Issuer  string `json:"issuer"`
+	Subject string `json:"subject"`
+}
+
 // AccountExport is everything the API holds about one account (LGPD art. 18:
 // access and portability).
 type AccountExport struct {
@@ -25,4 +31,5 @@ type AccountExport struct {
 	PushSubscriptions []ExportPushSubscription `json:"push_subscriptions"`
 	Shares            []*CalendarShare         `json:"shares"`
 	Devices           []DeviceKey              `json:"devices"`
+	OIDCIdentities    []OIDCIdentity           `json:"oidc_identities"`
 }

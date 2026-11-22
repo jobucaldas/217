@@ -61,6 +61,7 @@ type Config struct {
 	AllowedOrigins string
 	Push           PushConfig
 	WorkOS         WorkOSConfig
+	OIDC           *auth.OIDC
 	// Keyring seals personal data at rest; required with a database.
 	Keyring *fieldcrypt.Keyring
 	// PrivacyContact (email or URL) is shown in the app's privacy notice.
@@ -139,6 +140,7 @@ func Run(cfg Config) error {
 	defer s.Close()
 
 	h := handler.NewWithVAPID(s, push.PublicKey)
+	h.SetOIDC(cfg.OIDC)
 	h.SetSyncHub(hub)
 	h.SetAppBaseURL(appBaseURL)
 	h.SetAllowedOrigins(allowedOrigins)
@@ -214,6 +216,13 @@ func Run(cfg Config) error {
 	mux.HandleFunc("POST /api/auth/password/verify/resend", h.ResendVerificationEmail)
 	mux.HandleFunc("PUT /api/account/password", h.AuthMiddleware(h.RecentBrowserSignIn(h.ChangePassword)))
 	mux.HandleFunc("DELETE /api/account/password", h.AuthMiddleware(h.RemovePasswordCredential))
+	mux.HandleFunc("GET /api/auth/oidc", h.StartOIDC)
+	mux.HandleFunc("GET /api/auth/oidc/native", h.StartOIDCNative)
+	mux.HandleFunc("GET /api/auth/oidc/callback", h.OIDCCallback)
+	mux.HandleFunc("POST /api/auth/oidc/exchange", h.ExchangeOIDC)
+	mux.HandleFunc("GET /api/auth/oidc/link", h.StartOIDCLink)
+	mux.HandleFunc("POST /api/account/oidc/link", h.OIDCEnabled(h.AuthMiddleware(h.RecentBrowserSignIn(h.BeginOIDCLink))))
+	mux.HandleFunc("DELETE /api/account/oidc", h.OIDCEnabled(h.AuthMiddleware(h.DeleteOIDC)))
 	mux.HandleFunc("GET /api/auth/workos", h.StartWorkOSOAuth)
 	mux.HandleFunc("GET /api/auth/workos/callback", h.WorkOSOAuthCallback)
 	mux.HandleFunc("POST /api/auth/workos/exchange", h.ExchangeWorkOS)

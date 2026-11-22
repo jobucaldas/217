@@ -18,6 +18,66 @@ type memoryVerification struct {
 	expiresAt time.Time
 }
 
+// ResetPasswordCredential replaces a credential and revokes every session and device.
+func (s *MemoryStore) ResetPasswordCredential(userID, hash string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.findUserLocked(userID) == nil {
+		return fmt.Errorf("user not found")
+	}
+	s.passwordCredentials[userID] = memoryCredential{hash: hash, updatedAt: time.Now().UTC()}
+	for id, key := range s.deviceKeys {
+		if key.UserID == userID {
+			s.deleteDeviceKeyLocked(id)
+		}
+	}
+	for id, session := range s.sessions {
+		if session.UserID == userID {
+			delete(s.sessions, id)
+		}
+	}
+	return nil
+}
+
+func (s *MemoryStore) RemoveSignInMethod(userID, issuer string, password, passwordEnabled, workosEnabled bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.findUserLocked(userID) == nil {
+		return ErrUserNotFound
+	}
+	other := false
+	if workosEnabled {
+		for _, id := range s.workosSubjects {
+			if id == userID {
+				other = true
+			}
+		}
+	}
+	if password {
+		for identity, id := range s.oidcSubjects {
+			if issuer != "" && identity.issuer == issuer && id == userID {
+				other = true
+			}
+		}
+	} else {
+		_, hasPassword := s.passwordCredentials[userID]
+		other = other || (passwordEnabled && hasPassword)
+	}
+	if !other {
+		return ErrOnlySignInMethod
+	}
+	if password {
+		delete(s.passwordCredentials, userID)
+	} else {
+		for identity, id := range s.oidcSubjects {
+			if identity.issuer == issuer && id == userID {
+				delete(s.oidcSubjects, identity)
+			}
+		}
+	}
+	return nil
+}
+
 func (s *MemoryStore) SetPasswordCredential(userID string, hash string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
