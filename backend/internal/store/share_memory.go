@@ -187,8 +187,9 @@ func (s *MemoryStore) liveShareForPartnerLocked(partnerID string) *model.Calenda
 
 func (s *MemoryStore) latestShareForPartnerLocked(partnerID string) *model.CalendarShare {
 	var latest *model.CalendarShare
+	cutoff := time.Now().Add(-model.RetentionAfterRevoke)
 	for _, share := range s.shares {
-		if share.PartnerID != partnerID {
+		if share.PartnerID != partnerID || share.Status != model.ShareRevoked || !share.UpdatedAt.After(cutoff) {
 			continue
 		}
 		if latest == nil || share.UpdatedAt.After(latest.UpdatedAt) {
@@ -373,6 +374,23 @@ func (s *MemoryStore) CalendarSubjectID(userID string) (string, error) {
 	return live.OwnerID, nil
 }
 
+func (s *MemoryStore) ActivePeer(userID string) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, share := range s.shares {
+		if share.Status != model.ShareActive || share.PartnerID == "" {
+			continue
+		}
+		if share.OwnerID == userID {
+			return share.PartnerID, nil
+		}
+		if share.PartnerID == userID {
+			return share.OwnerID, nil
+		}
+	}
+	return "", nil
+}
+
 func (s *MemoryStore) SetRole(userID, role string) (*model.User, error) {
 	role = model.NormalizeRole(role)
 	if role == "" {
@@ -401,8 +419,9 @@ func (s *MemoryStore) ListAccountShares(userID string) ([]*model.CalendarShare, 
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := []*model.CalendarShare{}
+	cutoff := time.Now().Add(-model.RetentionAfterRevoke)
 	for _, sh := range s.shares {
-		if sh.OwnerID == userID || sh.PartnerID == userID {
+		if (sh.OwnerID == userID || sh.PartnerID == userID) && (sh.Status != model.ShareRevoked || sh.UpdatedAt.After(cutoff)) {
 			c := *sh
 			c.InviteCode = ""
 			out = append(out, &c)

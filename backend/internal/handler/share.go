@@ -55,6 +55,7 @@ func (h *Handler) RecordConsent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
 		return
 	}
+	h.notifyReminders()
 	writeJSON(w, http.StatusOK, h.sessionPayload(user))
 }
 
@@ -68,6 +69,7 @@ func (h *Handler) WithdrawConsent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
 		return
 	}
+	h.notifyReminders()
 	writeJSON(w, http.StatusOK, h.sessionPayload(user))
 }
 
@@ -189,6 +191,7 @@ func (h *Handler) deleteAccount(ctx context.Context, userID string) (int, string
 		log.Printf("delete account error: %v", err)
 		return http.StatusInternalServerError, "failed to delete local account data"
 	}
+	h.notifyReminders()
 	return 0, ""
 }
 
@@ -259,6 +262,8 @@ func (h *Handler) AcceptShare(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	// Accepting an invite can change an unset role to partner.
+	h.notifyReminders()
 	writeJSON(w, http.StatusOK, state)
 }
 

@@ -147,7 +147,7 @@ func (s *MemoryStore) GetEntry(userID, date string) (*model.Entry, error) {
 
 	e, ok := s.entries[entryKey(userID, date)]
 	if !ok {
-		return nil, fmt.Errorf("entry not found")
+		return nil, ErrEntryNotFound
 	}
 	return e, nil
 }
@@ -361,7 +361,7 @@ func (s *MemoryStore) ConsumeOAuthAttempt(state, binding string) (OAuthAttempt, 
 	if !ok {
 		return OAuthAttempt{}, fmt.Errorf("oauth state not found")
 	}
-	if !attempt.ExpiresAt.IsZero() && time.Now().UTC().After(attempt.ExpiresAt) {
+	if !time.Now().Before(attempt.ExpiresAt) {
 		delete(s.oauthAttempts, hash)
 		return OAuthAttempt{}, fmt.Errorf("oauth state expired")
 	}
@@ -494,41 +494,53 @@ func deliveryKey(subscriptionID string, reminderDate time.Time) string {
 	return subscriptionID + ":" + reminderDate.Format("2006-01-02")
 }
 
-func (s *MemoryStore) ClaimReminderDelivery(subscriptionID string, reminderDate, now time.Time) (bool, error) {
+func (s *MemoryStore) ClaimReminderDelivery(target model.ReminderTarget, reminderDate, now time.Time) (bool, time.Time, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	key := deliveryKey(subscriptionID, reminderDate)
-	delivery, exists := s.deliveries[key]
-	if exists {
-		if delivery.sent || now.Before(delivery.nextAttempt) || now.Sub(delivery.claimedAt) < 5*time.Minute {
-			return false, nil
-		}
+	sub, pref := s.subscriptions[target.Endpoint], s.preferences[target.UserID]
+	user := s.findUserLocked(target.UserID)
+	if sub == nil || sub.ID != target.SubscriptionID || sub.UserID != target.UserID ||
+		pref == nil || !pref.Enabled || pref.Time != target.Time || pref.Timezone != target.Timezone ||
+		user == nil || !user.HasConsent() || model.NormalizeRole(user.Role) == model.RolePartner {
+		return false, time.Time{}, nil
+	}
+	key := deliveryKey(target.SubscriptionID, reminderDate)
+	delivery := s.deliveries[key]
+	if delivery.sent {
+		return false, time.Time{}, nil
+	}
+	retryAt := delivery.nextAttempt
+	if leaseEnd := delivery.claimedAt.Add(ReminderDeliveryLease); !delivery.claimedAt.IsZero() && leaseEnd.After(retryAt) {
+		retryAt = leaseEnd
+	}
+	if now.Before(retryAt) {
+		return false, retryAt, nil
 	}
 	delivery.claimedAt = now
 	delivery.reminderDate = reminderDate
 	delivery.attempts++
 	s.deliveries[key] = delivery
-	return true, nil
+	return true, time.Time{}, nil
 }
 
-func (s *MemoryStore) FinishReminderDelivery(subscriptionID string, reminderDate time.Time, sent bool, now time.Time) error {
+func (s *MemoryStore) FinishReminderDelivery(subscriptionID string, reminderDate time.Time, sent bool, now time.Time) (time.Time, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	key := deliveryKey(subscriptionID, reminderDate)
 	delivery, ok := s.deliveries[key]
-	if !ok {
-		return nil
+	if !ok || delivery.sent {
+		return time.Time{}, nil
 	}
+	delivery.claimedAt = time.Time{}
 	if sent {
 		delivery.sent = true
 		delivery.nextAttempt = time.Time{}
 	} else {
 		delay := time.Minute << min(delivery.attempts-1, 5)
-		delivery.claimedAt = time.Time{}
 		delivery.nextAttempt = now.Add(delay)
 	}
 	s.deliveries[key] = delivery
-	return nil
+	return delivery.nextAttempt, nil
 }
 
 func (s *MemoryStore) CreateSession(userID, sessionID string, expiresAt time.Time) error {
@@ -545,30 +557,37 @@ func (s *MemoryStore) CreateSession(userID, sessionID string, expiresAt time.Tim
 }
 
 func (s *MemoryStore) GetUserBySession(sessionID string) (*model.User, error) {
+	user, _, err := s.GetSessionPrincipal(sessionID)
+	return user, err
+}
+
+func (s *MemoryStore) GetSessionPrincipal(sessionID string) (*model.User, time.Time, error) {
 	hash := hashString(sessionID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	sess, ok := s.sessions[hash]
-	if !ok {
-		return nil, fmt.Errorf("session not found")
+	now := time.Now()
+	if !ok || (sess.DeviceKeyID != "" && !s.deviceKeyActive(sess.DeviceKeyID, now)) {
+		return nil, time.Time{}, ErrSessionNotFound
 	}
-	if !sess.ExpiresAt.IsZero() && time.Now().UTC().After(sess.ExpiresAt) {
+	if !now.Before(sess.ExpiresAt) {
 		delete(s.sessions, hash)
-		return nil, fmt.Errorf("session expired")
+		return nil, time.Time{}, fmt.Errorf("%w: expired", ErrSessionNotFound)
 	}
 	for _, u := range s.users {
 		if u.ID == sess.UserID {
-			return sanitizeUser(u), nil
+			return sanitizeUser(u), sess.ExpiresAt, nil
 		}
 	}
-	return nil, fmt.Errorf("user not found")
+	return nil, time.Time{}, fmt.Errorf("%w: user not found", ErrSessionNotFound)
 }
 
 func (s *MemoryStore) SessionCreatedAt(sessionID string) (time.Time, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	sess, ok := s.sessions[hashString(sessionID)]
-	if !ok || (!sess.ExpiresAt.IsZero() && time.Now().UTC().After(sess.ExpiresAt)) {
+	now := time.Now()
+	if !ok || !now.Before(sess.ExpiresAt) || (sess.DeviceKeyID != "" && !s.deviceKeyActive(sess.DeviceKeyID, now)) {
 		return time.Time{}, fmt.Errorf("session not found")
 	}
 	return sess.CreatedAt, nil

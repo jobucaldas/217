@@ -17,6 +17,7 @@ import (
 	"217/backend/internal/handler"
 	"217/backend/internal/reminder"
 	"217/backend/internal/store"
+	"217/backend/internal/synchub"
 )
 
 type PushConfig struct {
@@ -120,16 +121,20 @@ func Run(cfg Config) error {
 		log.Println("using in-memory store")
 		s = store.NewMemoryStore()
 	}
+	// The sync hub is in memory: one API process per database.
+	hub := synchub.New()
+	s = synchub.Wrap(s, hub)
 	defer s.Close()
 
 	h := handler.NewWithVAPID(s, push.PublicKey)
+	h.SetSyncHub(hub)
 	h.SetAppBaseURL(appBaseURL)
 	h.SetAllowedOrigins(allowedOrigins)
 	h.SetPrivacyContact(cfg.PrivacyContact)
 
 	stopJanitor := make(chan struct{})
 	defer close(stopJanitor)
-	go purgeExpired(s, stopJanitor)
+	go purgeExpired(s, retentionPurgeInterval, stopJanitor)
 	if ttl := parseSessionTTL(); ttl > 0 {
 		h.SetSessionDuration(ttl)
 	}
@@ -152,9 +157,11 @@ func Run(cfg Config) error {
 	if push.PublicKey != "" && push.PrivateKey != "" {
 		stop := make(chan struct{})
 		defer close(stop)
-		service := reminder.Service{Store: s, Sender: reminder.WebPushSender{
+		service := &reminder.Service{Store: s, Sender: reminder.WebPushSender{
 			PublicKey: push.PublicKey, PrivateKey: push.PrivateKey, Subject: push.Subject,
 		}}
+		// Web Push requires replicas: 1: handler notifications refresh only this process.
+		h.SetReminderNotifier(service.Notify)
 		go service.Run(stop)
 		log.Println("web push reminder scheduler enabled")
 	} else {
@@ -182,6 +189,9 @@ func Run(cfg Config) error {
 	mux.HandleFunc("POST /api/auth/workos/exchange", h.ExchangeWorkOS)
 	mux.HandleFunc("POST /api/auth/device/challenge", h.DeviceChallenge)
 	mux.HandleFunc("POST /api/auth/device/session", h.DeviceSession)
+
+	// Authenticates itself from the in-memory hub (no database per poll).
+	mux.HandleFunc("GET /api/sync/status", h.SyncStatus)
 
 	mux.HandleFunc("GET /api/entries", h.ConsentMiddleware(h.ListEntries))
 	mux.HandleFunc("GET /api/entries/{date}", h.ConsentMiddleware(h.GetEntry))
@@ -238,9 +248,12 @@ func Run(cfg Config) error {
 	return srv.ListenAndServe()
 }
 
-// purgeExpired applies the retention rules hourly (see Store.PurgeExpired).
-func purgeExpired(s store.Store, stop <-chan struct{}) {
-	ticker := time.NewTicker(time.Hour)
+const retentionPurgeInterval = 30 * 24 * time.Hour
+
+// purgeExpired runs once while the DB is already warm from startup, then
+// monthly. Access checks enforce expiry independently of physical deletion.
+func purgeExpired(s store.Store, interval time.Duration, stop <-chan struct{}) {
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		if err := s.PurgeExpired(time.Now()); err != nil {
@@ -297,7 +310,8 @@ func corsMiddleware(next http.Handler, allowedOrigins []string) http.Handler {
 			w.Header().Add("Vary", "Origin")
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, If-None-Match")
+			w.Header().Set("Access-Control-Expose-Headers", "ETag")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		}
 		if r.Method == http.MethodOptions {

@@ -5,15 +5,16 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"217/backend/internal/fieldcrypt"
 	"217/backend/internal/model"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/stdlib"
 	"golang.org/x/crypto/bcrypt"
-
-	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 // PGStore keeps personal data sealed with kr (see sealed.go): emails, names,
@@ -24,21 +25,53 @@ type PGStore struct {
 	kr *fieldcrypt.Keyring
 }
 
-// NewPGStore connects to an already migrated database. It refuses a key that
-// cannot open the stored data and reseals rows left on a previous key.
+const (
+	pgMaxOpenConns       = 10
+	pgMaxIdleConns       = 2
+	pgMaxLifetime        = 5 * time.Minute
+	pgMaxIdleTime        = 1 * time.Minute
+	pgConnectTimeout     = 10 * time.Second
+	reminderQueryTimeout = 15 * time.Second
+)
+
+func parsePGConfig(databaseURL string) (*pgx.ConnConfig, error) {
+	cfg, err := pgx.ParseConfig(databaseURL)
+	if err != nil {
+		return nil, err
+	}
+	// Give a sleeping database time to resume; honor a configured connect_timeout.
+	if cfg.ConnectTimeout == 0 {
+		cfg.ConnectTimeout = pgConnectTimeout
+	}
+	// pgx's default protocol-level prepared statements work with Neon's pooler.
+	return cfg, nil
+}
+
+func configurePGPool(db *sql.DB) {
+	db.SetMaxOpenConns(pgMaxOpenConns)
+	db.SetMaxIdleConns(pgMaxIdleConns)
+	// Retire idle sockets before Neon's default 5-minute suspend timeout and
+	// rotate busy connections too. pgx/stdlib discards stale sockets on reuse.
+	db.SetConnMaxIdleTime(pgMaxIdleTime)
+	db.SetConnMaxLifetime(pgMaxLifetime)
+}
+
+// NewPGStore connects to an already migrated database; Prepare checks the key.
 func NewPGStore(databaseURL string, kr *fieldcrypt.Keyring) (*PGStore, error) {
 	if kr == nil {
 		return nil, fmt.Errorf("a data encryption key is required")
 	}
-	db, err := sql.Open("pgx", databaseURL)
+	cfg, err := parsePGConfig(databaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("opening database: %w", err)
 	}
-	db.SetMaxOpenConns(10)
-	db.SetMaxIdleConns(5)
-	db.SetConnMaxLifetime(5 * time.Minute)
+	db := stdlib.OpenDB(*cfg)
+	configurePGPool(db)
 
-	if err := db.Ping(); err != nil {
+	// A query deadline is separate from the dial/handshake connect timeout.
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.ConnectTimeout+5*time.Second)
+	defer cancel()
+	if err := db.PingContext(ctx); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("pinging database: %w", err)
 	}
@@ -183,7 +216,7 @@ func (s *PGStore) GetEntry(userID, date string) (*model.Entry, error) {
 		`SELECT `+entryColumns+` FROM entries WHERE user_id = $1 AND date = $2`, userID, date,
 	))
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("entry not found")
+		return nil, ErrEntryNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("getting entry: %w", err)
@@ -495,12 +528,15 @@ func (s *PGStore) CountPushSubscriptions(userID string) (int, error) {
 	return count, nil
 }
 
+const activeReminderTargets = `FROM push_subscriptions ps
+	JOIN users u ON u.id = ps.user_id
+	JOIN reminder_preferences rp ON rp.user_id = ps.user_id
+	WHERE rp.enabled = TRUE AND COALESCE(u.role, '') <> 'partner' AND u.consent_version >= $1`
+
 func (s *PGStore) ListReminderTargets() ([]model.ReminderTarget, error) {
-	rows, err := s.db.Query(`SELECT ps.id, ps.user_id, ps.sealed, rp.reminder_time, rp.timezone
-		FROM push_subscriptions ps
-		JOIN users u ON u.id = ps.user_id
-		JOIN reminder_preferences rp ON rp.user_id = ps.user_id
-		WHERE rp.enabled = TRUE AND COALESCE(u.role, '') <> 'partner' AND u.consent_version >= $1`, model.ConsentVersion)
+	ctx, cancel := context.WithTimeout(context.Background(), reminderQueryTimeout)
+	defer cancel()
+	rows, err := s.db.QueryContext(ctx, `SELECT ps.id, ps.user_id, ps.sealed, rp.reminder_time, rp.timezone `+activeReminderTargets, model.ConsentVersion)
 	if err != nil {
 		return nil, fmt.Errorf("listing reminder targets: %w", err)
 	}
@@ -514,7 +550,8 @@ func (s *PGStore) ListReminderTargets() ([]model.ReminderTarget, error) {
 		}
 		var p pushPayload
 		if err := openJSON(s.kr, sealed, pushCtx(target.SubscriptionID, target.UserID), &p); err != nil {
-			return nil, fmt.Errorf("opening push subscription %s: %w", target.SubscriptionID, err)
+			log.Printf("skipping unreadable push subscription %s: %v", target.SubscriptionID, err)
+			continue
 		}
 		target.Endpoint, target.P256DH, target.Auth = p.Endpoint, p.P256DH, p.Auth
 		result = append(result, target)
@@ -522,38 +559,60 @@ func (s *PGStore) ListReminderTargets() ([]model.ReminderTarget, error) {
 	return result, rows.Err()
 }
 
-func (s *PGStore) ClaimReminderDelivery(subscriptionID string, reminderDate, now time.Time) (bool, error) {
-	var claimed string
-	err := s.db.QueryRow(`INSERT INTO reminder_deliveries
-		(subscription_id, reminder_date, status, claimed_at, attempts, next_attempt_at)
-		VALUES ($1, $2, 'sending', $3, 1, $3)
+func (s *PGStore) ClaimReminderDelivery(target model.ReminderTarget, reminderDate, now time.Time) (bool, time.Time, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), reminderQueryTimeout)
+	defer cancel()
+	var claimed bool
+	var retryAt sql.NullTime
+	// Recheck consent, role, subscription and timing at claim time: a mutation
+	// can commit while the in-memory scheduler is waking up.
+	err := s.db.QueryRowContext(ctx, `WITH target AS (
+		SELECT ps.id `+activeReminderTargets+`
+		AND ps.id = $2 AND rp.reminder_time = $5 AND rp.timezone = $6
+	), claimed AS (
+		INSERT INTO reminder_deliveries (subscription_id, reminder_date, status, claimed_at, attempts, next_attempt_at)
+		SELECT id, $3::date, 'sending', $4::timestamptz, 1, $4 FROM target
 		ON CONFLICT (subscription_id, reminder_date) DO UPDATE
-		SET status = 'sending', claimed_at = $3, attempts = reminder_deliveries.attempts + 1
+		SET status = 'sending', claimed_at = $4, attempts = reminder_deliveries.attempts + 1
 		WHERE reminder_deliveries.status <> 'sent'
-		  AND reminder_deliveries.next_attempt_at <= $3
-		  AND (reminder_deliveries.claimed_at IS NULL OR reminder_deliveries.claimed_at <= $3 - INTERVAL '5 minutes')
-		RETURNING subscription_id::text`, subscriptionID, reminderDate.Format("2006-01-02"), now.UTC()).Scan(&claimed)
+		  AND reminder_deliveries.next_attempt_at <= $4
+		  AND (reminder_deliveries.claimed_at IS NULL OR reminder_deliveries.claimed_at <= $4 - $7::double precision * INTERVAL '1 second')
+		RETURNING 1
+	)
+	SELECT TRUE, NULL::timestamptz FROM claimed
+	UNION ALL
+	SELECT FALSE, GREATEST(d.next_attempt_at, d.claimed_at + $7 * INTERVAL '1 second')
+	FROM target JOIN reminder_deliveries d ON d.subscription_id = target.id
+	WHERE d.reminder_date = $3 AND d.status <> 'sent' AND NOT EXISTS (SELECT 1 FROM claimed)`,
+		model.ConsentVersion, target.SubscriptionID, reminderDate.Format("2006-01-02"), now.UTC(),
+		target.Time, target.Timezone, ReminderDeliveryLease.Seconds()).Scan(&claimed, &retryAt)
 	if err == sql.ErrNoRows {
-		return false, nil
+		return false, time.Time{}, nil
 	}
 	if err != nil {
-		return false, fmt.Errorf("claiming reminder delivery: %w", err)
+		return false, time.Time{}, fmt.Errorf("claiming reminder delivery: %w", err)
 	}
-	return true, nil
+	return claimed, retryAt.Time, nil
 }
 
-func (s *PGStore) FinishReminderDelivery(subscriptionID string, reminderDate time.Time, sent bool, now time.Time) error {
+func (s *PGStore) FinishReminderDelivery(subscriptionID string, reminderDate time.Time, sent bool, now time.Time) (time.Time, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), reminderQueryTimeout)
+	defer cancel()
 	if sent {
-		_, err := s.db.Exec(`UPDATE reminder_deliveries SET status = 'sent', sent_at = $3, claimed_at = NULL
+		_, err := s.db.ExecContext(ctx, `UPDATE reminder_deliveries SET status = 'sent', sent_at = $3, claimed_at = NULL
 			WHERE subscription_id = $1 AND reminder_date = $2`, subscriptionID, reminderDate.Format("2006-01-02"), now.UTC())
-		return err
+		return time.Time{}, err
 	}
-	_, err := s.db.Exec(`UPDATE reminder_deliveries
+	var retryAt time.Time
+	err := s.db.QueryRowContext(ctx, `UPDATE reminder_deliveries
 		SET status = 'retry', claimed_at = NULL,
-			next_attempt_at = $3 + (INTERVAL '1 minute' * LEAST(POWER(2, attempts - 1), 32))
-		WHERE subscription_id = $1 AND reminder_date = $2 AND status = 'sending'`,
-		subscriptionID, reminderDate.Format("2006-01-02"), now.UTC())
-	return err
+			next_attempt_at = $3::timestamptz + (INTERVAL '1 minute' * LEAST(POWER(2, attempts - 1), 32))
+		WHERE subscription_id = $1 AND reminder_date = $2 AND status = 'sending'
+		RETURNING next_attempt_at`, subscriptionID, reminderDate.Format("2006-01-02"), now.UTC()).Scan(&retryAt)
+	if err == sql.ErrNoRows {
+		return time.Time{}, nil
+	}
+	return retryAt, err
 }
 
 func (s *PGStore) CreateOAuthAttempt(state, binding, codeVerifier, nonce, redirectURI string, expiresAt time.Time) error {
@@ -590,7 +649,7 @@ func (s *PGStore) ConsumeOAuthAttempt(state, binding string) (OAuthAttempt, erro
 	if err != nil {
 		return OAuthAttempt{}, fmt.Errorf("getting oauth attempt: %w", err)
 	}
-	if time.Now().UTC().After(expiresAt) {
+	if !time.Now().UTC().Before(expiresAt) {
 		_, _ = tx.Exec(`DELETE FROM oauth_attempts WHERE state_hash = $1`, hash)
 		_ = tx.Commit()
 		return OAuthAttempt{}, fmt.Errorf("oauth state expired")
@@ -628,27 +687,37 @@ func (s *PGStore) CreateSession(userID, sessionID string, expiresAt time.Time) e
 }
 
 func (s *PGStore) GetUserBySession(sessionID string) (*model.User, error) {
+	user, _, err := s.GetSessionPrincipal(sessionID)
+	return user, err
+}
+
+func (s *PGStore) GetSessionPrincipal(sessionID string) (*model.User, time.Time, error) {
 	hash := hashString(sessionID)
-	var expires sql.NullTime
+	var expires time.Time
+	now := time.Now()
 	user, err := s.scanUser(s.db.QueryRow(`SELECT `+userColumns+`, s.expires_at
 		FROM sessions s JOIN users u ON u.id = s.user_id
-		WHERE s.id = $1`, hash), &expires)
+		LEFT JOIN device_keys d ON d.id = s.device_key_id
+		WHERE s.id = $1 AND (s.device_key_id IS NULL OR d.last_used_at > $2)`,
+		hash, now.Add(-model.DeviceKeyIdleRetention)), &expires)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("session not found")
+		return nil, time.Time{}, ErrSessionNotFound
 	}
 	if err != nil {
-		return nil, fmt.Errorf("getting user by session: %w", err)
+		return nil, time.Time{}, fmt.Errorf("getting user by session: %w", err)
 	}
-	if expires.Valid && time.Now().UTC().After(expires.Time) {
+	if !time.Now().Before(expires) {
 		_, _ = s.db.Exec(`DELETE FROM sessions WHERE id = $1`, hash)
-		return nil, fmt.Errorf("session expired")
+		return nil, time.Time{}, fmt.Errorf("%w: expired", ErrSessionNotFound)
 	}
-	return user, nil
+	return user, expires, nil
 }
 
 func (s *PGStore) SessionCreatedAt(sessionID string) (time.Time, error) {
 	var created time.Time
-	err := s.db.QueryRow(`SELECT created_at FROM sessions WHERE id = $1 AND expires_at > NOW()`, hashString(sessionID)).Scan(&created)
+	err := s.db.QueryRow(`SELECT s.created_at FROM sessions s LEFT JOIN device_keys d ON d.id = s.device_key_id
+		WHERE s.id = $1 AND s.expires_at > NOW() AND (s.device_key_id IS NULL OR d.last_used_at > $2)`,
+		hashString(sessionID), time.Now().Add(-model.DeviceKeyIdleRetention)).Scan(&created)
 	if err == sql.ErrNoRows {
 		return time.Time{}, fmt.Errorf("session not found")
 	}

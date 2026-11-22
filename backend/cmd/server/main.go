@@ -65,7 +65,7 @@ func main() {
 			if *migrateOnly {
 				log.Fatal("DATABASE_URL or -db is required for migrations")
 			}
-		} else if err := db.RunMigrations(dsn, store.MigrationSteps(keyring)); err != nil {
+		} else if err := db.RunMigrations(migrationDSN(dsn), store.MigrationSteps(keyring)); err != nil {
 			log.Fatalf("migration failed: %v", err)
 		}
 	}
@@ -93,6 +93,15 @@ func main() {
 		TLSCertFile:    os.Getenv("TLS_CERT_FILE"),
 		TLSKeyFile:     os.Getenv("TLS_KEY_FILE"),
 	}))
+}
+
+// migrationDSN prefers DATABASE_URL_UNPOOLED: migrations need a direct
+// connection when DATABASE_URL goes through a transaction pooler.
+func migrationDSN(dsn string) string {
+	if direct := strings.TrimSpace(os.Getenv("DATABASE_URL_UNPOOLED")); direct != "" {
+		return direct
+	}
+	return dsn
 }
 
 func splitList(s string) []string {

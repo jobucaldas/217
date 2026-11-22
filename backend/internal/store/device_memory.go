@@ -56,15 +56,20 @@ func (s *MemoryStore) deleteDeviceKeyLocked(keyID string) {
 	}
 }
 
+// deviceKeyActive is called with the store lock held.
+func (s *MemoryStore) deviceKeyActive(keyID string, now time.Time) bool {
+	key := s.deviceKeys[keyID]
+	return key != nil && key.LastUsedAt.After(now.Add(-model.DeviceKeyIdleRetention))
+}
+
 func (s *MemoryStore) CreateDeviceSession(userID, keyID, sessionID string, expiresAt time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	key, ok := s.deviceKeys[keyID]
-	if !ok || key.UserID != userID {
+	now := time.Now().UTC()
+	if !s.deviceKeyActive(keyID, now) || s.deviceKeys[keyID].UserID != userID {
 		return fmt.Errorf("device key not found")
 	}
-	now := time.Now().UTC()
-	key.LastUsedAt = now
+	s.deviceKeys[keyID].LastUsedAt = now
 	s.sessions[hashString(sessionID)] = memorySession{UserID: userID, CreatedAt: now, ExpiresAt: expiresAt, DeviceKeyID: keyID}
 	return nil
 }
@@ -72,10 +77,10 @@ func (s *MemoryStore) CreateDeviceSession(userID, keyID, sessionID string, expir
 func (s *MemoryStore) SetDeviceChallenge(keyID, challenge string, expiresAt time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	key, ok := s.deviceKeys[keyID]
-	if !ok || !key.LastUsedAt.After(time.Now().UTC().Add(-model.DeviceKeyIdleRetention)) {
+	if !s.deviceKeyActive(keyID, time.Now()) {
 		return fmt.Errorf("device key not found")
 	}
+	key := s.deviceKeys[keyID]
 	key.ChallengeHash, key.ChallengeExpires = hashString(challenge), expiresAt
 	return nil
 }
@@ -83,13 +88,14 @@ func (s *MemoryStore) SetDeviceChallenge(keyID, challenge string, expiresAt time
 func (s *MemoryStore) ConsumeDeviceChallenge(keyID, challenge string) (string, []byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	key, ok := s.deviceKeys[keyID]
-	if !ok {
+	now := time.Now()
+	if !s.deviceKeyActive(keyID, now) {
 		return "", nil, fmt.Errorf("device key not found")
 	}
+	key := s.deviceKeys[keyID]
 	hash, expires := key.ChallengeHash, key.ChallengeExpires
 	key.ChallengeHash, key.ChallengeExpires = "", time.Time{}
-	if hash == "" || !time.Now().UTC().Before(expires) ||
+	if hash == "" || !now.Before(expires) ||
 		subtle.ConstantTimeCompare([]byte(hash), []byte(hashString(challenge))) != 1 {
 		return "", nil, fmt.Errorf("invalid or expired challenge")
 	}
@@ -100,7 +106,7 @@ func (s *MemoryStore) DeleteSessionAndDevice(sessionID string) error {
 	hash := hashString(sessionID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if sess, ok := s.sessions[hash]; ok && sess.DeviceKeyID != "" {
+	if sess, ok := s.sessions[hash]; ok && sess.DeviceKeyID != "" && time.Now().Before(sess.ExpiresAt) {
 		s.deleteDeviceKeyLocked(sess.DeviceKeyID)
 	}
 	delete(s.sessions, hash)
@@ -111,8 +117,9 @@ func (s *MemoryStore) ListDeviceKeys(userID string) ([]model.DeviceKey, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	keys := []model.DeviceKey{}
+	now := time.Now()
 	for id, k := range s.deviceKeys {
-		if k.UserID == userID {
+		if k.UserID == userID && s.deviceKeyActive(id, now) {
 			keys = append(keys, model.DeviceKey{ID: id, CreatedAt: k.CreatedAt, LastUsedAt: k.LastUsedAt})
 		}
 	}

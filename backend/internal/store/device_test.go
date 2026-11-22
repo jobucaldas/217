@@ -53,6 +53,53 @@ func TestDeviceKeysChallengeOnceAndRevokeWithLogout(t *testing.T) {
 	})
 }
 
+func TestIdleDeviceKeyIsRejectedBeforePurge(t *testing.T) {
+	forEachStore(t, func(t *testing.T, name string, s Store) {
+		u, err := s.LinkWorkOSIdentity("idle-device", "idle-device@example.com", "Owner", true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		id, err := s.CreateDeviceKey(u.ID, []byte("key"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		expires := time.Now().Add(time.Hour)
+		if err := s.CreateDeviceSession(u.ID, id, "bound-session", expires); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.SetDeviceChallenge(id, "existing", expires); err != nil {
+			t.Fatal(err)
+		}
+		idleSince := time.Now().Add(-model.DeviceKeyIdleRetention - time.Hour)
+		switch s := s.(type) {
+		case *PGStore:
+			if _, err := s.db.Exec(`UPDATE device_keys SET last_used_at = $1 WHERE id = $2`, idleSince, id); err != nil {
+				t.Fatal(err)
+			}
+		case *MemoryStore:
+			s.deviceKeys[id].LastUsedAt = idleSince
+		}
+		if _, _, err := s.ConsumeDeviceChallenge(id, "existing"); err == nil {
+			t.Error("idle key could consume an outstanding challenge")
+		}
+		if err := s.SetDeviceChallenge(id, "new", expires); err == nil {
+			t.Error("idle key could obtain a new challenge")
+		}
+		if err := s.CreateDeviceSession(u.ID, id, "new-session", expires); err == nil {
+			t.Error("idle key could create a session")
+		}
+		if _, err := s.GetUserBySession("bound-session"); err == nil {
+			t.Error("session on an idle key still grants access")
+		}
+		if _, err := s.SessionCreatedAt("bound-session"); err == nil {
+			t.Error("session on an idle key still counts as a sign-in")
+		}
+		if keys, err := s.ListDeviceKeys(u.ID); err != nil || len(keys) != 0 {
+			t.Errorf("idle key included in account export: %+v, %v", keys, err)
+		}
+	})
+}
+
 func TestDeviceKeysAreCappedPerUser(t *testing.T) {
 	forEachStore(t, func(t *testing.T, name string, s Store) {
 		u, _ := s.LinkWorkOSIdentity("cap-"+name, "cap-"+name+"@example.com", "C", true)
