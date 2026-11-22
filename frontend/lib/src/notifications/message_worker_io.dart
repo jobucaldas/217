@@ -1,3 +1,4 @@
+import 'dart:io' show Platform;
 import 'dart:ui';
 
 import 'package:flutter/widgets.dart';
@@ -64,7 +65,10 @@ Future<void> _ensureInitialized() async {
 }
 
 Future<void> syncMessageWorker({required bool enabled}) async {
-  if (!isAndroidPlatform) return;
+  // Check the host OS, not defaultTargetPlatform: widget tests on Linux run
+  // with TargetPlatform.android and would otherwise dispatch to
+  // WorkmanagerLinux (spawning a subprocess inside FakeAsync).
+  if (!Platform.isAndroid) return;
   try {
     await _ensureInitialized();
     if (enabled) {
@@ -87,7 +91,7 @@ Future<void> syncMessageWorker({required bool enabled}) async {
 }
 
 Future<void> schedulePartnerPrecheck(DateTime? at) async {
-  if (!isAndroidPlatform) return;
+  if (!Platform.isAndroid) return;
   try {
     await _ensureInitialized();
     if (at == null) {
