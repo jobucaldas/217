@@ -586,7 +586,12 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     bool keepWhenOffline = false,
   }) async {
     final epoch = _accountEpoch;
-    final session = await _loadConfigAndSession();
+    // Public auth config refreshes alongside the session without blocking a
+    // confirmed relink, consent change, or sign-out.
+    unawaited(_api.loadAuthConfig().then((_) {
+      if (mounted && epoch == _accountEpoch) setState(() {});
+    }));
+    final session = await _api.currentSession();
     if (!mounted || epoch != _accountEpoch) return null;
     if (keepWhenOffline && session.fromCache) return null;
     _cancelOwnerReminderIfSessionLeavesOwner(session);

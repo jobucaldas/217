@@ -1345,8 +1345,9 @@ void main() {
   });
 
   testWidgets(
-      'confirmed session relink is applied even when /api/auth/config returns '
-      '503 after /api/auth/session succeeds', (tester) async {
+      'confirmed session relink dismisses open overlay immediately while '
+      '/api/auth/config is stalled and even if config later returns 503',
+      (tester) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(412, 915);
     addTearDown(tester.view.reset);
@@ -1382,7 +1383,7 @@ void main() {
     await local.replaceMonth('u-partner', 2026, 10, const []);
     await local.replaceMonth('u-partner', 2026, 12, const []);
 
-    final sessionReached = Completer<void>();
+    final sessionGate = Completer<void>();
     final configGate = Completer<void>();
     final entriesGate = Completer<void>();
     final api = ApiClient(
@@ -1394,7 +1395,7 @@ void main() {
       httpClient: MockClient((request) async {
         switch (request.url.path) {
           case '/api/auth/session':
-            if (!sessionReached.isCompleted) sessionReached.complete();
+            await sessionGate.future;
             return http.Response(
               jsonEncode({
                 'user': {
@@ -1413,9 +1414,6 @@ void main() {
               200,
             );
           case '/api/auth/config':
-            // Complete strictly AFTER /api/auth/session returns 200 so
-            // api.offline.value flips to true before _loadConfigAndSession()
-            // resolves.
             await configGate.future;
             return http.Response('unavailable', 503);
           case '/api/entries':
@@ -1446,17 +1444,33 @@ void main() {
     await tester.pump();
     await tester.pump();
     await tester.pump();
-    await sessionReached.future;
+
+    // Open Owner A's read-only day sheet while both session and config stall.
+    await tester.tap(find.byKey(const ValueKey('view-day-button')));
     await tester.pump();
-    configGate.complete();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byType(ExpandableDaySheet), findsOneWidget);
+    expect(find.text('owner-a private note'), findsWidgets);
+
+    // /api/auth/session confirms Owner B while /api/auth/config stays stalled.
+    sessionGate.complete();
     await tester.pump();
     await tester.pump();
     await tester.pump();
 
-    // Even though /api/auth/config flipped offline=true, the confirmed session
-    // for Owner B must NOT be discarded and Owner A's private data must go.
-    expect(api.offline.value, isTrue);
+    // Owner A's open sheet and calendar MUST already be gone before config replies.
+    expect(configGate.isCompleted, isFalse);
     expect(find.byType(CalendarScreen), findsOneWidget);
+    expect(find.byType(ExpandableDaySheet), findsNothing);
+    expect(find.text('owner-a private note'), findsNothing);
+    expect(find.text('Taken'), findsNothing);
+
+    // Even when /api/auth/config later returns 503 and sets offline=true,
+    // Owner B's confirmed session remains active.
+    configGate.complete();
+    await tester.pump();
+    await tester.pump();
+    expect(api.offline.value, isTrue);
     expect(find.text('owner-a private note'), findsNothing);
     expect(find.text('Taken'), findsNothing);
 
@@ -1471,6 +1485,9 @@ void main() {
     FlutterSecureStorage.setMockInitialValues({'session_token': 'tok'});
     final pendingReached = Completer<void>();
     final pendingGate = Completer<void>();
+    final entriesHttpGate = Completer<void>();
+    final relinkHttpReached = Completer<void>();
+    final relinkResponseGate = Completer<void>();
     var pauseNextPending = false;
     final local = _GatedPendingWritesStore(
       onPendingWrites: () {
@@ -1513,6 +1530,7 @@ void main() {
       ),
       httpClient: MockClient((request) async {
         if (request.url.path == '/api/entries') {
+          await entriesHttpGate.future;
           return http.Response(
             jsonEncode({
               'entries': [
@@ -1528,6 +1546,8 @@ void main() {
           );
         }
         if (request.url.path == '/api/auth/session') {
+          if (!relinkHttpReached.isCompleted) relinkHttpReached.complete();
+          await relinkResponseGate.future;
           return http.Response(
             jsonEncode({
               'user': {
@@ -1553,11 +1573,20 @@ void main() {
     expect((await api.cachedSession())?.user?.id, 'u-partner');
     pauseNextPending = true;
 
+    // Launch both requests so currentSession() has already sent its HTTP
+    // request before listEntries() pauses inside pendingWrites().
     final entriesFuture = api.listEntries(2026, 11);
+    final relinkFuture = api.currentSession();
+    await relinkHttpReached.future;
+
+    entriesHttpGate.complete();
     await pendingReached.future;
 
-    // While listEntries is paused inside pendingWrites, partner relinks to B.
-    final relinkFuture = api.currentSession();
+    // Deliver the relink response while listEntries() is still blocked inside
+    // pendingWrites(), giving an unserialized implementation time to run
+    // clearCalendar() before replaceMonth() executes.
+    relinkResponseGate.complete();
+    await Future<void>.delayed(const Duration(milliseconds: 50));
 
     pendingGate.complete();
     await Future.wait([entriesFuture, relinkFuture]);
