@@ -332,7 +332,7 @@ class _SettingsPageState extends State<SettingsPage> {
           if (widget.onLogout != null &&
               !widget.consentPending &&
               widget.user != null &&
-              widget.api.passwordAuth) ...[
+              (widget.api.passwordAuth || widget.api.oidcName != null)) ...[
             _SectionLabel(widget.strings.signInMethods),
             SignInMethodsSection(
               api: widget.api,

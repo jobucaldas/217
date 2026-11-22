@@ -8,6 +8,7 @@ class User {
     this.displayName = '',
     this.birthDate = '',
     this.hasPassword = false,
+    this.oidcLinked = false,
   });
 
   final String id;
@@ -25,6 +26,7 @@ class User {
   /// Has a first-party email+password credential (Set/Change/Remove password
   /// in Settings; absent for WorkOS-only accounts).
   final bool hasPassword;
+  final bool oidcLinked;
 
   /// The name the other side sees: the chosen one, else the sign-in name.
   String get shownName => displayName.trim().isNotEmpty ? displayName : name;
@@ -46,7 +48,8 @@ class User {
       stage: stage,
       displayName: displayName,
       birthDate: birthDate,
-      hasPassword: hasPassword);
+      hasPassword: hasPassword,
+      oidcLinked: oidcLinked);
 
   factory User.fromJson(Map<String, dynamic> json) {
     return User(
@@ -58,6 +61,7 @@ class User {
       displayName: (json['display_name'] as String?) ?? '',
       birthDate: (json['birth_date'] as String?) ?? '',
       hasPassword: json['has_password'] == true,
+      oidcLinked: json['oidc_linked'] == true,
     );
   }
 }

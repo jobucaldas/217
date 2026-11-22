@@ -14,9 +14,15 @@ import '../models.dart';
 /// WorkOS returns to /api/auth/workos/callback which sets the session cookie,
 /// then lands on the app, or on [returnTo] (one of the privacy pages, e.g.
 /// `/app/privacy?confirm=delete`; the server ignores any other path).
-Future<User?> beginWorkOSSignIn(ApiClient api, {String? returnTo}) async {
+Future<User?> beginWorkOSSignIn(ApiClient api, {String? returnTo}) =>
+    _beginSignIn(api, 'workos', returnTo: returnTo);
+
+Future<User?> beginOIDCSignIn(ApiClient api, {String? returnTo}) =>
+    _beginSignIn(api, 'oidc', returnTo: returnTo);
+
+Future<User?> _beginSignIn(ApiClient api, String provider, {String? returnTo}) async {
   final base = api.config.apiBaseUrl.replaceAll(RegExp(r'/+$'), '');
-  var target = base.isEmpty ? '/api/auth/workos' : '$base/api/auth/workos';
+  var target = '$base/api/auth/$provider';
   if (returnTo != null && returnTo.isNotEmpty) {
     target += '?${Uri(queryParameters: {'return': returnTo}).query}';
   }
@@ -42,4 +48,10 @@ Future<User?> beginWorkOSSignIn(ApiClient api, {String? returnTo}) async {
   }
   html.window.location.assign(authURL);
   return Completer<User?>().future;
+}
+
+Future<bool> connectOIDC(ApiClient api) async {
+  final url = await api.beginOIDCLink('web');
+  html.window.location.assign(url);
+  return Completer<bool>().future;
 }

@@ -18,6 +18,7 @@ class AuthScreen extends StatefulWidget {
     required this.api,
     required this.onSignedIn,
     this.onSignInWorkOS,
+    this.onSignInOIDC,
     this.onOpenSettings,
     this.server,
     this.onOpenServerSettings,
@@ -31,6 +32,7 @@ class AuthScreen extends StatefulWidget {
 
   /// The existing WorkOS button flow; null hides it (server without WorkOS).
   final Future<void> Function()? onSignInWorkOS;
+  final Future<void> Function()? onSignInOIDC;
 
   final VoidCallback? onOpenSettings;
 
@@ -189,6 +191,20 @@ class _AuthScreenState extends State<AuthScreen> {
                                               .strings.continueWorkOSOther
                                           : widget.strings.continueWorkOS),
                                     ),
+                                  ),
+                                ],
+                                if (widget.onSignInOIDC != null &&
+                                    widget.api.oidcName != null) ...[
+                                  if (_passwordOn ||
+                                      (widget.onSignInWorkOS != null && widget.api.workos)) ...[
+                                    const SizedBox(height: 16),
+                                    _OrDivider(strings: widget.strings),
+                                    const SizedBox(height: 16),
+                                  ],
+                                  FilledButton(
+                                    key: const ValueKey('auth-oidc'),
+                                    onPressed: widget.onSignInOIDC,
+                                    child: Text(widget.strings.continueOIDC(widget.api.oidcName!)),
                                   ),
                                 ],
                               ],
