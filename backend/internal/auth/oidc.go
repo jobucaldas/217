@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/coreos/go-oidc/v3/oidc"
@@ -88,6 +89,10 @@ func (o *OIDC) Exchange(ctx context.Context, redirect, code, verifier, nonce str
 		return nil, err
 	}
 	if claims.Email == "" {
+		// The access token never leaves HTTPS for a plain-HTTP userinfo URL.
+		if strings.HasPrefix(o.Issuer, "https://") && !strings.HasPrefix(p.UserInfoEndpoint(), "https://") {
+			return nil, fmt.Errorf("userinfo endpoint is not https")
+		}
 		ui, err := p.UserInfo(ctx, oauth2.StaticTokenSource(token))
 		if err != nil {
 			return nil, err

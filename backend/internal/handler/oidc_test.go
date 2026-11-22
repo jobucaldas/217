@@ -151,12 +151,14 @@ func TestOIDCBrowserAndNative(t *testing.T) {
 	}
 	idTokenProfile = false
 	userinfoSubject = "different-subject"
+	verified = true // only the subject check can refuse this one
 	cookie, state := start(false, "")
 	w := callback(cookie, state)
 	if w.Code != 302 || w.Header().Get("Location") != "https://app.example.com/app/?auth_error=oidc_failed" {
 		t.Fatalf("userinfo subject mismatch: %d %s", w.Code, w.Header().Get("Location"))
 	}
 	userinfoSubject = ""
+	verified = false
 	cookie, state = start(false, "")
 	w = callback(cookie, state)
 	if w.Code != 302 || w.Header().Get("Location") != "https://app.example.com/app/?auth_error=oidc_failed" {
