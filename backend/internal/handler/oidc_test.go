@@ -284,11 +284,47 @@ func TestOIDCBrowserAndNative(t *testing.T) {
 		nonce, challenge = provider.Query().Get("nonce"), provider.Query().Get("code_challenge")
 		return callback(w.Result().Cookies()[0], provider.Query().Get("state"))
 	}
-	if w = link("subject"); !strings.Contains(w.Header().Get("Location"), "link_error") {
-		t.Fatal("linked identity owned by another user")
+	other, err := s.CreateUser("other@example.com", "Other", "password")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if w = link("new-link"); !strings.Contains(w.Header().Get("Location"), "linked=1") {
-		t.Fatalf("link failed: %d %s", w.Code, w.Body.String())
+	if err := s.CreateSession(other.ID, "other-session", time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	otherSession := &http.Cookie{Name: "217_session", Value: "other-session"}
+	confirm := func(subject string, cookie *http.Cookie) int {
+		t.Helper()
+		w := link(subject)
+		u, err := url.Parse(w.Header().Get("Location"))
+		if err != nil || u.Query().Get("link_code") == "" {
+			t.Fatalf("link callback: %d %s", w.Code, w.Header().Get("Location"))
+		}
+		r := authedRequest("POST", "/api/account/oidc/link/confirm", cookie, []byte(fmt.Sprintf(`{"code":%q}`, u.Query().Get("link_code"))))
+		r.Header.Set("Origin", "https://app.example.com")
+		w = httptest.NewRecorder()
+		h.AuthMiddleware(h.ConfirmOIDCLink)(w, r)
+		status := w.Code
+		r = authedRequest("POST", "/api/account/oidc/link/confirm", cookie, []byte(fmt.Sprintf(`{"code":%q}`, u.Query().Get("link_code"))))
+		r.Header.Set("Origin", "https://app.example.com")
+		w = httptest.NewRecorder()
+		h.AuthMiddleware(h.ConfirmOIDCLink)(w, r)
+		if w.Code != 400 {
+			t.Fatalf("confirmation code replay: %d", w.Code)
+		}
+		return status
+	}
+	if status := confirm("subject", session); status != 409 {
+		t.Fatalf("identity already linked: %d", status)
+	}
+	if status := confirm("new-link", otherSession); status != 403 {
+		t.Fatalf("different user: %d", status)
+	}
+	ids, err = s.OIDCIdentities(owner.ID)
+	if err != nil || len(ids) != 0 {
+		t.Fatal("identity attached without owner confirmation")
+	}
+	if status := confirm("new-link", session); status != 204 {
+		t.Fatalf("owner confirmation: %d", status)
 	}
 	ids, err = s.OIDCIdentities(owner.ID)
 	if err != nil || len(ids) != 1 || ids[0].Subject != "new-link" {

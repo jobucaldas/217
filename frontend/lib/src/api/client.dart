@@ -2219,6 +2219,12 @@ class ApiClient {
     return url;
   }
 
+  Future<void> confirmOIDCLink(String code) async {
+    final response = await _send('POST', _uri('/api/account/oidc/link/confirm'),
+        body: {'code': code});
+    if (response.statusCode != 204) throw ApiException('connect', response);
+  }
+
   Future<void> removeOIDC() async {
     final response = await _send('DELETE', _uri('/api/account/oidc'));
     if (response.statusCode != 204) throw ApiException('disconnect', response);

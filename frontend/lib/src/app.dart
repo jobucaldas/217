@@ -618,14 +618,25 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
       final authError = params.remove('auth_error');
       final linkError = params.remove('link_error');
       final linked = params.remove('linked');
-      if (authError != null || linkError != null || linked != null) {
+      final linkCode = params.remove('link_code');
+      if (authError != null || linkError != null || linked != null || linkCode != null) {
         replaceWebPath(params.isEmpty
             ? uri.path
             : uri.replace(queryParameters: params).toString());
+        var linkFailed = linkError != null;
+        if (linkCode != null) {
+          try {
+            if (_user == null) throw StateError('not signed in');
+            await _api.confirmOIDCLink(linkCode);
+            await _refreshSession();
+          } catch (_) {
+            linkFailed = true;
+          }
+        }
         final message = authError == 'account_exists'
             ? _strings.oidcAccountExists
             : authError != null ? _strings.oidcFailed
-            : linkError != null ? _strings.oidcLinkFailed
+            : linkFailed ? _strings.oidcLinkFailed
             : _strings.oidcLinkSuccess;
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) {

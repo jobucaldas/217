@@ -222,6 +222,7 @@ func Run(cfg Config) error {
 	mux.HandleFunc("POST /api/auth/oidc/exchange", h.ExchangeOIDC)
 	mux.HandleFunc("GET /api/auth/oidc/link", h.StartOIDCLink)
 	mux.HandleFunc("POST /api/account/oidc/link", h.OIDCEnabled(h.AuthMiddleware(h.RecentBrowserSignIn(h.BeginOIDCLink))))
+	mux.HandleFunc("POST /api/account/oidc/link/confirm", h.OIDCEnabled(h.AuthMiddleware(h.ConfirmOIDCLink)))
 	mux.HandleFunc("DELETE /api/account/oidc", h.OIDCEnabled(h.AuthMiddleware(h.DeleteOIDC)))
 	mux.HandleFunc("GET /api/auth/workos", h.StartWorkOSOAuth)
 	mux.HandleFunc("GET /api/auth/workos/callback", h.WorkOSOAuthCallback)

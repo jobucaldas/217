@@ -16,6 +16,7 @@ const oidcCallbackPath = "/api/auth/oidc/callback"
 const oidcAppURL = "com.caldasstudios.app217://oidc"
 const oidcCodeBinding = "217-oidc-native-code"
 const oidcLinkBinding = "217-oidc-link-token"
+const oidcLinkConfirmBinding = "217-oidc-link-confirm"
 
 type oidcAttempt struct{ Kind, Verifier, Challenge, UserID, Platform, Return string }
 
@@ -160,16 +161,18 @@ func (h *Handler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a.Kind == "link" {
-		err = h.store.AttachOIDCIdentity(a.UserID, h.oidc.Issuer, info.Subject)
-		target := strings.TrimSuffix(attempt.RedirectURI, oidcCallbackPath) + "/app/?linked=oidc"
-		if a.Platform == "android" {
-			target = oidcAppURL + "?linked=1"
-		}
+		code, err := generateRandom(32)
 		if err != nil {
-			target = strings.TrimSuffix(attempt.RedirectURI, oidcCallbackPath) + "/app/?link_error=oidc"
-			if a.Platform == "android" {
-				target = oidcAppURL + "?link_error=oidc"
-			}
+			oidcFailure(w, r, a, attempt.RedirectURI, "oidc_failed")
+			return
+		}
+		if err = h.store.CreateOAuthAttempt(code, oidcLinkConfirmBinding, a.UserID, info.Subject, "", time.Now().Add(2*time.Minute)); err != nil {
+			oidcFailure(w, r, a, attempt.RedirectURI, "oidc_failed")
+			return
+		}
+		target := strings.TrimSuffix(attempt.RedirectURI, oidcCallbackPath) + "/app/?link_code=" + url.QueryEscape(code)
+		if a.Platform == "android" {
+			target = oidcAppURL + "?link_code=" + url.QueryEscape(code)
 		}
 		http.Redirect(w, r, target, 302)
 		return
@@ -262,6 +265,30 @@ func (h *Handler) BeginOIDCLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]string{"url": h.requestOrigin(r) + "/api/auth/oidc/link?token=" + url.QueryEscape(token)})
+}
+func (h *Handler) ConfirmOIDCLink(w http.ResponseWriter, r *http.Request) {
+	var b struct {
+		Code string `json:"code"`
+	}
+	if json.NewDecoder(r.Body).Decode(&b) != nil || b.Code == "" {
+		http.Error(w, `{"error":"invalid code"}`, 400)
+		return
+	}
+	a, err := h.store.ConsumeOAuthAttempt(b.Code, oidcLinkConfirmBinding)
+	if err != nil {
+		http.Error(w, `{"error":"invalid code"}`, 400)
+		return
+	}
+	if a.CodeVerifier != getUserID(r) {
+		http.Error(w, `{"error":"link belongs to another account"}`, 403)
+		return
+	}
+	// Attach fails when the identity or the account is already linked.
+	if err = h.store.AttachOIDCIdentity(a.CodeVerifier, h.oidc.Issuer, a.Nonce); err != nil {
+		http.Error(w, `{"error":"identity already linked"}`, 409)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 func (h *Handler) StartOIDCLink(w http.ResponseWriter, r *http.Request) {
 	if h.oidcGone(w) {

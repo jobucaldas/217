@@ -16,5 +16,11 @@ Future<bool> connectOIDC(ApiClient api) async {
     callbackUrlScheme: 'com.caldasstudios.app217',
     options: const FlutterWebAuth2Options(useWebview: false),
   );
-  return Uri.parse(result).queryParameters['linked'] == '1';
+  final params = Uri.parse(result).queryParameters;
+  final code = params['link_code'];
+  if (params['link_error'] != null || code == null || code.isEmpty) {
+    return false;
+  }
+  await api.confirmOIDCLink(code);
+  return true;
 }

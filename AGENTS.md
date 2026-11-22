@@ -72,7 +72,7 @@ Sign-in is WorkOS AuthKit by default; first-party email+password sign-in also ex
 Optional generic OpenID Connect uses `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` and `OIDC_NAME`; discovery is lazy. Browser and Android use the API callback with PKCE; automatic email linking requires a verified email and an existing account without a password credential. Callback failures redirect web to `/app/?auth_error=account_exists|oidc_failed` and Android to `com.caldasstudios.app217://oidc?error=account_exists|oidc_failed`; explicit linking forces provider re-login.
 - `GET /api/auth/oidc` — browser start (`auth_url`); `/api/auth/oidc/callback` completes sign-in
 - `GET /api/auth/oidc/native?app_challenge=...` — native start; `POST /api/auth/oidc/exchange` accepts `code`, `code_verifier`, and optional `device_public_key`
-- `POST /api/account/oidc/link` — `{platform: web|android}` → `{url}`; `GET /api/auth/oidc/link` starts linking; `DELETE /api/account/oidc` unlinks
+- `POST /api/account/oidc/link` — `{platform: web|android}` → `{url}`; `GET /api/auth/oidc/link` starts linking; the callback returns `link_code`, confirmed by `POST /api/account/oidc/link/confirm` with `{code}`; `DELETE /api/account/oidc` unlinks
 - `GET /api/auth/workos` — browser AuthKit start
 - `GET /api/auth/workos/callback` — browser callback; the redirect URI is chosen at login from the request host (`X-Forwarded-Host`/`Host`) if it is in `APP_BASE_URL` + `APP_ALLOWED_ORIGINS`, else `APP_BASE_URL`, and stored with the attempt (sealed) for the exchange and final redirect
 - `POST /api/auth/workos/exchange` — native PKCE exchange; optional `device_public_key` (base64 PKIX P-256) → `device_key_id`
