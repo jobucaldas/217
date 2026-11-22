@@ -5,12 +5,13 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import 'i18n.dart';
 import 'models.dart';
+import 'secure_storage.dart';
 import 'theme/palette.dart';
 
 /// Persists appearance across auth and restarts.
 class AppearancePrefs {
   AppearancePrefs({FlutterSecureStorage? storage})
-      : _storage = storage ?? const FlutterSecureStorage();
+      : _storage = storage ?? appSecureStorage;
 
   final FlutterSecureStorage _storage;
 
