@@ -2438,6 +2438,507 @@ void main() {
     entriesGate.complete();
     await tester.pump();
   });
+
+  test(
+      'delayed 200 /api/auth/session cannot undo a persisted 403 consent '
+      'required block', () async {
+    FlutterSecureStorage.setMockInitialValues({'session_token': 'tok'});
+    final local = MemoryLocalStore();
+    await local.writeDoc(localGlobalUser, 'last_user', 'u-owner');
+    await local.writeDoc(
+      'u-owner',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-owner',
+          'email': 'owner@example.com',
+          'role': 'owner',
+        },
+        'share': {'status': 'none'},
+        'consent': {'version': 1, 'required': false},
+      }),
+    );
+    await local.writeDoc('u-owner', 'calendar', 'own');
+    await local.replaceMonth('u-owner', 2026, 11, const [
+      Entry(date: '2026-11-15', taken: true, notes: 'owner private note'),
+    ]);
+
+    final staleSessionReached = Completer<void>();
+    final staleSessionGate = Completer<void>();
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: local,
+      httpClient: MockClient((request) async {
+        if (request.url.path == '/api/auth/session') {
+          if (!staleSessionReached.isCompleted) staleSessionReached.complete();
+          await staleSessionGate.future;
+          // Stale 200 generated before consent was withdrawn.
+          return http.Response(
+            jsonEncode({
+              'user': {
+                'id': 'u-owner',
+                'email': 'owner@example.com',
+                'role': 'owner',
+              },
+              'share': {'status': 'none'},
+              'consent': {'version': 1, 'required': false},
+            }),
+            200,
+          );
+        }
+        if (request.url.path == '/api/entries') {
+          return http.Response(
+            '{"error":"consent required","consent_version":2}',
+            403,
+          );
+        }
+        return http.Response('{}', 200);
+      }),
+    );
+
+    expect((await api.cachedSession())?.consentRequired, isFalse);
+
+    // Launch a session refresh that stalls before consent is withdrawn.
+    final delayedSession = api.currentSession();
+    await staleSessionReached.future;
+
+    // Calendar read receives 403 consent required and persists the block.
+    await expectLater(
+      api.listEntries(2026, 11),
+      throwsA(isA<ApiException>()
+          .having((e) => e.statusCode, 'statusCode', 403)
+          .having((e) => e.message, 'message', 'consent required')),
+    );
+
+    // Delayed 200 /api/auth/session arrives with required:false: must be
+    // rejected as stale so it cannot overwrite the persisted consent block.
+    staleSessionGate.complete();
+    await expectLater(
+      delayedSession,
+      throwsA(isA<StaleAuthScopeException>()),
+    );
+
+    final offlineApi = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: local,
+      httpClient: MockClient((_) async => http.Response('unavailable', 503)),
+    );
+    final restarted = await offlineApi.cachedSession();
+    expect(restarted?.consentRequired, isTrue);
+    expect(restarted?.consentVersion, 2);
+  });
+
+  testWidgets(
+      'secondary-screen subject mismatch and superseded-swipe 403 immediately '
+      'clear mounted CalendarScreen in-memory data', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(412, 915);
+    addTearDown(tester.view.reset);
+
+    // Part A: a /api/cycle mismatch (e.g. from Partner Alerts) clears the
+    // mounted CalendarScreen immediately while /api/auth/session stalls.
+    FlutterSecureStorage.setMockInitialValues({'session_token': 'tok'});
+    final localA = MemoryLocalStore();
+    await localA.writeDoc(localGlobalUser, 'last_user', 'u-partner');
+    await localA.writeDoc(
+      'u-partner',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-partner',
+          'email': 'partner@example.com',
+          'role': 'partner',
+        },
+        'share': {
+          'status': 'active',
+          'owner_id': 'owner-a',
+          'owner_email': 'owner-a@example.com',
+          'owner_name': 'Owner A',
+          'can_edit_calendar': false,
+        },
+      }),
+    );
+    await localA.writeDoc(
+      'u-partner',
+      'calendar',
+      'partner:active:owner-a:owner-a@example.com',
+    );
+    await localA.replaceMonth('u-partner', 2026, 11, const [
+      Entry(date: '2026-11-15', taken: true, notes: 'owner-a private note'),
+    ]);
+    await localA.replaceMonth('u-partner', 2026, 10, const []);
+    await localA.replaceMonth('u-partner', 2026, 12, const []);
+
+    final sessionGateA = Completer<void>();
+    final entriesGateA = Completer<void>();
+    final apiA = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: localA,
+      httpClient: MockClient((request) async {
+        switch (request.url.path) {
+          case '/api/auth/config':
+            return http.Response('unavailable', 503);
+          case '/api/auth/session':
+            await sessionGateA.future;
+            return http.Response('unavailable', 503);
+          case '/api/entries':
+            await entriesGateA.future;
+            return http.Response('unavailable', 503);
+          case '/api/cycle':
+            return http.Response(
+              jsonEncode({
+                'subject_id': 'owner-b',
+                'cycle_length': 28,
+                'period_length': 5,
+                'period_starts': [],
+                'predictions': [],
+              }),
+              200,
+            );
+          default:
+            return http.Response('{}', 200);
+        }
+      }),
+    );
+
+    await tester.pumpWidget(App217(
+      config: apiA.config,
+      api: apiA,
+      clock: () => DateTime(2026, 11, 15, 10, 0),
+    ));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('owner-a private note'), findsWidgets);
+
+    // Simulate a secondary screen calling getCycle() and hitting mismatch.
+    await expectLater(
+      apiA.getCycle('2026-11-15'),
+      throwsA(isA<CalendarScopeMismatchException>()),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(sessionGateA.isCompleted, isFalse);
+    expect(find.text('owner-a private note'), findsNothing);
+    expect(find.text('Taken'), findsNothing);
+
+    sessionGateA.complete();
+    entriesGateA.complete();
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+
+    // Part B: a 403 share inactive from an older month load superseded by a
+    // month change still clears the mounted CalendarScreen immediately.
+    final localB = MemoryLocalStore();
+    await localB.writeDoc(localGlobalUser, 'last_user', 'u-partner');
+    await localB.writeDoc(
+      'u-partner',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-partner',
+          'email': 'partner@example.com',
+          'role': 'partner',
+        },
+        'share': {
+          'status': 'active',
+          'owner_id': 'owner-a',
+          'owner_email': 'owner-a@example.com',
+          'owner_name': 'Owner A',
+          'can_edit_calendar': false,
+        },
+      }),
+    );
+    await localB.writeDoc(
+      'u-partner',
+      'calendar',
+      'partner:active:owner-a:owner-a@example.com',
+    );
+    await localB.replaceMonth('u-partner', 2026, 11, const [
+      Entry(date: '2026-11-15', taken: true, notes: 'superseded private note'),
+    ]);
+    await localB.replaceMonth('u-partner', 2026, 10, const []);
+    await localB.replaceMonth('u-partner', 2026, 12, const []);
+
+    final sessionGateB = Completer<void>();
+    final firstNovGate = Completer<void>();
+    final otherEntriesGateB = Completer<void>();
+    var firstNovSeen = false;
+
+    final apiB = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: localB,
+      httpClient: MockClient((request) async {
+        switch (request.url.path) {
+          case '/api/auth/config':
+            return http.Response('unavailable', 503);
+          case '/api/auth/session':
+            await sessionGateB.future;
+            return http.Response('unavailable', 503);
+          case '/api/entries':
+            if (request.url.queryParameters['month'] == '11' && !firstNovSeen) {
+              firstNovSeen = true;
+              await firstNovGate.future;
+              return http.Response('{"error":"share inactive"}', 403);
+            }
+            await otherEntriesGateB.future;
+            return http.Response('unavailable', 503);
+          default:
+            return http.Response('{}', 200);
+        }
+      }),
+    );
+
+    await tester.pumpWidget(App217(
+      config: apiB.config,
+      api: apiB,
+      clock: () => DateTime(2026, 11, 15, 10, 0),
+    ));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+    expect(firstNovSeen, isTrue);
+    expect(find.text('superseded private note'), findsWidgets);
+
+    // Move to the next month so a new _loadGeneration supersedes firstNovGate.
+    await tester.tap(find.byIcon(Icons.chevron_right));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+
+    // Superseded month=11 request returns 403 share inactive while the newer
+    // month's requests and /api/auth/session stay stalled.
+    firstNovGate.complete();
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    expect(otherEntriesGateB.isCompleted, isFalse);
+    expect(sessionGateB.isCompleted, isFalse);
+    expect(find.text('superseded private note'), findsNothing);
+    expect(find.text('Taken'), findsNothing);
+    expect(await localB.monthEntries('u-partner', 2026, 11), isNull);
+
+    otherEntriesGateB.complete();
+    sessionGateB.complete();
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+  });
+
+  test(
+      'failing clearCalendar on 403 denial or subject_id mismatch preserves '
+      'the denial and blocks cached calendar fallback', () async {
+    FlutterSecureStorage.setMockInitialValues({'session_token': 'tok'});
+
+    Future<(_FailingClearCalendarStore, ApiClient)> makeClient(
+      MockClient httpClient,
+    ) async {
+      final store = _FailingClearCalendarStore();
+      await store.writeDoc(localGlobalUser, 'last_user', 'u-partner');
+      await store.writeDoc(
+        'u-partner',
+        'session',
+        jsonEncode({
+          'user': {
+            'id': 'u-partner',
+            'email': 'partner@example.com',
+            'role': 'partner',
+          },
+          'share': {
+            'status': 'active',
+            'owner_id': 'owner-a',
+            'owner_email': 'owner-a@example.com',
+          },
+        }),
+      );
+      await store.writeDoc(
+        'u-partner',
+        'calendar',
+        'partner:active:owner-a:owner-a@example.com',
+      );
+      await store.replaceMonth('u-partner', 2026, 11, const [
+        Entry(date: '2026-11-15', taken: true, notes: 'owner-a secret'),
+      ]);
+      await store.writeDoc(
+        'u-partner',
+        'cycle',
+        jsonEncode({
+          'cycle_length': 28,
+          'period_length': 5,
+          'period_starts': ['2026-10-30'],
+          'predictions': [],
+        }),
+      );
+      final api = ApiClient(
+        AppConfig(
+          apiBaseUrl: 'https://api.example',
+          workosClientId: 'client',
+          redirectUri: 'com.caldasstudios.app217://auth/callback',
+        ),
+        localStore: store,
+        httpClient: httpClient,
+      );
+      expect((await api.cachedSession())?.share?.ownerId, 'owner-a');
+      return (store, api);
+    }
+
+    // Case A: 403 share inactive when clearCalendar throws must still throw
+    // ApiException(403) instead of returning stale cached entries.
+    final (_, api403) = await makeClient(
+      MockClient((request) async {
+        if (request.url.path == '/api/entries') {
+          return http.Response('{"error":"share inactive"}', 403);
+        }
+        return http.Response('unavailable', 503);
+      }),
+    );
+    await expectLater(
+      api403.listEntries(2026, 11),
+      throwsA(isA<ApiException>()
+          .having((e) => e.statusCode, 'statusCode', 403)
+          .having((e) => e.message, 'message', 'share inactive')),
+    );
+    expect(await api403.cachedMonth(2026, 11), isNull);
+    expect(await api403.cachedCycle(), isNull);
+
+    // Case B: subject_id mismatch when clearCalendar throws must still throw
+    // CalendarScopeMismatchException instead of returning stale cached cycle.
+    final (_, apiMismatch) = await makeClient(
+      MockClient((request) async {
+        if (request.url.path == '/api/cycle') {
+          return http.Response(
+            jsonEncode({
+              'subject_id': 'owner-b',
+              'cycle_length': 30,
+              'period_length': 4,
+              'period_starts': [],
+              'predictions': [],
+            }),
+            200,
+          );
+        }
+        return http.Response('unavailable', 503);
+      }),
+    );
+    await expectLater(
+      apiMismatch.getCycle('2026-11-15'),
+      throwsA(isA<CalendarScopeMismatchException>()),
+    );
+    expect(await apiMismatch.cachedCycle(), isNull);
+    expect(await apiMismatch.cachedMonth(2026, 11), isNull);
+  });
+
+  testWidgets(
+      'successful acceptShare persists share and role so an offline follow-up '
+      'session refresh stays on the joined calendar', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(412, 915);
+    addTearDown(tester.view.reset);
+
+    FlutterSecureStorage.setMockInitialValues({'session_token': 'tok'});
+    final local = MemoryLocalStore();
+    await local.writeDoc(localGlobalUser, 'last_user', 'u-partner');
+    await local.writeDoc(
+      'u-partner',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-partner',
+          'email': 'partner@example.com',
+          'role': 'partner',
+        },
+        'share': {'status': 'none'},
+      }),
+    );
+    await local.writeDoc('u-partner', 'calendar', 'partner:none:');
+
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: local,
+      httpClient: MockClient((request) async {
+        switch (request.url.path) {
+          case '/api/share/accept':
+            return http.Response(
+              jsonEncode({
+                'status': 'active',
+                'owner_id': 'owner-b',
+                'owner_email': 'owner-b@example.com',
+                'owner_name': 'Owner B',
+                'can_edit_calendar': false,
+              }),
+              200,
+            );
+          case '/api/auth/session':
+          case '/api/auth/config':
+          case '/api/entries':
+          case '/api/cycle':
+            // Network drops right after accepting the invite.
+            return http.Response('unavailable', 503);
+          default:
+            return http.Response('{}', 200);
+        }
+      }),
+    );
+
+    await tester.pumpWidget(App217(
+      config: api.config,
+      api: api,
+      clock: () => DateTime(2026, 11, 15, 10, 0),
+    ));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+    expect(find.byType(PartnerJoinScreen), findsOneWidget);
+
+    await tester.enterText(
+      find.byKey(const ValueKey('partner-join-code')),
+      'INVITEB',
+    );
+    await tester.tap(find.byType(FilledButton));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    // Even though /api/auth/session returned 503 after acceptShare succeeded,
+    // the partner stays on Owner B's calendar instead of rolling back.
+    expect(find.byType(CalendarScreen), findsOneWidget);
+    expect(find.byType(PartnerJoinScreen), findsNothing);
+    expect(
+      await local.readDoc('u-partner', 'calendar'),
+      'partner:active:owner-b:owner-b@example.com',
+    );
+    final persisted = await api.cachedSession();
+    expect(persisted?.share?.isActive, isTrue);
+    expect(persisted?.share?.ownerId, 'owner-b');
+    expect(persisted?.user?.role, 'partner');
+  });
+}
+
+class _FailingClearCalendarStore extends MemoryLocalStore {
+  @override
+  Future<void> clearCalendar(String userId) async {
+    throw StateError('disk clear failed');
+  }
 }
 
 class _RecordingLocalStore extends MemoryLocalStore {

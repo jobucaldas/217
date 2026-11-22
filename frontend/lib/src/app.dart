@@ -73,7 +73,8 @@ class App217 extends StatefulWidget {
 class _App217State extends State<App217> with WidgetsBindingObserver {
   late final ApiClient _api = (widget.api ?? ApiClient(widget.config))
     ..onConsentRequired = _onOwnConsentRequired
-    ..onCalendarScopeMismatch = _onCalendarScopeMismatch;
+    ..onCalendarScopeMismatch = _onCalendarScopeMismatch
+    ..onCalendarAccessDenied = _onCalendarAccessDenied;
   late final AppearancePrefs _prefs = AppearancePrefs();
   late final http.Client _updateHttp = widget.updateClient ?? http.Client();
   final GlobalKey<NavigatorState> _navKey = GlobalKey<NavigatorState>();
@@ -572,6 +573,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
   void _onOwnConsentRequired() {
     _clearInitialCalendarCache();
     _sessionGeneration++;
+    _calendarScopeReset.value++;
     unawaited(_cancelDailyReminder());
     unawaited(_cancelPartnerAlerts());
     unawaited(_recoverConsent());
@@ -593,6 +595,17 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     _navKey.currentState?.popUntil((route) => route.isFirst);
     if (_user?.isPartner == true) unawaited(_cancelPartnerAlerts());
     unawaited(_recoverCalendarScope());
+  }
+
+  void _onCalendarAccessDenied({required bool refreshSession}) {
+    _clearInitialCalendarCache();
+    _calendarScopeReset.value++;
+    if (_user?.isPartner == true) unawaited(_cancelPartnerAlerts());
+    if (refreshSession) {
+      _sessionGeneration++;
+      _navKey.currentState?.popUntil((route) => route.isFirst);
+      unawaited(_recoverCalendarScope());
+    }
   }
 
   /// Auth config and session asked together, so an unreachable server costs

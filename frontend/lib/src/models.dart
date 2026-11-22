@@ -118,6 +118,19 @@ class ShareState {
       unreadNotes: json['unread_notes'] as int? ?? 0,
     );
   }
+
+  Map<String, dynamic> toJson() => {
+        'status': status,
+        if (inviteCode.isNotEmpty) 'invite_code': inviteCode,
+        if (inviteUrl.isNotEmpty) 'invite_url': inviteUrl,
+        if (partnerEmail.isNotEmpty) 'partner_email': partnerEmail,
+        if (partnerName.isNotEmpty) 'partner_name': partnerName,
+        if (ownerId.isNotEmpty) 'owner_id': ownerId,
+        if (ownerName.isNotEmpty) 'owner_name': ownerName,
+        if (ownerEmail.isNotEmpty) 'owner_email': ownerEmail,
+        'can_edit_calendar': canEditCalendar,
+        if (unreadNotes != 0) 'unread_notes': unreadNotes,
+      };
 }
 
 class SessionSnapshot {

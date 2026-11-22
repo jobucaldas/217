@@ -300,7 +300,7 @@ class _CalendarScreenState extends State<CalendarScreen>
       });
     WidgetsBinding.instance.addObserver(this);
     widget.cycleRefreshSignal?.addListener(_onCycleRefresh);
-    widget.scopeResetSignal?.addListener(_dismissOverlays);
+    widget.scopeResetSignal?.addListener(_onScopeReset);
     if (widget.initialMonths != null) {
       for (final entry in widget.initialMonths!.entries) {
         _monthCache[entry.key] = Map<String, Entry>.of(entry.value);
@@ -329,8 +329,8 @@ class _CalendarScreenState extends State<CalendarScreen>
       widget.cycleRefreshSignal?.addListener(_onCycleRefresh);
     }
     if (oldWidget.scopeResetSignal != widget.scopeResetSignal) {
-      oldWidget.scopeResetSignal?.removeListener(_dismissOverlays);
-      widget.scopeResetSignal?.addListener(_dismissOverlays);
+      oldWidget.scopeResetSignal?.removeListener(_onScopeReset);
+      widget.scopeResetSignal?.addListener(_onScopeReset);
     }
     // Share revoked (or otherwise inactive): the day card must go.
     if (oldWidget.share.isActive && !widget.share.isActive) {
@@ -406,12 +406,18 @@ class _CalendarScreenState extends State<CalendarScreen>
     return true;
   }
 
+  void _onScopeReset() {
+    _dismissOverlays();
+    if (!mounted) return;
+    _clearCalendarData(cancelPartnerAlerts: false);
+  }
+
   @override
   void dispose() {
     _disposed = true;
     WidgetsBinding.instance.removeObserver(this);
     widget.cycleRefreshSignal?.removeListener(_onCycleRefresh);
-    widget.scopeResetSignal?.removeListener(_dismissOverlays);
+    widget.scopeResetSignal?.removeListener(_onScopeReset);
     _wheelIdle?.cancel();
     _midnight?.cancel();
     _loadDebounce?.cancel();
@@ -439,7 +445,8 @@ class _CalendarScreenState extends State<CalendarScreen>
         try {
           return await widget.api.listEntries(y, m);
         } catch (err) {
-          if (mounted && generation == _loadGeneration) {
+          if (mounted &&
+              (generation == _loadGeneration || _isCalendarAccessDenial(err))) {
             _handleConsentFailure(err);
           }
           rethrow;
@@ -480,8 +487,12 @@ class _CalendarScreenState extends State<CalendarScreen>
           if (!mounted || generation != _loadGeneration) return;
           fresh[_monthKey(month)] = {for (final e in list) e.date: e};
         } catch (err) {
-          if (!mounted || generation != _loadGeneration) return;
-          if (_handleConsentFailure(err)) return;
+          if (!mounted) return;
+          if ((generation == _loadGeneration || _isCalendarAccessDenial(err)) &&
+              _handleConsentFailure(err)) {
+            return;
+          }
+          if (generation != _loadGeneration) return;
           // Today keeps _todayEntry, which is never older than the cached
           // month (edits and reads update both). A selected day whose month
           // could not be read falls back to today below.
@@ -522,6 +533,16 @@ class _CalendarScreenState extends State<CalendarScreen>
     if (!mounted || generation != _loadGeneration) return;
     await _loadCycle();
   }
+
+  static bool _isCalendarAccessDenial(Object err) =>
+      err is CalendarScopeMismatchException ||
+      (err is ApiException &&
+          (err.statusCode == 401 ||
+              (err.statusCode == 403 &&
+                  (err.message == 'calendar owner consent required' ||
+                      err.message == 'consent required' ||
+                      err.message == 'share inactive' ||
+                      err.message == 'role not chosen'))));
 
   bool _handleConsentFailure(Object err, {bool closeDayEditor = false}) {
     if (err is CalendarScopeMismatchException) {
@@ -597,8 +618,10 @@ class _CalendarScreenState extends State<CalendarScreen>
     try {
       cycle = await widget.api.getCycle(_todayKey);
     } catch (err) {
-      if (!mounted || generation != _cycleLoadGeneration) return;
-      _handleConsentFailure(err);
+      if (!mounted) return;
+      if (generation == _cycleLoadGeneration || _isCalendarAccessDenial(err)) {
+        _handleConsentFailure(err);
+      }
       return;
     }
     if (!mounted ||

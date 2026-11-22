@@ -58,6 +58,12 @@ class ApiClient {
   /// `/api/auth/session` was slow), so the app refreshes the session.
   void Function()? onCalendarScopeMismatch;
 
+  /// Called when a calendar endpoint denies access for the active calendar
+  /// scope (`401`, `403 share inactive`, `403 role not chosen`, or `403
+  /// calendar owner consent required`) so the mounted calendar clears its
+  /// in-memory data even if another screen or a superseded load detected it.
+  void Function({required bool refreshSession})? onCalendarAccessDenied;
+
   /// True when [loadPersistedApiBase] failed to read the saved server URL or
   /// while [setApiBaseUrl] is clearing credentials for a server switch.
   /// Authenticated requests refuse to run until the server URL is resolved so
@@ -292,6 +298,7 @@ class ApiClient {
     _consentRevision++;
     pendingWrites.value = 0;
     await _local.clearAll();
+    _calendarCacheBlocked = false;
   }
 
   Future<void> _forgetDeviceLocked() async {
@@ -317,6 +324,7 @@ class ApiClient {
     http.Response response, {
     int? expectedScope,
     String? expectedBase,
+    int? expectedSessionRevision,
   }) async {
     final decoded = jsonDecode(response.body) as Map<String, dynamic>;
     final snapshot = SessionSnapshot.fromJson(decoded);
@@ -324,6 +332,10 @@ class ApiClient {
     await _serializeAuth(() async {
       if (expectedScope != null &&
           _scopeChanged(expectedScope, expectedBase ?? config.apiBaseUrl)) {
+        throw const StaleAuthScopeException();
+      }
+      if (expectedSessionRevision != null &&
+          expectedSessionRevision != _sessionRevision) {
         throw const StaleAuthScopeException();
       }
       shouldSync = await _applySessionLocked(decoded, snapshot);
@@ -357,12 +369,16 @@ class ApiClient {
   String? _role;
   String? _calendarSubjectId;
 
+  /// True when a calendar invalidation failed to delete local rows from disk;
+  /// suppresses local calendar cache reads until a subsequent clear succeeds.
+  bool _calendarCacheBlocked = false;
+
   /// Moves whenever the calendar kept on the device is cleared or changes.
   int _calendarGeneration = 0;
 
   /// Moves whenever a server session, share mutation, consent block, or
-  /// calendar invalidation commits, so an in-flight offline fallback cannot
-  /// roll back a newer session or calendar marker.
+  /// calendar invalidation commits, so an in-flight session response or offline
+  /// fallback cannot roll back a newer session, consent block, or share state.
   int _sessionRevision = 0;
 
   /// Moves whenever a server session confirms consent state, so a late `403
@@ -390,9 +406,12 @@ class ApiClient {
         : (role == 'owner' ? userId : null);
     final calendar = _calendarMarker(role, share);
     final known = await _local.readDoc(userId, 'calendar');
-    if (known == calendar) return;
+    if (known == calendar && !_calendarCacheBlocked) return;
     _calendarGeneration++;
-    if (known != null || role == 'partner') await _local.clearCalendar(userId);
+    if (known != null || role == 'partner' || _calendarCacheBlocked) {
+      await _local.clearCalendar(userId);
+      _calendarCacheBlocked = false;
+    }
     await _local.writeDoc(userId, 'calendar', calendar);
   }
 
@@ -410,7 +429,23 @@ class ApiClient {
       final userId = _userId;
       final role = _role;
       if (userId != null && role != null) {
+        // Invalidate the previous calendar strictly before persisting the
+        // updated share/role into the cached session doc so a follow-up
+        // offline session refresh never rolls back the confirmed mutation.
         await _calendarIs(userId, role, share);
+        final raw = await _local.readDoc(userId, _sessionDoc);
+        if (raw != null) {
+          try {
+            final decoded = jsonDecode(raw);
+            if (decoded is Map<String, dynamic>) {
+              decoded['share'] = share.toJson();
+              if (newRole != null && decoded['user'] is Map) {
+                (decoded['user'] as Map)['role'] = newRole;
+              }
+              await _local.writeDoc(userId, _sessionDoc, jsonEncode(decoded));
+            }
+          } catch (_) {}
+        }
         _sessionRevision++;
       }
     });
@@ -706,11 +741,19 @@ class ApiClient {
         if (expectedConsentRev != _consentRevision) return false;
         final userId = _userId;
         if (userId == null) return true;
-        final raw = await _local.readDoc(userId, _sessionDoc);
-        if (raw == null) return true;
         try {
+          final raw = await _local.readDoc(userId, _sessionDoc);
+          if (raw == null) {
+            _calendarGeneration++;
+            _sessionRevision++;
+            return true;
+          }
           final decoded = jsonDecode(raw);
-          if (decoded is! Map<String, dynamic>) return true;
+          if (decoded is! Map<String, dynamic>) {
+            _calendarGeneration++;
+            _sessionRevision++;
+            return true;
+          }
           final prevConsent = decoded['consent'];
           final prevRequired =
               prevConsent is Map && prevConsent['required'] == true;
@@ -724,10 +767,15 @@ class ApiClient {
             'version': nextVersion,
             'required': true,
           };
-          await _local.writeDoc(userId, _sessionDoc, jsonEncode(decoded));
           _calendarGeneration++;
           _sessionRevision++;
-        } catch (_) {}
+          await _local.writeDoc(userId, _sessionDoc, jsonEncode(decoded));
+        } catch (_) {
+          // Still advance revisions so a delayed 200 session cannot overwrite
+          // this denial, and never turn a 403 into a storage/offline error.
+          _calendarGeneration++;
+          _sessionRevision++;
+        }
         return true;
       });
 
@@ -890,6 +938,7 @@ class ApiClient {
       response,
       expectedScope: scope,
       expectedBase: base,
+      expectedSessionRevision: startRevision,
     );
     if (_scopeChanged(scope, base)) throw const StaleAuthScopeException();
     if (snapshot.user == null) {
@@ -1245,6 +1294,7 @@ class ApiClient {
           return CycleInfo.fromJson(decoded);
         },
         (userId) async {
+          if (_calendarCacheBlocked) return null;
           final body = await _local.readDoc(userId, 'cycle');
           return body == null
               ? null
@@ -1285,8 +1335,15 @@ class ApiClient {
       if (!_isCurrent(scope)) return;
       _calendarGeneration++;
       _sessionRevision++;
-      await _local.clearCalendar(scope.userId!);
       fired = true;
+      try {
+        await _local.clearCalendar(scope.userId!);
+        _calendarCacheBlocked = false;
+      } catch (_) {
+        // Never let a disk-cleanup failure turn a confirmed mismatch into an
+        // unreachable-server cache fallback; suppress cached calendar reads.
+        _calendarCacheBlocked = true;
+      }
     });
     if (fired) onCalendarScopeMismatch?.call();
     throw const CalendarScopeMismatchException();
@@ -1308,12 +1365,27 @@ class ApiClient {
                 msg == 'calendar owner consent required' ||
                 msg == 'role not chosen'));
     if (!denied) return;
+    final refreshSession = response.statusCode == 401 ||
+        (response.statusCode == 403 &&
+            (msg == 'share inactive' || msg == 'role not chosen'));
+    var fired = false;
     await _serializeAuth(() async {
       if (!_isCurrent(scope)) return;
       _calendarGeneration++;
       _sessionRevision++;
-      await _local.clearCalendar(scope.userId!);
+      fired = true;
+      try {
+        await _local.clearCalendar(scope.userId!);
+        _calendarCacheBlocked = false;
+      } catch (_) {
+        // Never let a disk-cleanup failure turn a confirmed denial into an
+        // unreachable-server cache fallback; suppress cached calendar reads.
+        _calendarCacheBlocked = true;
+      }
     });
+    if (fired) {
+      onCalendarAccessDenied?.call(refreshSession: refreshSession);
+    }
   }
 
   /// Saves a server answer, if it is still for the account and calendar on
@@ -1415,14 +1487,17 @@ class ApiClient {
             return merged;
           });
         },
-        (userId) => _local.monthEntries(userId, year, month),
+        (userId) async {
+          if (_calendarCacheBlocked) return null;
+          return _local.monthEntries(userId, year, month);
+        },
       );
 
   /// The device's copy of a month, without asking the server; null when it
   /// was never read here. Lets a month swiped into view draw at once.
   Future<List<Entry>?> cachedMonth(int year, int month) async {
     final userId = _userId;
-    if (userId == null) return null;
+    if (userId == null || _calendarCacheBlocked) return null;
     return _local.monthEntries(userId, year, month);
   }
 
@@ -1431,7 +1506,7 @@ class ApiClient {
   /// once, before the fresh answer arrives.
   Future<CycleInfo?> cachedCycle() async {
     final userId = _userId;
-    if (userId == null) return null;
+    if (userId == null || _calendarCacheBlocked) return null;
     final body = await _local.readDoc(userId, 'cycle');
     return body == null
         ? null
