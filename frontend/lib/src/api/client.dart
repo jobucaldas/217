@@ -173,7 +173,7 @@ class ApiClient {
           passwordSignup = decoded['signup'] == true;
           mailVerification = decoded['mail'] == true;
           // Absent key: an older server, which always offered WorkOS.
-          workos = decoded['workos'] != false;
+          workos = decoded['workos'] != false && decoded['authkit'] != false;
           final contact = decoded['privacy_contact'];
           privacyContact = contact is String ? contact.trim() : '';
         }
@@ -2078,7 +2078,8 @@ class ApiClient {
     final decoded = jsonDecode(response.body) as Map<String, dynamic>;
     final userJson = decoded['user'] as Map<String, dynamic>?;
     final token = decoded['session_token'] as String?;
-    if (userJson == null || token == null) {
+    // Browsers get only the HttpOnly cookie; other clients need the token.
+    if (userJson == null || (token == null && !kIsWeb)) {
       await deleteOwnedDeviceKey();
       throw ApiException('password sign-in', response);
     }
@@ -2093,7 +2094,7 @@ class ApiClient {
       }
       invalidatePendingAuth();
       await _dropLocalDataLocked();
-      await saveSessionToken(token);
+      if (token != null) await saveSessionToken(token);
       final keyId = decoded['device_key_id'];
       if (keyId is String && keyId.isNotEmpty) {
         await _storage.write(key: _deviceKeyIdKey, value: keyId);

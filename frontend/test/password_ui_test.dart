@@ -244,10 +244,18 @@ void main() {
   testWidgets(
       'workos defaults to true when the config has no workos key (old server)',
       (tester) async {
-    final server = _Server(workos: false, omitWorkosKey: true);
+    final server = _Server(workos: true, omitWorkosKey: true);
     final api = server.client();
     await api.loadAuthConfig();
     expect(api.workos, isTrue);
+  });
+
+  testWidgets('authkit false hides WorkOS (server without WorkOS credentials)',
+      (tester) async {
+    final server = _Server(workos: false, omitWorkosKey: true);
+    final api = server.client();
+    await api.loadAuthConfig();
+    expect(api.workos, isFalse);
   });
 
   testWidgets('a config fetch failure still shows WorkOS sign-in',
