@@ -1499,6 +1499,8 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     }
     if (_user == null) {
       return AuthScreen(
+        // A new server starts a fresh form (mode, verify step, typed fields).
+        key: ValueKey(_api.config.apiBaseUrl),
         strings: _strings,
         api: _api,
         onSignedIn: _onSignedIn,
