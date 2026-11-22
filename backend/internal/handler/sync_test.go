@@ -265,6 +265,42 @@ func TestSyncStatusRevocation(t *testing.T) {
 	})
 }
 
+// Deleting the owner behaves like a revoke for the partner: share inactive,
+// no calendar, the inbox and account tags move (so the app refetches), and
+// nothing of the owner is served any more.
+func TestSyncStatusOwnerDeletionKicksPartner(t *testing.T) {
+	f := newSyncFixture(t)
+	if _, err := f.s.UpsertEntry(f.owner.ID, "2026-11-01", model.UpsertRequest{Taken: model.BoolPtr(true)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.s.SendMessage(f.owner.ID, "from the owner"); err != nil {
+		t.Fatal(err)
+	}
+	before := syncStatus(t, f, f.partC)
+	if !before.ShareActive || before.Tags["calendar"] == "none" {
+		t.Fatalf("setup: %+v", before)
+	}
+	syncCall(t, f.h.AuthMiddleware(f.h.DeleteAccount), http.MethodDelete, "/api/account", f.ownerC, "")
+
+	after := syncStatus(t, f, f.partC)
+	if after.ShareActive || after.Tags["calendar"] != "none" ||
+		after.Tags["account"] == before.Tags["account"] || after.Tags["inbox"] == before.Tags["inbox"] {
+		t.Fatalf("partner after owner deletion: before=%+v after=%+v", before, after)
+	}
+	inbox := httptest.NewRecorder()
+	f.h.AuthMiddleware(f.h.ListInbox)(inbox, authedRequest(http.MethodGet, "/api/inbox", f.partC, nil))
+	if inbox.Code != http.StatusOK || strings.Contains(inbox.Body.String(), "from the owner") {
+		t.Fatalf("inbox: %d %s", inbox.Code, inbox.Body.String())
+	}
+	for name, fn := range map[string]http.HandlerFunc{"entries": f.h.ListEntries, "cycle": f.h.GetCycle} {
+		w := httptest.NewRecorder()
+		f.h.AuthMiddleware(fn)(w, authedRequest(http.MethodGet, "/api/"+name+"?year=2026&month=11", f.partC, nil))
+		if w.Code == http.StatusOK || strings.Contains(w.Body.String(), "2026-11-01") {
+			t.Fatalf("%s still served to the partner: %d %s", name, w.Code, w.Body.String())
+		}
+	}
+}
+
 func TestSyncStatusRejects(t *testing.T) {
 	f := newSyncFixture(t)
 	syncStatus(t, f, f.ownerC)
