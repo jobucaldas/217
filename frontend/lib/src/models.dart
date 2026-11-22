@@ -62,6 +62,7 @@ class ShareState {
     this.inviteUrl = '',
     this.partnerEmail = '',
     this.partnerName = '',
+    this.ownerId = '',
     this.ownerName = '',
     this.ownerEmail = '',
     this.canEditCalendar = true,
@@ -75,6 +76,7 @@ class ShareState {
   final String inviteUrl;
   final String partnerEmail;
   final String partnerName;
+  final String ownerId;
   final String ownerName;
   final String ownerEmail;
   final bool canEditCalendar;
@@ -87,6 +89,7 @@ class ShareState {
         inviteUrl: inviteUrl,
         partnerEmail: partnerEmail,
         partnerName: partnerName,
+        ownerId: ownerId,
         ownerName: ownerName,
         ownerEmail: ownerEmail,
         canEditCalendar: canEditCalendar,
@@ -108,12 +111,26 @@ class ShareState {
       inviteUrl: (json['invite_url'] as String?) ?? '',
       partnerEmail: (json['partner_email'] as String?) ?? '',
       partnerName: (json['partner_name'] as String?) ?? '',
+      ownerId: (json['owner_id'] as String?) ?? '',
       ownerName: (json['owner_name'] as String?) ?? '',
       ownerEmail: (json['owner_email'] as String?) ?? '',
       canEditCalendar: json['can_edit_calendar'] as bool? ?? true,
       unreadNotes: json['unread_notes'] as int? ?? 0,
     );
   }
+
+  Map<String, dynamic> toJson() => {
+        'status': status,
+        if (inviteCode.isNotEmpty) 'invite_code': inviteCode,
+        if (inviteUrl.isNotEmpty) 'invite_url': inviteUrl,
+        if (partnerEmail.isNotEmpty) 'partner_email': partnerEmail,
+        if (partnerName.isNotEmpty) 'partner_name': partnerName,
+        if (ownerId.isNotEmpty) 'owner_id': ownerId,
+        if (ownerName.isNotEmpty) 'owner_name': ownerName,
+        if (ownerEmail.isNotEmpty) 'owner_email': ownerEmail,
+        'can_edit_calendar': canEditCalendar,
+        if (unreadNotes != 0) 'unread_notes': unreadNotes,
+      };
 }
 
 class SessionSnapshot {
@@ -123,6 +140,7 @@ class SessionSnapshot {
     this.consentRequired = false,
     this.consentVersion = 0,
     this.recentSignIn = false,
+    this.fromCache = false,
   });
 
   final User? user;
@@ -138,6 +156,10 @@ class SessionSnapshot {
   /// Signed in within the last few minutes: the privacy pages export,
   /// withdraw or delete only then (otherwise they ask to sign in again).
   final bool recentSignIn;
+
+  /// True when this snapshot came from the device's local cache or an offline
+  /// fallback rather than a confirmed server reply.
+  final bool fromCache;
 
   factory SessionSnapshot.fromJson(Map<String, dynamic> json) {
     final userJson = json['user'];

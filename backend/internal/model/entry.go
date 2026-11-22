@@ -28,9 +28,10 @@ func BoolPtr(v bool) *bool { return &v }
 func TakenTrue(t *bool) bool { return t != nil && *t }
 
 type MonthEntries struct {
-	Year    int      `json:"year"`
-	Month   int      `json:"month"`
-	Entries []*Entry `json:"entries"`
+	Year      int      `json:"year"`
+	Month     int      `json:"month"`
+	SubjectID string   `json:"subject_id,omitempty"`
+	Entries   []*Entry `json:"entries"`
 }
 
 type Stats struct {

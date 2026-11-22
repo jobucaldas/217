@@ -13,7 +13,7 @@ import (
 func (s *PGStore) GetUserByID(userID string) (*model.User, error) {
 	user, err := s.scanUser(s.db.QueryRow(`SELECT `+userColumns+` FROM users u WHERE u.id = $1`, userID))
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("user not found")
+		return nil, ErrUserNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("getting user: %w", err)
@@ -44,7 +44,7 @@ func (s *PGStore) DeleteUser(userID string) error {
 	var lockedID string
 	if err := tx.QueryRow(`SELECT id FROM users WHERE id = $1 FOR UPDATE`, userID).Scan(&lockedID); err != nil {
 		if err == sql.ErrNoRows {
-			return fmt.Errorf("user not found")
+			return ErrUserNotFound
 		}
 		return fmt.Errorf("locking user for deletion: %w", err)
 	}
@@ -60,7 +60,7 @@ func (s *PGStore) DeleteUser(userID string) error {
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		return fmt.Errorf("user not found")
+		return ErrUserNotFound
 	}
 	return tx.Commit()
 }
@@ -131,6 +131,7 @@ func (s *PGStore) buildShareState(user *model.User) (*model.ShareState, error) {
 		return nil, fmt.Errorf("loading partner share: %w", err)
 	}
 	state.Status = share.Status
+	state.OwnerID = share.OwnerID
 	state.CanEditCalendar = false
 	state.UnreadNotes = s.unreadMessages(user.ID)
 	if owner, err := s.GetUserByID(share.OwnerID); err == nil {
@@ -302,7 +303,7 @@ func (s *PGStore) CalendarSubjectID(userID string) (string, error) {
 	case model.RoleOwner:
 		return userID, nil
 	case "":
-		return "", fmt.Errorf("role not chosen")
+		return "", ErrRoleNotChosen
 	}
 	var ownerID string
 	err = s.db.QueryRow(
@@ -310,7 +311,7 @@ func (s *PGStore) CalendarSubjectID(userID string) (string, error) {
 		 WHERE partner_id = $1 AND status = 'active' LIMIT 1`, userID,
 	).Scan(&ownerID)
 	if err == sql.ErrNoRows {
-		return "", fmt.Errorf("share inactive")
+		return "", ErrShareInactive
 	}
 	if err != nil {
 		return "", err

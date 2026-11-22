@@ -134,7 +134,7 @@ func (s *PGStore) SendMessage(senderID, body string) (*model.Message, error) {
 
 func (s *PGStore) MarkMessageRead(userID, messageID string) error {
 	if _, err := uuid.Parse(messageID); err != nil {
-		return fmt.Errorf("message not found")
+		return ErrMessageNotFound
 	}
 	res, err := s.db.Exec(
 		`UPDATE partner_notes SET read_at = COALESCE(read_at, NOW())
@@ -145,7 +145,7 @@ func (s *PGStore) MarkMessageRead(userID, messageID string) error {
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		return fmt.Errorf("message not found")
+		return ErrMessageNotFound
 	}
 	return nil
 }

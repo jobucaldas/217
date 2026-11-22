@@ -1,0 +1,4597 @@
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:flutter_secure_storage_platform_interface/flutter_secure_storage_platform_interface.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+
+import 'package:a217/src/api/client.dart';
+import 'package:a217/src/app.dart';
+import 'package:a217/src/auth/device_key.dart';
+import 'package:a217/src/config.dart';
+import 'package:a217/src/models.dart';
+import 'package:a217/src/offline/local_store.dart';
+import 'package:a217/src/offline/local_store_memory.dart';
+import 'package:a217/src/screens/auth_screen.dart';
+import 'package:a217/src/screens/calendar_screen.dart';
+import 'package:a217/src/screens/day_summary.dart';
+import 'package:a217/src/screens/privacy_screens.dart';
+import 'package:a217/src/screens/share_screens.dart';
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  GoogleFonts.config.allowRuntimeFetching = false;
+
+  setUp(() =>
+      FlutterSecureStorage.setMockInitialValues({'session_token': 'kept'}));
+
+  testWidgets(
+      'first calendar frame shows cached status, note and prediction with '
+      'stable bounds, and late cycle updates after owner open->active share '
+      'revalidation', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(412, 915);
+    addTearDown(tester.view.reset);
+
+    final fixedNow = DateTime(2026, 11, 21, 10, 0);
+    final local = MemoryLocalStore();
+    await local.writeDoc(localGlobalUser, 'last_user', 'u1');
+    await local.writeDoc(
+      'u1',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u1',
+          'email': 'owner@example.com',
+          'name': 'Owner',
+          'role': 'owner',
+        },
+        'share': {'status': 'open', 'code': 'INV123'},
+      }),
+    );
+    await local.replaceMonth('u1', 2026, 11, const [
+      Entry(date: '2026-11-05', taken: true, notes: '', period: true),
+      Entry(date: '2026-11-21', taken: true, notes: 'morning pill'),
+    ]);
+    await local.replaceMonth('u1', 2026, 10, const []);
+    await local.replaceMonth('u1', 2026, 12, const []);
+    await local.writeDoc(
+      'u1',
+      'cycle',
+      jsonEncode({
+        'cycle_length': 28,
+        'period_length': 5,
+        'period_starts': ['2026-10-30'],
+        'predictions': [
+          {
+            'period_start': '2026-11-27',
+            'period_end': '2026-12-01',
+            'pms_start': '2026-11-20',
+            'pms_end': '2026-11-27',
+          },
+        ],
+      }),
+    );
+
+    final sessionGate = Completer<void>();
+    final entriesGate = Completer<void>();
+    final cycleGate = Completer<void>();
+
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://test.example',
+        workosClientId: '',
+        redirectUri: androidRedirectUri,
+      ),
+      httpClient: MockClient((request) async {
+        switch (request.url.path) {
+          case '/api/auth/config':
+            return http.Response(jsonEncode({'authkit': true}), 200);
+          case '/api/auth/session':
+            await sessionGate.future;
+            return http.Response(
+              jsonEncode({
+                'user': {
+                  'id': 'u1',
+                  'email': 'owner@example.com',
+                  'name': 'Owner',
+                  'role': 'owner',
+                },
+                // Owner's invite transitioned open -> active; calendar access
+                // is unchanged so in-flight cycle work must not be dropped.
+                'share': {
+                  'status': 'active',
+                  'partner_email': 'partner@example.com',
+                },
+                'consent': {'version': 1, 'required': false},
+              }),
+              200,
+            );
+          case '/api/entries':
+            await entriesGate.future;
+            final month = request.url.queryParameters['month'];
+            final year = request.url.queryParameters['year'];
+            if (year == '2026' && month == '11') {
+              return http.Response(
+                jsonEncode({
+                  'entries': [
+                    {
+                      'date': '2026-11-05',
+                      'taken': true,
+                      'notes': '',
+                      'heart': false,
+                      'period': true,
+                    },
+                    {
+                      'date': '2026-11-21',
+                      'taken': false,
+                      'notes': 'morning pill',
+                      'heart': false,
+                      'period': false,
+                    },
+                  ],
+                }),
+                200,
+              );
+            }
+            return http.Response(jsonEncode({'entries': []}), 200);
+          case '/api/cycle':
+            await cycleGate.future;
+            return http.Response(
+              jsonEncode({
+                'cycle_length': 28,
+                'period_length': 5,
+                'period_starts': ['2026-10-30'],
+                'predictions': [
+                  {
+                    'period_start': '2026-11-29',
+                    'period_end': '2026-12-03',
+                    'pms_start': '2026-11-22',
+                    'pms_end': '2026-11-29',
+                  },
+                ],
+              }),
+              200,
+            );
+          default:
+            return http.Response('{}', 200);
+        }
+      }),
+      localStore: local,
+    );
+
+    await tester.pumpWidget(
+      App217(config: api.config, api: api, clock: () => fixedNow),
+    );
+    // Advance only enough for the local reads to land while every network
+    // request stays gated.
+    await tester.pump();
+    await tester.pump();
+
+    // Very first calendar frame is already populated from local cache.
+    expect(find.byType(CalendarScreen), findsOneWidget);
+    expect(find.text('Loading…'), findsNothing);
+    expect(find.text('Taken'), findsOneWidget);
+    expect(find.text('morning pill'), findsOneWidget);
+    expect(find.byKey(const ValueKey('cycle-line')), findsOneWidget);
+    expect(find.textContaining('Nov 27'), findsOneWidget);
+
+    final initialGridRect = tester.getRect(find.byKey(const ValueKey('2026-11')));
+
+    // Entries answer first so CalendarScreen launches getCycle(), then the
+    // owner session revalidation (open -> active) lands BEFORE getCycle()
+    // returns. Revalidation must not drop the in-flight cycle update.
+    entriesGate.complete();
+    await tester.pump();
+    await tester.pump();
+
+    sessionGate.complete();
+    await tester.pump();
+    await tester.pump();
+
+    // Now release the late cycle response with zero user input.
+    cycleGate.complete();
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('Missed'), findsOneWidget);
+    expect(find.text('Taken'), findsNothing);
+    expect(find.textContaining('Nov 29'), findsOneWidget);
+    expect(
+      tester.getRect(find.byKey(const ValueKey('2026-11'))),
+      initialGridRect,
+    );
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 30));
+  });
+
+  testWidgets('a failing local read still opens the app without leaking auth',
+      (tester) async {
+    FlutterSecureStoragePlatform.instance = _ThrowingOnRead();
+    final requests = <http.Request>[];
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://default.example',
+        workosClientId: '',
+        redirectUri: androidRedirectUri,
+      ),
+      httpClient: MockClient((request) async {
+        requests.add(request);
+        return http.Response('{}', 200);
+      }),
+      localStore: _ThrowingLocalStore(),
+    );
+
+    await tester.pumpWidget(App217(config: api.config, api: api));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.byType(AuthScreen), findsOneWidget);
+    expect(find.text('Loading…'), findsNothing);
+    expect(requests, isEmpty);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 30));
+  });
+
+  testWidgets(
+      'a failing api_base_url read blocks auth and explicitly saving the '
+      'default clears custom-server credentials first', (tester) async {
+    final storage = _ThrowOnApiBaseOnly({
+      'session_token': 'custom-server-secret-token',
+      'device_key_id': 'custom-device-key',
+    });
+    FlutterSecureStoragePlatform.instance = storage;
+    final deviceKey = _RecordingDeviceKey();
+    final requests = <http.Request>[];
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://default.example',
+        workosClientId: '',
+        redirectUri: androidRedirectUri,
+      ),
+      httpClient: MockClient((request) async {
+        requests.add(request);
+        return http.Response(jsonEncode({'user': null}), 200);
+      }),
+      localStore: MemoryLocalStore(),
+      deviceKey: deviceKey,
+    );
+
+    await tester.pumpWidget(App217(config: api.config, api: api));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.byType(AuthScreen), findsOneWidget);
+    expect(requests, isEmpty);
+    expect(api.apiBaseResolved, isFalse);
+    await expectLater(api.currentSession(), throwsStateError);
+    expect(requests, isEmpty);
+
+    // Explicitly saving the default server must still treat the unresolved
+    // base as a server change and wipe the custom server's token & device key
+    // before allowing authenticated requests.
+    expect(await api.setApiBaseUrl(''), isTrue);
+    expect(api.apiBaseResolved, isTrue);
+    expect(await api.readSessionToken(), isNull);
+    expect(deviceKey.deletedCount, 1);
+
+    await api.currentSession();
+    expect(requests, hasLength(1));
+    expect(requests.single.headers['Authorization'], isNull);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 30));
+  });
+
+  test(
+      'switching servers clears old credentials and blocks auth before '
+      'publishing the new server URL', () async {
+    final ops = <String>[];
+    late ApiClient api;
+    final storage = _RecordingStorage(
+      {
+        'api_base_url': 'https://old.example',
+        'session_token': 'old-secret',
+        'device_key_id': 'old-dev-key',
+      },
+      onOp: (op, key, value) {
+        ops.add('$op:$key@${api.config.apiBaseUrl}:resolved=${api.apiBaseResolved}');
+      },
+    );
+    FlutterSecureStoragePlatform.instance = storage;
+    final deviceKey = _RecordingDeviceKey();
+    api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://old.example',
+        workosClientId: '',
+        redirectUri: androidRedirectUri,
+      ),
+      httpClient: MockClient((_) async => http.Response('{}', 200)),
+      localStore: MemoryLocalStore(),
+      deviceKey: deviceKey,
+    );
+
+    expect(await api.setApiBaseUrl('https://new.example'), isTrue);
+    expect(api.config.apiBaseUrl, 'https://new.example');
+    expect(api.apiBaseResolved, isTrue);
+    expect(deviceKey.deletedCount, 1);
+
+    final deleteTokenIdx =
+        ops.indexWhere((e) => e.startsWith('delete:session_token@'));
+    final deleteKeyIdx =
+        ops.indexWhere((e) => e.startsWith('delete:device_key_id@'));
+    final writeBaseIdx =
+        ops.indexWhere((e) => e.startsWith('write:api_base_url@'));
+    expect(deleteTokenIdx, greaterThanOrEqualTo(0));
+    expect(deleteKeyIdx, greaterThan(deleteTokenIdx));
+    expect(writeBaseIdx, greaterThan(deleteKeyIdx));
+    // Throughout cleanup and before publishing, old URL remained in config and
+    // authenticated requests were blocked (resolved=false).
+    expect(ops[deleteTokenIdx], contains('@https://old.example:resolved=false'));
+    expect(ops[deleteKeyIdx], contains('@https://old.example:resolved=false'));
+    expect(ops[writeBaseIdx], contains('@https://old.example:resolved=false'));
+  });
+
+  testWidgets(
+      'partner whose share is revoked and who rejoins a different owner never '
+      'sees the former owner cached calendar', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(412, 915);
+    addTearDown(tester.view.reset);
+
+    final fixedNow = DateTime(2026, 11, 21, 10, 0);
+    final local = MemoryLocalStore();
+    await local.writeDoc(localGlobalUser, 'last_user', 'u-partner');
+    await local.writeDoc(
+      'u-partner',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-partner',
+          'email': 'partner@example.com',
+          'name': 'Partner',
+          'role': 'partner',
+        },
+        'share': {
+          'status': 'active',
+          'owner_email': 'owner-a@example.com',
+          'can_edit_calendar': false,
+        },
+      }),
+    );
+    await local.writeDoc(
+      'u-partner',
+      'calendar',
+      'partner:active:owner-a@example.com',
+    );
+    await local.replaceMonth('u-partner', 2026, 11, const [
+      Entry(date: '2026-11-21', taken: true, notes: 'owner-a private note'),
+    ]);
+    await local.replaceMonth('u-partner', 2026, 10, const []);
+    await local.replaceMonth('u-partner', 2026, 12, const []);
+    await local.writeDoc(
+      'u-partner',
+      'cycle',
+      jsonEncode({
+        'cycle_length': 28,
+        'period_length': 5,
+        'period_starts': ['2026-10-30'],
+        'predictions': [
+          {
+            'period_start': '2026-11-27',
+            'period_end': '2026-12-01',
+            'pms_start': '2026-11-20',
+            'pms_end': '2026-11-27',
+          },
+        ],
+      }),
+    );
+
+    var joinedOwnerB = false;
+    final ownerBEntriesGate = Completer<void>();
+    final ownerBCycleGate = Completer<void>();
+
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://test.example',
+        workosClientId: '',
+        redirectUri: androidRedirectUri,
+      ),
+      httpClient: MockClient((request) async {
+        switch (request.url.path) {
+          case '/api/auth/config':
+            return http.Response(jsonEncode({'authkit': true}), 200);
+          case '/api/auth/session':
+            if (!joinedOwnerB) {
+              return http.Response(
+                jsonEncode({
+                  'user': {
+                    'id': 'u-partner',
+                    'email': 'partner@example.com',
+                    'name': 'Partner',
+                    'role': 'partner',
+                  },
+                  'share': {'status': 'revoked', 'can_edit_calendar': false},
+                  'consent': {'version': 1, 'required': false},
+                }),
+                200,
+              );
+            }
+            return http.Response(
+              jsonEncode({
+                'user': {
+                  'id': 'u-partner',
+                  'email': 'partner@example.com',
+                  'name': 'Partner',
+                  'role': 'partner',
+                },
+                'share': {
+                  'status': 'active',
+                  'owner_email': 'owner-b@example.com',
+                  'can_edit_calendar': false,
+                },
+                'consent': {'version': 1, 'required': false},
+              }),
+              200,
+            );
+          case '/api/share/accept':
+            joinedOwnerB = true;
+            return http.Response(
+              jsonEncode({
+                'status': 'active',
+                'owner_email': 'owner-b@example.com',
+                'can_edit_calendar': false,
+              }),
+              200,
+            );
+          case '/api/entries':
+            if (joinedOwnerB) await ownerBEntriesGate.future;
+            return http.Response(jsonEncode({'entries': []}), 200);
+          case '/api/cycle':
+            if (joinedOwnerB) await ownerBCycleGate.future;
+            return http.Response(
+              jsonEncode({
+                'cycle_length': 0,
+                'period_length': 0,
+                'period_starts': [],
+                'predictions': [],
+              }),
+              200,
+            );
+          default:
+            return http.Response('{}', 200);
+        }
+      }),
+      localStore: local,
+    );
+
+    await tester.pumpWidget(
+      App217(config: api.config, api: api, clock: () => fixedNow),
+    );
+    await tester.pumpAndSettle();
+
+    // Startup revalidation revoked Owner A's share -> PartnerJoinScreen shown.
+    expect(find.byType(PartnerJoinScreen), findsOneWidget);
+    expect(find.byType(CalendarScreen), findsNothing);
+
+    // Join Owner B while Owner B's calendar network responses stay held back.
+    await tester.enterText(
+      find.byKey(const ValueKey('partner-join-code')),
+      'OWNERB',
+    );
+    await tester.tap(find.byType(FilledButton));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    // Newly mounted calendar must NEVER show Owner A's private data.
+    expect(find.byType(CalendarScreen), findsOneWidget);
+    expect(find.text('owner-a private note'), findsNothing);
+    expect(find.text('Taken'), findsNothing);
+    expect(find.textContaining('Nov 27'), findsNothing);
+
+    ownerBEntriesGate.complete();
+    ownerBCycleGate.complete();
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 30));
+  });
+
+  test(
+      'stale startup probe returning user:null after server switch does not '
+      'clear new credentials or overwrite new server config', () async {
+    FlutterSecureStorage.setMockInitialValues({});
+    final oldConfigReached = Completer<void>();
+    final oldSessionReached = Completer<void>();
+    final oldConfigGate = Completer<void>();
+    final oldSessionGate = Completer<void>();
+    final local = MemoryLocalStore();
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://old.example',
+        workosClientId: '',
+        redirectUri: androidRedirectUri,
+      ),
+      httpClient: MockClient((request) async {
+        if (request.url.host == 'old.example' &&
+            request.url.path == '/api/auth/config') {
+          if (!oldConfigReached.isCompleted) oldConfigReached.complete();
+          await oldConfigGate.future;
+          return http.Response(
+            jsonEncode({'authkit': true, 'workos_user_deletion': true}),
+            200,
+          );
+        }
+        if (request.url.host == 'old.example' &&
+            request.url.path == '/api/auth/session') {
+          if (!oldSessionReached.isCompleted) oldSessionReached.complete();
+          await oldSessionGate.future;
+          return http.Response(jsonEncode({'user': null}), 200);
+        }
+        if (request.url.host == 'new.example' &&
+            request.url.path == '/api/auth/config') {
+          return http.Response(
+            jsonEncode({'authkit': true, 'workos_user_deletion': false}),
+            200,
+          );
+        }
+        if (request.url.host == 'new.example' &&
+            request.url.path == '/api/auth/session') {
+          return http.Response(
+            jsonEncode({
+              'user': {
+                'id': 'u-new',
+                'email': 'new@example.com',
+                'role': 'owner',
+              },
+            }),
+            200,
+          );
+        }
+        return http.Response('{}', 404);
+      }),
+      localStore: local,
+    );
+
+    // Start the old server's startup probes and wait until both are in flight.
+    final oldConfig = api.loadAuthConfig();
+    final oldSession = api.currentSession();
+    final oldSessionExpect =
+        expectLater(oldSession, throwsA(isA<StaleAuthScopeException>()));
+    await Future.wait([oldConfigReached.future, oldSessionReached.future]);
+
+    // Before they finish, switch to a new server and establish a new session.
+    expect(await api.setApiBaseUrl('https://new.example'), isTrue);
+    await api.loadAuthConfig();
+    await api.saveSessionToken('fresh-token');
+    final newSession = await api.currentSession();
+    expect(newSession.user?.id, 'u-new');
+    expect(api.workosUserDeletion, isFalse);
+
+    // Release the stale probes from old.example.
+    oldConfigGate.complete();
+    oldSessionGate.complete();
+    await oldConfig;
+    await oldSessionExpect;
+
+    // New server's config, token, and cached session survive untouched.
+    expect(api.workosUserDeletion, isFalse);
+    expect(await api.readSessionToken(), 'fresh-token');
+    expect((await api.cachedSession())?.user?.id, 'u-new');
+  });
+
+  test(
+      'stale probe paused inside cached-session storage read cannot revert '
+      'client account identity after a newer sign-in', () async {
+    final pauseCachedTokenRead = Completer<void>();
+    final cachedTokenReadReached = Completer<void>();
+    var pausedOnce = false;
+    final storage = _GatedTokenReadStorage(
+      {'session_token': 'old-token'},
+      shouldPauseRead: (key, count) {
+        // First read is _sendOnce attaching Bearer token; second read is
+        // _readCachedSession() after the 503 response.
+        if (key == 'session_token' && count == 2 && !pausedOnce) {
+          pausedOnce = true;
+          cachedTokenReadReached.complete();
+          return pauseCachedTokenRead.future;
+        }
+        return null;
+      },
+    );
+    FlutterSecureStoragePlatform.instance = storage;
+
+    final local = MemoryLocalStore();
+    await local.writeDoc(localGlobalUser, 'last_user', 'u-old');
+    await local.writeDoc(
+      'u-old',
+      'session',
+      jsonEncode({
+        'user': {'id': 'u-old', 'email': 'old@example.com', 'role': 'owner'},
+      }),
+    );
+    await local.writeDoc(
+      'u-old',
+      'cycle',
+      jsonEncode({
+        'cycle_length': 28,
+        'period_length': 5,
+        'period_starts': ['2026-10-01'],
+        'predictions': [],
+      }),
+    );
+
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://old.example',
+        workosClientId: '',
+        redirectUri: androidRedirectUri,
+      ),
+      httpClient: MockClient((request) async {
+        if (request.url.host == 'old.example' &&
+            request.url.path == '/api/auth/session') {
+          return http.Response('unavailable', 503);
+        }
+        if (request.url.host == 'new.example' &&
+            request.url.path == '/api/auth/session') {
+          return http.Response(
+            jsonEncode({
+              'user': {
+                'id': 'u-new',
+                'email': 'new@example.com',
+                'role': 'owner',
+              },
+            }),
+            200,
+          );
+        }
+        return http.Response('{}', 200);
+      }),
+      localStore: local,
+    );
+
+    // Start old probe; it gets 503 and pauses inside _readCachedSession().
+    final oldProbe = api.currentSession();
+    await cachedTokenReadReached.future;
+
+    // While paused inside storage, switch servers and establish Account B.
+    expect(await api.setApiBaseUrl('https://new.example'), isTrue);
+    await api.saveSessionToken('new-token');
+    final newSession = await api.currentSession();
+    expect(newSession.user?.id, 'u-new');
+    await local.writeDoc(
+      'u-new',
+      'cycle',
+      jsonEncode({
+        'cycle_length': 30,
+        'period_length': 4,
+        'period_starts': ['2026-11-01'],
+        'predictions': [],
+      }),
+    );
+
+    // Release the paused storage read for the old probe.
+    pauseCachedTokenRead.complete();
+    await expectLater(oldProbe, throwsA(isA<StaleAuthScopeException>()));
+
+    // Client's active account identity must still be u-new, not u-old.
+    expect(await api.readSessionToken(), 'new-token');
+    final cycle = await api.cachedCycle();
+    expect(cycle?.cycleLength, 30);
+  });
+
+  test(
+      'anonymous session arriving before same-server auth config does not '
+      'discard authkit: true', () async {
+    FlutterSecureStorage.setMockInitialValues({});
+    final configGate = Completer<void>();
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://test.example',
+        workosClientId: '',
+        redirectUri: androidRedirectUri,
+      ),
+      httpClient: MockClient((request) async {
+        if (request.url.path == '/api/auth/config') {
+          await configGate.future;
+          return http.Response(
+            jsonEncode({
+              'authkit': true,
+              'workos_user_deletion': true,
+              'privacy_contact': 'privacy@example.com',
+            }),
+            200,
+          );
+        }
+        if (request.url.path == '/api/auth/session') {
+          return http.Response(jsonEncode({'user': null}), 200);
+        }
+        return http.Response('{}', 404);
+      }),
+      localStore: MemoryLocalStore(),
+    );
+
+    // Start both concurrently, just like _loadConfigAndSession() on web.
+    final configFuture = api.loadAuthConfig();
+    final session = await api.currentSession();
+    expect(session.user, isNull);
+
+    // Now the same-server config finishes after clearSession() ran.
+    configGate.complete();
+    await configFuture;
+
+    expect(api.authkit, isTrue);
+    expect(api.workosUserDeletion, isTrue);
+    expect(api.privacyContact, 'privacy@example.com');
+  });
+
+  test(
+      'loadPersistedApiBase started during setApiBaseUrl cleanup cannot '
+      'restore the old server URL in memory', () async {
+    final cleanupReached = Completer<void>();
+    final cleanupGate = Completer<void>();
+    final storage = _GatedStorage(
+      {
+        'api_base_url': 'https://old.example',
+        'session_token': 'old-token',
+      },
+      onDelete: (key) {
+        if (key == 'session_token' && !cleanupReached.isCompleted) {
+          cleanupReached.complete();
+          return cleanupGate.future;
+        }
+        return null;
+      },
+    );
+    FlutterSecureStoragePlatform.instance = storage;
+
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://old.example',
+        workosClientId: '',
+        redirectUri: androidRedirectUri,
+      ),
+      httpClient: MockClient((_) async => http.Response('{}', 200)),
+      localStore: MemoryLocalStore(),
+    );
+
+    final switchFuture = api.setApiBaseUrl('https://new.example');
+    await cleanupReached.future;
+    expect(api.apiBaseResolved, isFalse);
+
+    // Sign-in retry path sees apiBaseResolved == false during cleanup and calls
+    // loadPersistedApiBase() concurrently.
+    final reloadFuture = api.loadPersistedApiBase();
+
+    cleanupGate.complete();
+    expect(await switchFuture, isTrue);
+    expect(await reloadFuture, isTrue);
+
+    expect(api.config.apiBaseUrl, 'https://new.example');
+    expect(api.apiBaseResolved, isTrue);
+    expect(storage.values['api_base_url'], 'https://new.example');
+  });
+
+  testWidgets(
+      'partner relinked active-to-active to another owner disposes the former '
+      'owner calendar immediately on revalidation', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(412, 915);
+    addTearDown(tester.view.reset);
+
+    final fixedNow = DateTime(2026, 11, 21, 10, 0);
+    final local = MemoryLocalStore();
+    await local.writeDoc(localGlobalUser, 'last_user', 'u-partner');
+    await local.writeDoc(
+      'u-partner',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-partner',
+          'email': 'partner@example.com',
+          'name': 'Partner',
+          'role': 'partner',
+        },
+        'share': {
+          'status': 'active',
+          'owner_email': 'owner-a@example.com',
+          'can_edit_calendar': false,
+        },
+      }),
+    );
+    await local.writeDoc(
+      'u-partner',
+      'calendar',
+      'partner:active:owner-a@example.com',
+    );
+    await local.replaceMonth('u-partner', 2026, 11, const [
+      Entry(date: '2026-11-21', taken: true, notes: 'owner-a private note'),
+    ]);
+    await local.replaceMonth('u-partner', 2026, 10, const []);
+    await local.replaceMonth('u-partner', 2026, 12, const []);
+    await local.writeDoc(
+      'u-partner',
+      'cycle',
+      jsonEncode({
+        'cycle_length': 28,
+        'period_length': 5,
+        'period_starts': ['2026-10-30'],
+        'predictions': [
+          {
+            'period_start': '2026-11-27',
+            'period_end': '2026-12-01',
+            'pms_start': '2026-11-20',
+            'pms_end': '2026-11-27',
+          },
+        ],
+      }),
+    );
+
+    final sessionGate = Completer<void>();
+    final ownerBEntriesGate = Completer<void>();
+    final ownerBCycleGate = Completer<void>();
+    var revalidated = false;
+
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://test.example',
+        workosClientId: '',
+        redirectUri: androidRedirectUri,
+      ),
+      httpClient: MockClient((request) async {
+        switch (request.url.path) {
+          case '/api/auth/config':
+            return http.Response(jsonEncode({'authkit': true}), 200);
+          case '/api/auth/session':
+            await sessionGate.future;
+            revalidated = true;
+            return http.Response(
+              jsonEncode({
+                'user': {
+                  'id': 'u-partner',
+                  'email': 'partner@example.com',
+                  'name': 'Partner',
+                  'role': 'partner',
+                },
+                // Relinked directly to Owner B on another device without ever
+                // observing a revoked state on this device.
+                'share': {
+                  'status': 'active',
+                  'owner_email': 'owner-b@example.com',
+                  'can_edit_calendar': false,
+                },
+                'consent': {'version': 1, 'required': false},
+              }),
+              200,
+            );
+          case '/api/entries':
+            await ownerBEntriesGate.future;
+            if (revalidated &&
+                request.url.queryParameters['year'] == '2026' &&
+                request.url.queryParameters['month'] == '11') {
+              return http.Response(
+                jsonEncode({
+                  'entries': [
+                    {
+                      'date': '2026-11-21',
+                      'taken': false,
+                      'notes': 'owner-b note',
+                      'period': false,
+                    },
+                  ],
+                }),
+                200,
+              );
+            }
+            return http.Response(jsonEncode({'entries': []}), 200);
+          case '/api/cycle':
+            await ownerBCycleGate.future;
+            return http.Response(
+              jsonEncode({
+                'cycle_length': 0,
+                'period_length': 0,
+                'period_starts': [],
+                'predictions': [],
+              }),
+              200,
+            );
+          default:
+            return http.Response('{}', 200);
+        }
+      }),
+      localStore: local,
+    );
+
+    await tester.pumpWidget(
+      App217(config: api.config, api: api, clock: () => fixedNow),
+    );
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    // Cached Owner A calendar appears before network reply.
+    expect(find.byType(CalendarScreen), findsOneWidget);
+    expect(find.text('owner-a private note'), findsOneWidget);
+    expect(find.text('Taken'), findsOneWidget);
+
+    // Open Owner A's read-only day sheet while revalidation is still pending.
+    await tester.tap(find.byKey(const ValueKey('view-day-button')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byType(ExpandableDaySheet), findsOneWidget);
+
+    // Revalidation reveals active share for Owner B while Owner B's network
+    // calendar data is still pending.
+    sessionGate.complete();
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    // Owner A's private calendar AND open day sheet must already be dismissed.
+    expect(find.byType(CalendarScreen), findsOneWidget);
+    expect(find.byType(ExpandableDaySheet), findsNothing);
+    expect(find.text('owner-a private note'), findsNothing);
+    expect(find.text('Taken'), findsNothing);
+    expect(find.textContaining('Nov 27'), findsNothing);
+
+    // Once Owner B's data arrives, Owner B's entry renders cleanly.
+    ownerBEntriesGate.complete();
+    ownerBCycleGate.complete();
+    await tester.pumpAndSettle();
+    expect(find.byType(ExpandableDaySheet), findsNothing);
+    expect(find.text('owner-b note'), findsOneWidget);
+    expect(find.text('owner-a private note'), findsNothing);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 30));
+  });
+
+  testWidgets(
+      'release build with empty defaultApiBaseUrl and saved custom server '
+      'opens straight to cached calendar offline-first', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(412, 915);
+    addTearDown(tester.view.reset);
+
+    FlutterSecureStorage.setMockInitialValues({
+      'api_base_url': 'https://custom.example',
+      'session_token': 'custom-tok',
+    });
+
+    final fixedNow = DateTime(2026, 11, 21, 10, 0);
+    final local = MemoryLocalStore();
+    await local.writeDoc(localGlobalUser, 'last_user', 'u-custom');
+    await local.writeDoc(
+      'u-custom',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-custom',
+          'email': 'owner@custom.example',
+          'name': 'Custom Owner',
+          'role': 'owner',
+        },
+        'share': {'status': 'none'},
+      }),
+    );
+    await local.replaceMonth('u-custom', 2026, 11, const [
+      Entry(date: '2026-11-21', taken: true, notes: 'custom server note'),
+    ]);
+    await local.replaceMonth('u-custom', 2026, 10, const []);
+    await local.replaceMonth('u-custom', 2026, 12, const []);
+    await local.writeDoc(
+      'u-custom',
+      'cycle',
+      jsonEncode({
+        'cycle_length': 28,
+        'period_length': 5,
+        'period_starts': ['2026-10-30'],
+        'predictions': [
+          {
+            'period_start': '2026-11-27',
+            'period_end': '2026-12-01',
+            'pms_start': '2026-11-20',
+            'pms_end': '2026-11-27',
+          },
+        ],
+      }),
+    );
+
+    final networkGate = Completer<void>();
+    final hosts = <String>[];
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: '',
+        workosClientId: '',
+        redirectUri: androidRedirectUri,
+      ),
+      httpClient: MockClient((request) async {
+        hosts.add(request.url.host);
+        await networkGate.future;
+        return http.Response('unavailable', 503);
+      }),
+      localStore: local,
+    );
+
+    await tester.pumpWidget(
+      App217(config: api.config, api: api, clock: () => fixedNow),
+    );
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    // Populated cached calendar appears immediately before any network reply.
+    expect(api.config.apiBaseUrl, 'https://custom.example');
+    expect(find.byType(CalendarScreen), findsOneWidget);
+    expect(find.text('Taken'), findsOneWidget);
+    expect(find.text('custom server note'), findsOneWidget);
+    expect(find.textContaining('Nov 27'), findsOneWidget);
+    expect(hosts, isNotEmpty);
+    expect(hosts.every((h) => h == 'custom.example'), isTrue);
+
+    networkGate.complete();
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 30));
+  });
+
+  test(
+      'concurrent currentSession started during signInWithWorkOS commit cannot '
+      'read empty credentials and wipe the new session', () async {
+    const channel = MethodChannel('flutter_web_auth_2');
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'authenticate') {
+        final args = call.arguments as Map<Object?, Object?>;
+        final authUri = Uri.parse(args['url'] as String);
+        final state = authUri.queryParameters['state'];
+        return '$androidRedirectUri?code=auth-code-1&state=$state';
+      }
+      return null;
+    });
+    addTearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null);
+    });
+
+    final tokenWriteReached = Completer<void>();
+    final tokenWriteGate = Completer<void>();
+    final storage = _GatedStorage(
+      {},
+      onWrite: (key, value) {
+        if (key == 'session_token' && !tokenWriteReached.isCompleted) {
+          tokenWriteReached.complete();
+          return tokenWriteGate.future;
+        }
+        return null;
+      },
+    );
+    FlutterSecureStoragePlatform.instance = storage;
+
+    final local = MemoryLocalStore();
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://test.example',
+        workosClientId: 'client_123',
+        redirectUri: androidRedirectUri,
+      ),
+      httpClient: MockClient((request) async {
+        if (request.url.path == '/api/auth/config') {
+          return http.Response(
+            jsonEncode({'authkit': true, 'workos_client_id': 'client_123'}),
+            200,
+          );
+        }
+        if (request.url.path == '/api/auth/workos/exchange') {
+          return http.Response(
+            jsonEncode({
+              'session_token': 'new-sign-in-token',
+              'user': {
+                'id': 'u-signed-in',
+                'email': 'signedin@example.com',
+                'role': 'owner',
+              },
+            }),
+            200,
+          );
+        }
+        if (request.url.path == '/api/auth/session') {
+          if (request.headers['Authorization'] != 'Bearer new-sign-in-token') {
+            return http.Response(jsonEncode({'user': null}), 200);
+          }
+          return http.Response(
+            jsonEncode({
+              'user': {
+                'id': 'u-signed-in',
+                'email': 'signedin@example.com',
+                'role': 'owner',
+              },
+            }),
+            200,
+          );
+        }
+        return http.Response('{}', 404);
+      }),
+      localStore: local,
+      deviceKey: _RecordingDeviceKey(),
+    );
+
+    final signInFuture = api.signInWithWorkOS();
+    await tokenWriteReached.future;
+
+    // A probe starting mid-commit must not capture the post-commit scope and
+    // later wipe the newly saved token.
+    final concurrentProbe = api.currentSession();
+    final probeExpect =
+        expectLater(concurrentProbe, throwsA(isA<StaleAuthScopeException>()));
+
+    tokenWriteGate.complete();
+    final user = await signInFuture;
+    expect(user.id, 'u-signed-in');
+    await probeExpect;
+
+    expect(await api.readSessionToken(), 'new-sign-in-token');
+    expect((await api.cachedSession())?.user?.id, 'u-signed-in');
+  });
+
+  test(
+      'stale session and share mutation responses arriving after a server '
+      'switch throw StaleAuthScopeException and preserve the new account',
+      () async {
+    FlutterSecureStorage.setMockInitialValues({'session_token': 'old-tok'});
+    final gate = Completer<void>();
+    var reachedCount = 0;
+    final allReached = Completer<void>();
+
+    final local = MemoryLocalStore();
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://old.example',
+        workosClientId: '',
+        redirectUri: androidRedirectUri,
+      ),
+      httpClient: MockClient((request) async {
+        if (request.url.host == 'old.example') {
+          reachedCount++;
+          if (reachedCount == 4 && !allReached.isCompleted) {
+            allReached.complete();
+          }
+          await gate.future;
+          if (request.url.path == '/api/share/accept') {
+            return http.Response(
+              jsonEncode({
+                'status': 'active',
+                'owner_email': 'old-owner@example.com',
+              }),
+              200,
+            );
+          }
+          return http.Response(
+            jsonEncode({
+              'user': {
+                'id': 'u-old',
+                'email': 'old@example.com',
+                'role': 'owner',
+              },
+            }),
+            200,
+          );
+        }
+        if (request.url.host == 'new.example' &&
+            request.url.path == '/api/auth/session') {
+          return http.Response(
+            jsonEncode({
+              'user': {
+                'id': 'u-new',
+                'email': 'new@example.com',
+                'role': 'owner',
+              },
+            }),
+            200,
+          );
+        }
+        return http.Response('{}', 404);
+      }),
+      localStore: local,
+    );
+
+    final fProfile = api.updateProfile(displayName: 'Old');
+    final fRole = api.setRole('owner');
+    final fConsent = api.acceptConsent(1);
+    final fAccept = api.acceptShare('OLDCODE');
+    final expects = [
+      expectLater(fProfile, throwsA(isA<StaleAuthScopeException>())),
+      expectLater(fRole, throwsA(isA<StaleAuthScopeException>())),
+      expectLater(fConsent, throwsA(isA<StaleAuthScopeException>())),
+      expectLater(fAccept, throwsA(isA<StaleAuthScopeException>())),
+    ];
+    await allReached.future;
+
+    // Switch servers and sign in as a new account before the old calls reply.
+    expect(await api.setApiBaseUrl('https://new.example'), isTrue);
+    await api.saveSessionToken('new-tok');
+    expect((await api.currentSession()).user?.id, 'u-new');
+
+    gate.complete();
+    await Future.wait(expects);
+
+    expect(await api.readSessionToken(), 'new-tok');
+    expect((await api.cachedSession())?.user?.id, 'u-new');
+  });
+
+  testWidgets(
+      'open note dialog dismisses immediately on active-to-active partner '
+      'relink', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    // Short viewport so the note renders as a tag opening showDayNoteCard.
+    tester.view.physicalSize = const Size(412, 620);
+    addTearDown(tester.view.reset);
+
+    final fixedNow = DateTime(2026, 11, 21, 10, 0);
+    final local = MemoryLocalStore();
+    await local.writeDoc(localGlobalUser, 'last_user', 'u-partner');
+    await local.writeDoc(
+      'u-partner',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-partner',
+          'email': 'partner@example.com',
+          'name': 'Partner',
+          'role': 'partner',
+        },
+        'share': {
+          'status': 'active',
+          'owner_email': 'owner-a@example.com',
+          'can_edit_calendar': false,
+        },
+      }),
+    );
+    await local.writeDoc(
+      'u-partner',
+      'calendar',
+      'partner:active:owner-a@example.com',
+    );
+    await local.replaceMonth('u-partner', 2026, 11, const [
+      Entry(date: '2026-11-21', taken: true, notes: 'owner-a secret note'),
+    ]);
+    await local.replaceMonth('u-partner', 2026, 10, const []);
+    await local.replaceMonth('u-partner', 2026, 12, const []);
+
+    final sessionGate = Completer<void>();
+    final entriesGate = Completer<void>();
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://test.example',
+        workosClientId: '',
+        redirectUri: androidRedirectUri,
+      ),
+      httpClient: MockClient((request) async {
+        switch (request.url.path) {
+          case '/api/auth/config':
+            return http.Response(jsonEncode({'authkit': true}), 200);
+          case '/api/auth/session':
+            await sessionGate.future;
+            return http.Response(
+              jsonEncode({
+                'user': {
+                  'id': 'u-partner',
+                  'email': 'partner@example.com',
+                  'name': 'Partner',
+                  'role': 'partner',
+                },
+                'share': {
+                  'status': 'active',
+                  'owner_email': 'owner-b@example.com',
+                  'can_edit_calendar': false,
+                },
+                'consent': {'version': 1, 'required': false},
+              }),
+              200,
+            );
+          case '/api/entries':
+            await entriesGate.future;
+            return http.Response(jsonEncode({'entries': []}), 200);
+          case '/api/cycle':
+            await entriesGate.future;
+            return http.Response(
+              jsonEncode({
+                'cycle_length': 0,
+                'period_length': 0,
+                'period_starts': [],
+                'predictions': [],
+              }),
+              200,
+            );
+          default:
+            return http.Response('{}', 200);
+        }
+      }),
+      localStore: local,
+    );
+
+    await tester.pumpWidget(
+      App217(config: api.config, api: api, clock: () => fixedNow),
+    );
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.byKey(const ValueKey('day-tag-note')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('day-tag-note')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byKey(const ValueKey('day-note-card')), findsOneWidget);
+    expect(find.text('owner-a secret note'), findsOneWidget);
+
+    sessionGate.complete();
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.byKey(const ValueKey('day-note-card')), findsNothing);
+    expect(find.text('owner-a secret note'), findsNothing);
+
+    entriesGate.complete();
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('day-note-card')), findsNothing);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 30));
+  });
+
+  testWidgets(
+      'confirmed session relink dismisses open overlay immediately while '
+      '/api/auth/config is stalled and even if config later returns 503',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(412, 915);
+    addTearDown(tester.view.reset);
+
+    final fixedNow = DateTime(2026, 11, 21, 10, 0);
+    final local = MemoryLocalStore();
+    await local.writeDoc(localGlobalUser, 'last_user', 'u-partner');
+    await local.writeDoc(
+      'u-partner',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-partner',
+          'email': 'partner@example.com',
+          'name': 'Partner',
+          'role': 'partner',
+        },
+        'share': {
+          'status': 'active',
+          'owner_email': 'owner-a@example.com',
+          'can_edit_calendar': false,
+        },
+      }),
+    );
+    await local.writeDoc(
+      'u-partner',
+      'calendar',
+      'partner:active:owner-a@example.com',
+    );
+    await local.replaceMonth('u-partner', 2026, 11, const [
+      Entry(date: '2026-11-21', taken: true, notes: 'owner-a private note'),
+    ]);
+    await local.replaceMonth('u-partner', 2026, 10, const []);
+    await local.replaceMonth('u-partner', 2026, 12, const []);
+
+    final sessionGate = Completer<void>();
+    final configGate = Completer<void>();
+    final entriesGate = Completer<void>();
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://test.example',
+        workosClientId: '',
+        redirectUri: androidRedirectUri,
+      ),
+      httpClient: MockClient((request) async {
+        switch (request.url.path) {
+          case '/api/auth/session':
+            await sessionGate.future;
+            return http.Response(
+              jsonEncode({
+                'user': {
+                  'id': 'u-partner',
+                  'email': 'partner@example.com',
+                  'name': 'Partner',
+                  'role': 'partner',
+                },
+                'share': {
+                  'status': 'active',
+                  'owner_email': 'owner-b@example.com',
+                  'can_edit_calendar': false,
+                },
+                'consent': {'version': 1, 'required': false},
+              }),
+              200,
+            );
+          case '/api/auth/config':
+            await configGate.future;
+            return http.Response('unavailable', 503);
+          case '/api/entries':
+            await entriesGate.future;
+            return http.Response(jsonEncode({'entries': []}), 200);
+          case '/api/cycle':
+            await entriesGate.future;
+            return http.Response(
+              jsonEncode({
+                'cycle_length': 0,
+                'period_length': 0,
+                'period_starts': [],
+                'predictions': [],
+              }),
+              200,
+            );
+          default:
+            await entriesGate.future;
+            return http.Response('{}', 200);
+        }
+      }),
+      localStore: local,
+    );
+
+    await tester.pumpWidget(
+      App217(config: api.config, api: api, clock: () => fixedNow),
+    );
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    // Open Owner A's read-only day sheet while both session and config stall.
+    await tester.tap(find.byKey(const ValueKey('view-day-button')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byType(ExpandableDaySheet), findsOneWidget);
+    expect(find.text('owner-a private note'), findsWidgets);
+
+    // /api/auth/session confirms Owner B while /api/auth/config stays stalled.
+    sessionGate.complete();
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    // Owner A's open sheet and calendar MUST already be gone before config replies.
+    expect(configGate.isCompleted, isFalse);
+    expect(find.byType(CalendarScreen), findsOneWidget);
+    expect(find.byType(ExpandableDaySheet), findsNothing);
+    expect(find.text('owner-a private note'), findsNothing);
+    expect(find.text('Taken'), findsNothing);
+
+    // Even when /api/auth/config later returns 503 and sets offline=true,
+    // Owner B's confirmed session remains active.
+    configGate.complete();
+    await tester.pump();
+    await tester.pump();
+    expect(api.offline.value, isTrue);
+    expect(find.text('owner-a private note'), findsNothing);
+    expect(find.text('Taken'), findsNothing);
+
+    entriesGate.complete();
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 30));
+  });
+
+  test(
+      'late listEntries paused in pendingWrites cannot repopulate cleared '
+      'cache after partner relink', () async {
+    FlutterSecureStorage.setMockInitialValues({'session_token': 'tok'});
+    final pendingReached = Completer<void>();
+    final pendingGate = Completer<void>();
+    final entriesHttpGate = Completer<void>();
+    final relinkHttpReached = Completer<void>();
+    final relinkResponseGate = Completer<void>();
+    var pauseNextPending = false;
+    final local = _GatedPendingWritesStore(
+      onPendingWrites: () {
+        if (pauseNextPending && !pendingReached.isCompleted) {
+          pauseNextPending = false;
+          pendingReached.complete();
+          return pendingGate.future;
+        }
+        return null;
+      },
+    );
+    await local.writeDoc(localGlobalUser, 'last_user', 'u-partner');
+    await local.writeDoc(
+      'u-partner',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-partner',
+          'email': 'partner@example.com',
+          'role': 'partner',
+        },
+        'share': {
+          'status': 'active',
+          'owner_email': 'owner-a@example.com',
+          'can_edit_calendar': false,
+        },
+      }),
+    );
+    await local.writeDoc(
+      'u-partner',
+      'calendar',
+      'partner:active:owner-a@example.com',
+    );
+
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://test.example',
+        workosClientId: '',
+        redirectUri: androidRedirectUri,
+      ),
+      httpClient: MockClient((request) async {
+        if (request.url.path == '/api/entries') {
+          await entriesHttpGate.future;
+          return http.Response(
+            jsonEncode({
+              'entries': [
+                {
+                  'date': '2026-11-21',
+                  'taken': true,
+                  'notes': 'owner-a private entry',
+                  'period': false,
+                },
+              ],
+            }),
+            200,
+          );
+        }
+        if (request.url.path == '/api/auth/session') {
+          if (!relinkHttpReached.isCompleted) relinkHttpReached.complete();
+          await relinkResponseGate.future;
+          return http.Response(
+            jsonEncode({
+              'user': {
+                'id': 'u-partner',
+                'email': 'partner@example.com',
+                'role': 'partner',
+              },
+              'share': {
+                'status': 'active',
+                'owner_email': 'owner-b@example.com',
+                'can_edit_calendar': false,
+              },
+            }),
+            200,
+          );
+        }
+        return http.Response('{}', 200);
+      }),
+      localStore: local,
+    );
+
+    // Adopt cached session for Owner A so listEntries captures Owner A's scope.
+    expect((await api.cachedSession())?.user?.id, 'u-partner');
+    pauseNextPending = true;
+
+    // Launch both requests so currentSession() has already sent its HTTP
+    // request before listEntries() pauses inside pendingWrites().
+    final entriesFuture = api.listEntries(2026, 11);
+    final relinkFuture = api.currentSession();
+    await relinkHttpReached.future;
+
+    entriesHttpGate.complete();
+    await pendingReached.future;
+
+    // Deliver the relink response while listEntries() is still blocked inside
+    // pendingWrites(), giving an unserialized implementation time to run
+    // clearCalendar() before replaceMonth() executes.
+    relinkResponseGate.complete();
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+
+    pendingGate.complete();
+    await Future.wait([entriesFuture, relinkFuture]);
+
+    // Owner A's response must NOT survive in the local cache after relink.
+    expect(await api.cachedMonth(2026, 11), isNull);
+  });
+
+  testWidgets(
+      'interrupted relink clears previous owner calendar before persisting '
+      'session and never hydrates a mismatched cached calendar',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(412, 915);
+    addTearDown(tester.view.reset);
+
+    // Part A: live relink clears Owner A's calendar strictly before persisting
+    // Owner B's session doc.
+    FlutterSecureStorage.setMockInitialValues({'session_token': 'tok'});
+    final ops = <String>[];
+    final recordingStore = _RecordingLocalStore(onOp: ops.add);
+    await recordingStore.writeDoc(localGlobalUser, 'last_user', 'u-partner');
+    await recordingStore.writeDoc(
+      'u-partner',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-partner',
+          'email': 'partner@example.com',
+          'role': 'partner',
+        },
+        'share': {
+          'status': 'active',
+          'owner_email': 'owner-a@example.com',
+          'owner_name': 'Owner A',
+        },
+      }),
+    );
+    await recordingStore.writeDoc(
+      'u-partner',
+      'calendar',
+      'partner:active:owner-a@example.com',
+    );
+    await recordingStore.replaceMonth('u-partner', 2026, 11, const [
+      Entry(date: '2026-11-15', taken: true, notes: 'owner-a secret'),
+    ]);
+    final relinkApi = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: recordingStore,
+      httpClient: MockClient((request) async {
+        if (request.url.path == '/api/auth/session') {
+          return http.Response(
+            jsonEncode({
+              'user': {
+                'id': 'u-partner',
+                'email': 'partner@example.com',
+                'role': 'partner',
+              },
+              'share': {
+                'status': 'active',
+                'owner_email': 'owner-b@example.com',
+                'owner_name': 'Owner B',
+              },
+            }),
+            200,
+          );
+        }
+        return http.Response('{}', 200);
+      }),
+    );
+    expect((await relinkApi.cachedSession())?.share?.ownerEmail,
+        'owner-a@example.com');
+    ops.clear();
+    await relinkApi.currentSession();
+
+    final clearIdx = ops.indexOf('clearCalendar:u-partner');
+    final sessionWriteIdx = ops.indexOf('writeDoc:u-partner:session');
+    expect(clearIdx, greaterThanOrEqualTo(0));
+    expect(sessionWriteIdx, greaterThan(clearIdx));
+    expect(await recordingStore.monthEntries('u-partner', 2026, 11), isNull);
+
+    // Part B: even if an older crash left Owner B's session alongside Owner A's
+    // calendar scope on disk, an offline start clears Owner A's data before
+    // preloading the calendar.
+    final mismatched = MemoryLocalStore();
+    await mismatched.writeDoc(localGlobalUser, 'last_user', 'u-partner');
+    await mismatched.writeDoc(
+      'u-partner',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-partner',
+          'email': 'partner@example.com',
+          'role': 'partner',
+        },
+        'share': {
+          'status': 'active',
+          'owner_email': 'owner-b@example.com',
+          'owner_name': 'Owner B',
+        },
+      }),
+    );
+    await mismatched.writeDoc(
+      'u-partner',
+      'calendar',
+      'partner:active:owner-a@example.com',
+    );
+    await mismatched.replaceMonth('u-partner', 2026, 11, const [
+      Entry(date: '2026-11-15', taken: true, notes: 'owner-a secret'),
+    ]);
+    await mismatched.replaceMonth('u-partner', 2026, 10, const []);
+    await mismatched.replaceMonth('u-partner', 2026, 12, const []);
+
+    final offlineApi = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: mismatched,
+      httpClient: MockClient(
+        (_) async => http.Response('unavailable', 503),
+      ),
+    );
+    await tester.pumpWidget(App217(
+      config: offlineApi.config,
+      api: offlineApi,
+      clock: () => DateTime(2026, 11, 15, 10, 0),
+    ));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.byType(CalendarScreen), findsOneWidget);
+    expect(find.text('owner-a secret'), findsNothing);
+    expect(find.text('Taken'), findsNothing);
+    expect(await mismatched.monthEntries('u-partner', 2026, 11), isNull);
+  });
+
+  testWidgets(
+      'single-month 403 share inactive clears preloaded calendar, dismisses '
+      'open overlay, and wipes local cache while other months and session stall',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(412, 915);
+    addTearDown(tester.view.reset);
+
+    FlutterSecureStorage.setMockInitialValues({'session_token': 'tok'});
+    final local = MemoryLocalStore();
+    await local.writeDoc(localGlobalUser, 'last_user', 'u-partner');
+    await local.writeDoc(
+      'u-partner',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-partner',
+          'email': 'partner@example.com',
+          'role': 'partner',
+        },
+        'share': {
+          'status': 'active',
+          'owner_id': 'owner-a',
+          'owner_email': 'owner-a@example.com',
+          'owner_name': 'Owner A',
+          'can_edit_calendar': false,
+        },
+      }),
+    );
+    await local.writeDoc(
+      'u-partner',
+      'calendar',
+      'partner:active:owner-a:owner-a@example.com',
+    );
+    await local.replaceMonth('u-partner', 2026, 11, const [
+      Entry(date: '2026-11-15', taken: true, notes: 'revoked private note'),
+    ]);
+    await local.replaceMonth('u-partner', 2026, 10, const []);
+    await local.replaceMonth('u-partner', 2026, 12, const []);
+
+    final sessionGate = Completer<void>();
+    final configGate = Completer<void>();
+    final novemberGate = Completer<void>();
+    final otherMonthsGate = Completer<void>();
+    final cycleGate = Completer<void>();
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: local,
+      httpClient: MockClient((request) async {
+        switch (request.url.path) {
+          case '/api/auth/session':
+            await sessionGate.future;
+            return http.Response('unavailable', 503);
+          case '/api/auth/config':
+            await configGate.future;
+            return http.Response('unavailable', 503);
+          case '/api/entries':
+            if (request.url.queryParameters['month'] == '11') {
+              await novemberGate.future;
+              return http.Response('{"error":"share inactive"}', 403);
+            }
+            await otherMonthsGate.future;
+            return http.Response(
+              jsonEncode({
+                'subject_id': 'owner-a',
+                'entries': [
+                  {
+                    'date': '2026-10-15',
+                    'taken': true,
+                    'notes': 'late stale note',
+                    'period': false,
+                  },
+                ],
+              }),
+              200,
+            );
+          case '/api/cycle':
+            await cycleGate.future;
+            return http.Response('{"error":"share inactive"}', 403);
+          default:
+            return http.Response('{}', 200);
+        }
+      }),
+    );
+
+    await tester.pumpWidget(App217(
+      config: api.config,
+      api: api,
+      clock: () => DateTime(2026, 11, 15, 10, 0),
+    ));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    // Open Owner A's read-only day sheet while /api/auth/session stays stalled.
+    await tester.tap(find.byKey(const ValueKey('view-day-button')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byType(ExpandableDaySheet), findsOneWidget);
+    expect(find.text('revoked private note'), findsWidgets);
+
+    // Only month=11 returns 403 share inactive; months 10 & 12, cycle, and
+    // session remain stalled. UI and disk cache must clear immediately.
+    novemberGate.complete();
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    expect(otherMonthsGate.isCompleted, isFalse);
+    expect(sessionGate.isCompleted, isFalse);
+    expect(find.byType(ExpandableDaySheet), findsNothing);
+    expect(find.text('revoked private note'), findsNothing);
+    expect(find.text('Taken'), findsNothing);
+    expect(await local.monthEntries('u-partner', 2026, 11), isNull);
+
+    // Late 200 responses from the other stalled months must not repopulate disk.
+    otherMonthsGate.complete();
+    cycleGate.complete();
+    sessionGate.complete();
+    configGate.complete();
+    await tester.pump();
+    await tester.pump();
+    expect(await local.monthEntries('u-partner', 2026, 10), isNull);
+    expect(find.text('revoked private note'), findsNothing);
+  });
+
+  testWidgets(
+      'standalone privacy page updates with auth config even when '
+      '/api/auth/session fails during background bootstrap', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(412, 2400);
+    addTearDown(tester.view.reset);
+
+    FlutterSecureStorage.setMockInitialValues({});
+    final configGate = Completer<void>();
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: MemoryLocalStore(),
+      httpClient: MockClient((request) async {
+        switch (request.url.path) {
+          case '/api/auth/config':
+            await configGate.future;
+            return http.Response(
+              jsonEncode({
+                'authkit': true,
+                'privacy_contact': 'dpo@example.com',
+                'workos_user_deletion': true,
+              }),
+              200,
+            );
+          case '/api/auth/session':
+            throw http.ClientException('session endpoint unreachable');
+          default:
+            return http.Response('{}', 200);
+        }
+      }),
+    );
+
+    await tester.pumpWidget(App217(
+      config: api.config,
+      api: api,
+      webPage: WebPage.deleteAccount,
+      clock: () => DateTime(2026, 11, 15, 10, 0),
+    ));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    // Before config completes, sign-in is unavailable and no contact is shown.
+    expect(find.byKey(const ValueKey('privacy-sign-in')), findsNothing);
+    expect(find.textContaining('dpo@example.com'), findsNothing);
+
+    // Config completes while /api/auth/session threw: page must still rebuild.
+    configGate.complete();
+    await tester.pump();
+    await tester.pump();
+
+    expect(api.authkit, isTrue);
+    expect(api.privacyContact, 'dpo@example.com');
+    expect(find.byKey(const ValueKey('privacy-sign-in')), findsOneWidget);
+    expect(find.textContaining('dpo@example.com'), findsOneWidget);
+  });
+
+  testWidgets(
+      'mismatched subject_id in /api/entries rejects new owner rows, clears '
+      'stale calendar and cache, cancels partner alerts, and recovers session',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(412, 915);
+    addTearDown(tester.view.reset);
+
+    FlutterSecureStorage.setMockInitialValues({'session_token': 'tok'});
+    final local = MemoryLocalStore();
+    await local.writeDoc(localGlobalUser, 'last_user', 'u-partner');
+    await local.writeDoc(
+      'u-partner',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-partner',
+          'email': 'partner@example.com',
+          'role': 'partner',
+        },
+        'share': {
+          'status': 'active',
+          'owner_id': 'owner-a',
+          'owner_email': 'owner-a@example.com',
+          'owner_name': 'Owner A',
+          'can_edit_calendar': false,
+        },
+      }),
+    );
+    await local.writeDoc(
+      'u-partner',
+      'calendar',
+      'partner:active:owner-a:owner-a@example.com',
+    );
+    await local.replaceMonth('u-partner', 2026, 11, const [
+      Entry(date: '2026-11-15', taken: true, notes: 'owner-a private note'),
+    ]);
+    await local.replaceMonth('u-partner', 2026, 10, const []);
+    await local.replaceMonth('u-partner', 2026, 12, const []);
+
+    final sessionGate = Completer<void>();
+    final novemberGate = Completer<void>();
+    final otherMonthsGate = Completer<void>();
+    final cycleGate = Completer<void>();
+    var sessionCalls = 0;
+    var cancelledAlerts = 0;
+
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: local,
+      httpClient: MockClient((request) async {
+        switch (request.url.path) {
+          case '/api/auth/config':
+            return http.Response('unavailable', 503);
+          case '/api/auth/session':
+            sessionCalls++;
+            await sessionGate.future;
+            return http.Response(
+              jsonEncode({
+                'user': {
+                  'id': 'u-partner',
+                  'email': 'partner@example.com',
+                  'role': 'partner',
+                },
+                'share': {
+                  'status': 'active',
+                  'owner_id': 'owner-b',
+                  'owner_email': 'owner-b@example.com',
+                  'owner_name': 'Owner B',
+                  'can_edit_calendar': false,
+                },
+              }),
+              200,
+            );
+          case '/api/entries':
+            if (request.url.queryParameters['month'] == '11') {
+              await novemberGate.future;
+              return http.Response(
+                jsonEncode({
+                  'subject_id': 'owner-b',
+                  'entries': [
+                    {
+                      'date': '2026-11-15',
+                      'taken': true,
+                      'notes': 'owner-b private note',
+                      'period': false,
+                    },
+                  ],
+                }),
+                200,
+              );
+            }
+            await otherMonthsGate.future;
+            return http.Response(
+              jsonEncode({'subject_id': 'owner-b', 'entries': []}),
+              200,
+            );
+          case '/api/cycle':
+            await cycleGate.future;
+            return http.Response(
+              jsonEncode({
+                'subject_id': 'owner-b',
+                'cycle_length': 0,
+                'period_length': 0,
+                'period_starts': [],
+                'predictions': [],
+              }),
+              200,
+            );
+          default:
+            return http.Response('{}', 200);
+        }
+      }),
+    );
+
+    await tester.pumpWidget(App217(
+      config: api.config,
+      api: api,
+      partnerAlertCanceller: () async => cancelledAlerts++,
+      clock: () => DateTime(2026, 11, 15, 10, 0),
+    ));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    // Open Owner A's day sheet while /api/auth/session stays stalled.
+    await tester.tap(find.byKey(const ValueKey('view-day-button')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byType(ExpandableDaySheet), findsOneWidget);
+    expect(find.text('owner-a private note'), findsWidgets);
+
+    // Month=11 returns 200 for Owner B (relinked on another device) while
+    // /api/auth/session and other months remain stalled.
+    novemberGate.complete();
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    expect(sessionGate.isCompleted, isFalse);
+    expect(otherMonthsGate.isCompleted, isFalse);
+    expect(find.byType(ExpandableDaySheet), findsNothing);
+    expect(find.text('owner-a private note'), findsNothing);
+    expect(find.text('owner-b private note'), findsNothing);
+    expect(await local.monthEntries('u-partner', 2026, 11), isNull);
+    expect(cancelledAlerts, greaterThanOrEqualTo(1));
+    // Scope recovery kicked off a session refresh.
+    expect(sessionCalls, greaterThanOrEqualTo(2));
+
+    // Complete session + remaining gates cleanly.
+    sessionGate.complete();
+    otherMonthsGate.complete();
+    cycleGate.complete();
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+    expect(
+      await local.readDoc('u-partner', 'calendar'),
+      'partner:active:owner-b:owner-b@example.com',
+    );
+  });
+
+  testWidgets(
+      '403 consent required persists consent block across offline restart '
+      'without deleting underlying local entries', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(412, 915);
+    addTearDown(tester.view.reset);
+
+    FlutterSecureStorage.setMockInitialValues({'session_token': 'tok'});
+    final local = MemoryLocalStore();
+    await local.writeDoc(localGlobalUser, 'last_user', 'u-owner');
+    await local.writeDoc(
+      'u-owner',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-owner',
+          'email': 'owner@example.com',
+          'role': 'owner',
+        },
+        'share': {'status': 'none'},
+        'consent': {'version': 1, 'required': false},
+      }),
+    );
+    await local.writeDoc('u-owner', 'calendar', 'own');
+    await local.replaceMonth('u-owner', 2026, 11, const [
+      Entry(date: '2026-11-15', taken: true, notes: 'owner private note'),
+    ]);
+    await local.replaceMonth('u-owner', 2026, 10, const []);
+    await local.replaceMonth('u-owner', 2026, 12, const []);
+
+    final entriesGate = Completer<void>();
+    final api1 = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: local,
+      httpClient: MockClient((request) async {
+        switch (request.url.path) {
+          case '/api/auth/session':
+          case '/api/auth/config':
+            return http.Response('unavailable', 503);
+          case '/api/entries':
+            await entriesGate.future;
+            return http.Response(
+              '{"error":"consent required","consent_version":2}',
+              403,
+            );
+          case '/api/cycle':
+            await entriesGate.future;
+            return http.Response(
+              '{"error":"consent required","consent_version":2}',
+              403,
+            );
+          default:
+            return http.Response('{}', 200);
+        }
+      }),
+    );
+
+    await tester.pumpWidget(App217(
+      config: api1.config,
+      api: api1,
+      clock: () => DateTime(2026, 11, 15, 10, 0),
+    ));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+    expect(find.byType(CalendarScreen), findsOneWidget);
+    expect(find.text('owner private note'), findsWidgets);
+
+    // Server refuses calendar reads with 403 consent required while
+    // /api/auth/session stays unavailable (503).
+    entriesGate.complete();
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.byType(ConsentScreen), findsOneWidget);
+    expect(find.byType(CalendarScreen), findsNothing);
+    expect(find.text('owner private note'), findsNothing);
+
+    // Restart the app completely offline (503 everywhere): ConsentScreen must
+    // still gate the app and private rows must stay hidden while intact on disk.
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+
+    final api2 = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: local,
+      httpClient: MockClient(
+        (_) async => http.Response('unavailable', 503),
+      ),
+    );
+    await tester.pumpWidget(App217(
+      config: api2.config,
+      api: api2,
+      clock: () => DateTime(2026, 11, 15, 10, 0),
+    ));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.byType(ConsentScreen), findsOneWidget);
+    expect(find.byType(CalendarScreen), findsNothing);
+    expect(find.text('owner private note'), findsNothing);
+
+    final kept = await local.monthEntries('u-owner', 2026, 11);
+    expect(kept, isNotNull);
+    expect(kept!.single.notes, 'owner private note');
+  });
+
+  test(
+      'stale offline session fallback paused reading secure storage cannot '
+      'roll back concurrent partner relink', () async {
+    final prevPlatform = FlutterSecureStoragePlatform.instance;
+    final tokenReadReached = Completer<void>();
+    final tokenReadGate = Completer<void>();
+    var pausedOnce = false;
+    FlutterSecureStoragePlatform.instance = _GatedTokenReadStorage(
+      {'session_token': 'tok'},
+      shouldPauseRead: (key, count) {
+        // Read #1: first currentSession() Bearer header.
+        // Read #2: first currentSession()'s _readCachedSession() after 503,
+        // AFTER it has already read Owner A's session doc from local storage.
+        if (key == 'session_token' && count == 2 && !pausedOnce) {
+          pausedOnce = true;
+          tokenReadReached.complete();
+          return tokenReadGate.future;
+        }
+        return null;
+      },
+    );
+    addTearDown(() => FlutterSecureStoragePlatform.instance = prevPlatform);
+
+    final local = MemoryLocalStore();
+    await local.writeDoc(localGlobalUser, 'last_user', 'u-partner');
+    await local.writeDoc(
+      'u-partner',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-partner',
+          'email': 'partner@example.com',
+          'role': 'partner',
+        },
+        'share': {
+          'status': 'active',
+          'owner_id': 'owner-a',
+          'owner_email': 'owner-a@example.com',
+        },
+      }),
+    );
+    await local.writeDoc(
+      'u-partner',
+      'calendar',
+      'partner:active:owner-a:owner-a@example.com',
+    );
+
+    var sessionCalls = 0;
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: local,
+      httpClient: MockClient((request) async {
+        if (request.url.path == '/api/auth/session') {
+          sessionCalls++;
+          if (sessionCalls == 1) {
+            return http.Response('unavailable', 503);
+          }
+          return http.Response(
+            jsonEncode({
+              'user': {
+                'id': 'u-partner',
+                'email': 'partner@example.com',
+                'role': 'partner',
+              },
+              'share': {
+                'status': 'active',
+                'owner_id': 'owner-b',
+                'owner_email': 'owner-b@example.com',
+              },
+            }),
+            200,
+          );
+        }
+        if (request.url.path == '/api/entries') {
+          return http.Response(
+            jsonEncode({
+              'subject_id': 'owner-b',
+              'entries': [
+                {
+                  'date': '2026-11-15',
+                  'taken': true,
+                  'notes': 'owner-b note',
+                  'period': false,
+                },
+              ],
+            }),
+            200,
+          );
+        }
+        return http.Response('{}', 200);
+      }),
+    );
+
+    // Start first currentSession(): gets 503, reads Owner A's cached session
+    // doc, and pauses on secure-storage token read.
+    final staleFallback = api.currentSession();
+    await tokenReadReached.future;
+
+    // Concurrent currentSession() commits Owner B and caches Owner B's month.
+    final relinked = await api.currentSession();
+    expect(relinked.share?.ownerId, 'owner-b');
+    await api.listEntries(2026, 11);
+    expect(
+      await local.readDoc('u-partner', 'calendar'),
+      'partner:active:owner-b:owner-b@example.com',
+    );
+    expect((await local.monthEntries('u-partner', 2026, 11))?.single.notes,
+        'owner-b note');
+
+    // Release the paused Owner A fallback: it must be rejected as stale and
+    // leave Owner B's calendar marker and cached month untouched.
+    tokenReadGate.complete();
+    await expectLater(staleFallback, throwsA(isA<StaleAuthScopeException>()));
+
+    expect(
+      await local.readDoc('u-partner', 'calendar'),
+      'partner:active:owner-b:owner-b@example.com',
+    );
+    expect(
+      (await local.monthEntries('u-partner', 2026, 11))?.single.notes,
+      'owner-b note',
+    );
+  });
+
+  testWidgets(
+      'session-confirmed partner revocation cancels partner alerts before '
+      'calendar endpoints respond', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(412, 915);
+    addTearDown(tester.view.reset);
+
+    FlutterSecureStorage.setMockInitialValues({'session_token': 'tok'});
+    final local = MemoryLocalStore();
+    await local.writeDoc(localGlobalUser, 'last_user', 'u-partner');
+    await local.writeDoc(
+      'u-partner',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-partner',
+          'email': 'partner@example.com',
+          'role': 'partner',
+        },
+        'share': {
+          'status': 'active',
+          'owner_id': 'owner-a',
+          'owner_email': 'owner-a@example.com',
+          'owner_name': 'Owner A',
+          'can_edit_calendar': false,
+        },
+      }),
+    );
+    await local.writeDoc(
+      'u-partner',
+      'calendar',
+      'partner:active:owner-a:owner-a@example.com',
+    );
+    await local.replaceMonth('u-partner', 2026, 11, const [
+      Entry(date: '2026-11-15', taken: true, notes: 'owner-a private note'),
+    ]);
+    await local.replaceMonth('u-partner', 2026, 10, const []);
+    await local.replaceMonth('u-partner', 2026, 12, const []);
+
+    final sessionGate = Completer<void>();
+    final entriesGate = Completer<void>();
+    var cancelledAlerts = 0;
+
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: local,
+      httpClient: MockClient((request) async {
+        switch (request.url.path) {
+          case '/api/auth/config':
+            return http.Response('unavailable', 503);
+          case '/api/auth/session':
+            await sessionGate.future;
+            return http.Response(
+              jsonEncode({
+                'user': {
+                  'id': 'u-partner',
+                  'email': 'partner@example.com',
+                  'role': 'partner',
+                },
+                'share': {'status': 'revoked'},
+              }),
+              200,
+            );
+          case '/api/entries':
+          case '/api/cycle':
+            await entriesGate.future;
+            return http.Response('{"error":"share inactive"}', 403);
+          default:
+            return http.Response('{}', 200);
+        }
+      }),
+    );
+
+    await tester.pumpWidget(App217(
+      config: api.config,
+      api: api,
+      partnerAlertCanceller: () async => cancelledAlerts++,
+      clock: () => DateTime(2026, 11, 15, 10, 0),
+    ));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.byType(CalendarScreen), findsOneWidget);
+    expect(cancelledAlerts, 0);
+
+    // /api/auth/session confirms revocation while /api/entries stays stalled:
+    // CalendarScreen unmounts and partner alerts MUST be cancelled.
+    sessionGate.complete();
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    expect(entriesGate.isCompleted, isFalse);
+    expect(find.byType(PartnerJoinScreen), findsOneWidget);
+    expect(find.byType(CalendarScreen), findsNothing);
+    expect(cancelledAlerts, greaterThanOrEqualTo(1));
+
+    entriesGate.complete();
+    await tester.pump();
+  });
+
+  test(
+      'delayed 200 /api/auth/session cannot undo a persisted 403 consent '
+      'required block', () async {
+    FlutterSecureStorage.setMockInitialValues({'session_token': 'tok'});
+    final local = MemoryLocalStore();
+    await local.writeDoc(localGlobalUser, 'last_user', 'u-owner');
+    await local.writeDoc(
+      'u-owner',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-owner',
+          'email': 'owner@example.com',
+          'role': 'owner',
+        },
+        'share': {'status': 'none'},
+        'consent': {'version': 1, 'required': false},
+      }),
+    );
+    await local.writeDoc('u-owner', 'calendar', 'own');
+    await local.replaceMonth('u-owner', 2026, 11, const [
+      Entry(date: '2026-11-15', taken: true, notes: 'owner private note'),
+    ]);
+
+    final staleSessionReached = Completer<void>();
+    final staleSessionGate = Completer<void>();
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: local,
+      httpClient: MockClient((request) async {
+        if (request.url.path == '/api/auth/session') {
+          if (!staleSessionReached.isCompleted) staleSessionReached.complete();
+          await staleSessionGate.future;
+          // Stale 200 generated before consent was withdrawn.
+          return http.Response(
+            jsonEncode({
+              'user': {
+                'id': 'u-owner',
+                'email': 'owner@example.com',
+                'role': 'owner',
+              },
+              'share': {'status': 'none'},
+              'consent': {'version': 1, 'required': false},
+            }),
+            200,
+          );
+        }
+        if (request.url.path == '/api/entries') {
+          return http.Response(
+            '{"error":"consent required","consent_version":2}',
+            403,
+          );
+        }
+        return http.Response('{}', 200);
+      }),
+    );
+
+    expect((await api.cachedSession())?.consentRequired, isFalse);
+
+    // Launch a session refresh that stalls before consent is withdrawn.
+    final delayedSession = api.currentSession();
+    await staleSessionReached.future;
+
+    // Calendar read receives 403 consent required and persists the block.
+    await expectLater(
+      api.listEntries(2026, 11),
+      throwsA(isA<ApiException>()
+          .having((e) => e.statusCode, 'statusCode', 403)
+          .having((e) => e.message, 'message', 'consent required')),
+    );
+
+    // Delayed 200 /api/auth/session arrives with required:false: must be
+    // rejected as stale so it cannot overwrite the persisted consent block.
+    staleSessionGate.complete();
+    await expectLater(
+      delayedSession,
+      throwsA(isA<StaleAuthScopeException>()),
+    );
+
+    final offlineApi = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: local,
+      httpClient: MockClient((_) async => http.Response('unavailable', 503)),
+    );
+    final restarted = await offlineApi.cachedSession();
+    expect(restarted?.consentRequired, isTrue);
+    expect(restarted?.consentVersion, 2);
+  });
+
+  testWidgets(
+      'secondary-screen subject mismatch and superseded-swipe 403 immediately '
+      'clear mounted CalendarScreen in-memory data', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(412, 915);
+    addTearDown(tester.view.reset);
+
+    // Part A: a /api/cycle mismatch (e.g. from Partner Alerts) clears the
+    // mounted CalendarScreen immediately while /api/auth/session stalls.
+    FlutterSecureStorage.setMockInitialValues({'session_token': 'tok'});
+    final localA = MemoryLocalStore();
+    await localA.writeDoc(localGlobalUser, 'last_user', 'u-partner');
+    await localA.writeDoc(
+      'u-partner',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-partner',
+          'email': 'partner@example.com',
+          'role': 'partner',
+        },
+        'share': {
+          'status': 'active',
+          'owner_id': 'owner-a',
+          'owner_email': 'owner-a@example.com',
+          'owner_name': 'Owner A',
+          'can_edit_calendar': false,
+        },
+      }),
+    );
+    await localA.writeDoc(
+      'u-partner',
+      'calendar',
+      'partner:active:owner-a:owner-a@example.com',
+    );
+    await localA.replaceMonth('u-partner', 2026, 11, const [
+      Entry(date: '2026-11-15', taken: true, notes: 'owner-a private note'),
+    ]);
+    await localA.replaceMonth('u-partner', 2026, 10, const []);
+    await localA.replaceMonth('u-partner', 2026, 12, const []);
+
+    final sessionGateA = Completer<void>();
+    final entriesGateA = Completer<void>();
+    final apiA = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: localA,
+      httpClient: MockClient((request) async {
+        switch (request.url.path) {
+          case '/api/auth/config':
+            return http.Response('unavailable', 503);
+          case '/api/auth/session':
+            await sessionGateA.future;
+            return http.Response('unavailable', 503);
+          case '/api/entries':
+            await entriesGateA.future;
+            return http.Response('unavailable', 503);
+          case '/api/cycle':
+            return http.Response(
+              jsonEncode({
+                'subject_id': 'owner-b',
+                'cycle_length': 28,
+                'period_length': 5,
+                'period_starts': [],
+                'predictions': [],
+              }),
+              200,
+            );
+          default:
+            return http.Response('{}', 200);
+        }
+      }),
+    );
+
+    await tester.pumpWidget(App217(
+      config: apiA.config,
+      api: apiA,
+      clock: () => DateTime(2026, 11, 15, 10, 0),
+    ));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('owner-a private note'), findsWidgets);
+
+    // Simulate a secondary screen calling getCycle() and hitting mismatch.
+    await expectLater(
+      apiA.getCycle('2026-11-15'),
+      throwsA(isA<CalendarScopeMismatchException>()),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(sessionGateA.isCompleted, isFalse);
+    expect(find.text('owner-a private note'), findsNothing);
+    expect(find.text('Taken'), findsNothing);
+
+    sessionGateA.complete();
+    entriesGateA.complete();
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+
+    // Part B: a 403 share inactive from an older month load superseded by a
+    // month change still clears the mounted CalendarScreen immediately.
+    final localB = MemoryLocalStore();
+    await localB.writeDoc(localGlobalUser, 'last_user', 'u-partner');
+    await localB.writeDoc(
+      'u-partner',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-partner',
+          'email': 'partner@example.com',
+          'role': 'partner',
+        },
+        'share': {
+          'status': 'active',
+          'owner_id': 'owner-a',
+          'owner_email': 'owner-a@example.com',
+          'owner_name': 'Owner A',
+          'can_edit_calendar': false,
+        },
+      }),
+    );
+    await localB.writeDoc(
+      'u-partner',
+      'calendar',
+      'partner:active:owner-a:owner-a@example.com',
+    );
+    await localB.replaceMonth('u-partner', 2026, 11, const [
+      Entry(date: '2026-11-15', taken: true, notes: 'superseded private note'),
+    ]);
+    await localB.replaceMonth('u-partner', 2026, 10, const []);
+    await localB.replaceMonth('u-partner', 2026, 12, const []);
+
+    final sessionGateB = Completer<void>();
+    final firstNovGate = Completer<void>();
+    final otherEntriesGateB = Completer<void>();
+    var firstNovSeen = false;
+
+    final apiB = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: localB,
+      httpClient: MockClient((request) async {
+        switch (request.url.path) {
+          case '/api/auth/config':
+            return http.Response('unavailable', 503);
+          case '/api/auth/session':
+            await sessionGateB.future;
+            return http.Response('unavailable', 503);
+          case '/api/entries':
+            if (request.url.queryParameters['month'] == '11' && !firstNovSeen) {
+              firstNovSeen = true;
+              await firstNovGate.future;
+              return http.Response('{"error":"share inactive"}', 403);
+            }
+            await otherEntriesGateB.future;
+            return http.Response('unavailable', 503);
+          default:
+            return http.Response('{}', 200);
+        }
+      }),
+    );
+
+    await tester.pumpWidget(App217(
+      config: apiB.config,
+      api: apiB,
+      clock: () => DateTime(2026, 11, 15, 10, 0),
+    ));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+    expect(firstNovSeen, isTrue);
+    expect(find.text('superseded private note'), findsWidgets);
+
+    // Move to the next month so a new _loadGeneration supersedes firstNovGate.
+    await tester.tap(find.byIcon(Icons.chevron_right));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+
+    // Superseded month=11 request returns 403 share inactive while the newer
+    // month's requests and /api/auth/session stay stalled.
+    firstNovGate.complete();
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    expect(otherEntriesGateB.isCompleted, isFalse);
+    expect(sessionGateB.isCompleted, isFalse);
+    expect(find.text('superseded private note'), findsNothing);
+    expect(find.text('Taken'), findsNothing);
+    expect(await localB.monthEntries('u-partner', 2026, 11), isNull);
+
+    otherEntriesGateB.complete();
+    sessionGateB.complete();
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+  });
+
+  testWidgets(
+      'failing clearCalendar on 403 denial or subject_id mismatch preserves '
+      'the denial and blocks cached calendar fallback across offline restarts',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(412, 915);
+    addTearDown(tester.view.reset);
+
+    FlutterSecureStorage.setMockInitialValues({'session_token': 'tok'});
+
+    Future<(_FailingClearCalendarStore, ApiClient)> makeClient(
+      MockClient httpClient,
+    ) async {
+      final store = _FailingClearCalendarStore();
+      await store.writeDoc(localGlobalUser, 'last_user', 'u-partner');
+      await store.writeDoc(
+        'u-partner',
+        'session',
+        jsonEncode({
+          'user': {
+            'id': 'u-partner',
+            'email': 'partner@example.com',
+            'role': 'partner',
+          },
+          'share': {
+            'status': 'active',
+            'owner_id': 'owner-a',
+            'owner_email': 'owner-a@example.com',
+          },
+        }),
+      );
+      await store.writeDoc(
+        'u-partner',
+        'calendar',
+        'partner:active:owner-a:owner-a@example.com',
+      );
+      await store.replaceMonth('u-partner', 2026, 11, const [
+        Entry(date: '2026-11-15', taken: true, notes: 'owner-a secret'),
+      ]);
+      await store.writeDoc(
+        'u-partner',
+        'cycle',
+        jsonEncode({
+          'cycle_length': 28,
+          'period_length': 5,
+          'period_starts': ['2026-10-30'],
+          'predictions': [],
+        }),
+      );
+      final api = ApiClient(
+        AppConfig(
+          apiBaseUrl: 'https://api.example',
+          workosClientId: 'client',
+          redirectUri: 'com.caldasstudios.app217://auth/callback',
+        ),
+        localStore: store,
+        httpClient: httpClient,
+      );
+      expect((await api.cachedSession())?.share?.ownerId, 'owner-a');
+      return (store, api);
+    }
+
+    // Case A: 403 share inactive when clearCalendar throws must still throw
+    // ApiException(403) instead of returning stale cached entries, AND a fresh
+    // ApiClient + App217 offline restart over the same store must stay blocked.
+    final (store403, api403) = await makeClient(
+      MockClient((request) async {
+        if (request.url.path == '/api/entries') {
+          return http.Response('{"error":"share inactive"}', 403);
+        }
+        return http.Response('unavailable', 503);
+      }),
+    );
+    await expectLater(
+      api403.listEntries(2026, 11),
+      throwsA(isA<ApiException>()
+          .having((e) => e.statusCode, 'statusCode', 403)
+          .having((e) => e.message, 'message', 'share inactive')),
+    );
+    expect(await api403.cachedMonth(2026, 11), isNull);
+    expect(await api403.cachedCycle(), isNull);
+
+    // Offline restart with a brand-new ApiClient over the same failing store:
+    // revoked rows must NOT preload or serve from _orCached.
+    final restartedApi = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: store403,
+      httpClient: MockClient((_) async => http.Response('unavailable', 503)),
+    );
+    await tester.pumpWidget(App217(
+      config: restartedApi.config,
+      api: restartedApi,
+      clock: () => DateTime(2026, 11, 15, 10, 0),
+    ));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('owner-a secret'), findsNothing);
+    expect(find.text('Taken'), findsNothing);
+    expect(await restartedApi.cachedMonth(2026, 11), isNull);
+    expect(await restartedApi.cachedCycle(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+
+    // Once disk clearing recovers, a fresh client wipes the stale rows cleanly.
+    store403.failClear = false;
+    final healedApi = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: store403,
+      httpClient: MockClient((_) async => http.Response('unavailable', 503)),
+    );
+    await healedApi.cachedSession();
+    expect(await store403.monthEntries('u-partner', 2026, 11), isNull);
+
+    // Case B: subject_id mismatch when clearCalendar throws must still throw
+    // CalendarScopeMismatchException and stay blocked on a fresh client.
+    FlutterSecureStorage.setMockInitialValues({'session_token': 'tok'});
+    final (storeMismatch, apiMismatch) = await makeClient(
+      MockClient((request) async {
+        if (request.url.path == '/api/cycle') {
+          return http.Response(
+            jsonEncode({
+              'subject_id': 'owner-b',
+              'cycle_length': 30,
+              'period_length': 4,
+              'period_starts': [],
+              'predictions': [],
+            }),
+            200,
+          );
+        }
+        return http.Response('unavailable', 503);
+      }),
+    );
+    await expectLater(
+      apiMismatch.getCycle('2026-11-15'),
+      throwsA(isA<CalendarScopeMismatchException>()),
+    );
+    expect(await apiMismatch.cachedCycle(), isNull);
+    expect(await apiMismatch.cachedMonth(2026, 11), isNull);
+
+    final restartedMismatchApi = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: storeMismatch,
+      httpClient: MockClient((_) async => http.Response('unavailable', 503)),
+    );
+    await restartedMismatchApi.cachedSession();
+    expect(await restartedMismatchApi.cachedMonth(2026, 11), isNull);
+    expect(await restartedMismatchApi.cachedCycle(), isNull);
+  });
+
+  testWidgets(
+      'offline 503 calendar load after 403 consent required cannot redraw '
+      'retained rows while consent recovery is still pending', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(412, 915);
+    addTearDown(tester.view.reset);
+
+    FlutterSecureStorage.setMockInitialValues({'session_token': 'tok'});
+    final local = MemoryLocalStore();
+    await local.writeDoc(localGlobalUser, 'last_user', 'u-owner');
+    await local.writeDoc(
+      'u-owner',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-owner',
+          'email': 'owner@example.com',
+          'role': 'owner',
+        },
+        'share': {'status': 'none'},
+        'consent': {'version': 1, 'required': false},
+      }),
+    );
+    await local.writeDoc('u-owner', 'calendar', 'own');
+    await local.replaceMonth('u-owner', 2026, 11, const [
+      Entry(date: '2026-11-15', taken: true, notes: 'owner private note'),
+    ]);
+    await local.replaceMonth('u-owner', 2026, 10, const []);
+    await local.replaceMonth('u-owner', 2026, 12, const []);
+
+    final sessionGate = Completer<void>();
+    final firstEntriesGate = Completer<void>();
+    var entriesDeniedOnce = false;
+
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: local,
+      httpClient: MockClient((request) async {
+        switch (request.url.path) {
+          case '/api/auth/config':
+            return http.Response('unavailable', 503);
+          case '/api/auth/session':
+            await sessionGate.future;
+            return http.Response(
+              jsonEncode({
+                'user': {
+                  'id': 'u-owner',
+                  'email': 'owner@example.com',
+                  'role': 'owner',
+                },
+                'share': {'status': 'none'},
+                'consent': {'version': 2, 'required': false},
+              }),
+              200,
+            );
+          case '/api/entries':
+            if (!entriesDeniedOnce &&
+                request.url.queryParameters['month'] == '11') {
+              entriesDeniedOnce = true;
+              await firstEntriesGate.future;
+              return http.Response(
+                '{"error":"consent required","consent_version":2}',
+                403,
+              );
+            }
+            // Subsequent loads hit 503 while consent recovery is still pending.
+            return http.Response('unavailable', 503);
+          default:
+            return http.Response('unavailable', 503);
+        }
+      }),
+    );
+
+    await tester.pumpWidget(App217(
+      config: api.config,
+      api: api,
+      clock: () => DateTime(2026, 11, 15, 10, 0),
+    ));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('owner private note'), findsWidgets);
+
+    // Deliver 403 consent required while /api/auth/session remains stalled.
+    firstEntriesGate.complete();
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    expect(sessionGate.isCompleted, isFalse);
+    expect(find.text('owner private note'), findsNothing);
+    expect(find.text('Taken'), findsNothing);
+
+    // An offline 503 read or month navigation must NOT redraw retained rows.
+    await expectLater(
+      api.listEntries(2026, 11),
+      throwsA(isA<ApiException>().having((e) => e.statusCode, 'statusCode', 503)),
+    );
+    expect(await api.cachedMonth(2026, 11), isNull);
+
+    await tester.tap(find.byIcon(Icons.chevron_right));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+    await tester.tap(find.byIcon(Icons.chevron_left));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+    expect(find.text('owner private note'), findsNothing);
+    expect(find.text('Taken'), findsNothing);
+
+    // Once the server confirms consent again, the retained local month is
+    // readable without having been deleted.
+    sessionGate.complete();
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+    expect((await api.cachedMonth(2026, 11))?.single.notes,
+        'owner private note');
+  });
+
+  testWidgets(
+      'repeated invalidation during in-flight session recovery retries '
+      'recovery so the new calendar scope loads', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(412, 915);
+    addTearDown(tester.view.reset);
+
+    FlutterSecureStorage.setMockInitialValues({'session_token': 'tok'});
+    final local = MemoryLocalStore();
+    await local.writeDoc(localGlobalUser, 'last_user', 'u-partner');
+    await local.writeDoc(
+      'u-partner',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-partner',
+          'email': 'partner@example.com',
+          'role': 'partner',
+        },
+        'share': {
+          'status': 'active',
+          'owner_id': 'owner-a',
+          'owner_email': 'owner-a@example.com',
+          'owner_name': 'Owner A',
+          'can_edit_calendar': false,
+        },
+      }),
+    );
+    await local.writeDoc(
+      'u-partner',
+      'calendar',
+      'partner:active:owner-a:owner-a@example.com',
+    );
+    await local.replaceMonth('u-partner', 2026, 11, const [
+      Entry(date: '2026-11-15', taken: true, notes: 'owner-a private note'),
+    ]);
+    await local.replaceMonth('u-partner', 2026, 10, const []);
+    await local.replaceMonth('u-partner', 2026, 12, const []);
+
+    final recovery1Reached = Completer<void>();
+    final recovery1Gate = Completer<void>();
+    var sessionCalls = 0;
+
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: local,
+      httpClient: MockClient((request) async {
+        switch (request.url.path) {
+          case '/api/auth/config':
+            return http.Response('unavailable', 503);
+          case '/api/auth/session':
+            sessionCalls++;
+            if (sessionCalls == 1) {
+              // Initial startup revalidation fails so mismatch drives recovery.
+              return http.Response('unavailable', 503);
+            }
+            if (sessionCalls == 2) {
+              if (!recovery1Reached.isCompleted) recovery1Reached.complete();
+              await recovery1Gate.future;
+            }
+            return http.Response(
+              jsonEncode({
+                'user': {
+                  'id': 'u-partner',
+                  'email': 'partner@example.com',
+                  'role': 'partner',
+                },
+                'share': {
+                  'status': 'active',
+                  'owner_id': 'owner-b',
+                  'owner_email': 'owner-b@example.com',
+                  'owner_name': 'Owner B',
+                  'can_edit_calendar': false,
+                },
+              }),
+              200,
+            );
+          case '/api/entries':
+            if (request.url.queryParameters['month'] == '11') {
+              return http.Response(
+                jsonEncode({
+                  'subject_id': 'owner-b',
+                  'entries': [
+                    {
+                      'date': '2026-11-15',
+                      'taken': true,
+                      'notes': 'owner-b recovered note',
+                      'period': false,
+                    },
+                  ],
+                }),
+                200,
+              );
+            }
+            return http.Response(
+              jsonEncode({'subject_id': 'owner-b', 'entries': []}),
+              200,
+            );
+          case '/api/cycle':
+            return http.Response(
+              jsonEncode({
+                'subject_id': 'owner-b',
+                'cycle_length': 28,
+                'period_length': 5,
+                'period_starts': [],
+                'predictions': [],
+              }),
+              200,
+            );
+          default:
+            return http.Response('{}', 200);
+        }
+      }),
+    );
+
+    await tester.pumpWidget(App217(
+      config: api.config,
+      api: api,
+      clock: () => DateTime(2026, 11, 15, 10, 0),
+    ));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    // Mismatch #1 triggered recovery #1, which is now in flight.
+    await recovery1Reached.future;
+    expect(sessionCalls, 2);
+
+    // A second mismatch arrives while recovery #1 is still in flight,
+    // advancing _sessionRevision so recovery #1's 200 will be rejected.
+    await expectLater(
+      api.getCycle('2026-11-15'),
+      throwsA(isA<CalendarScopeMismatchException>()),
+    );
+
+    // Release recovery #1: even though its 200 is superseded by the second
+    // invalidation, _recoverSession must automatically run recovery #2 and
+    // transition cleanly to Owner B's calendar.
+    recovery1Gate.complete();
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    expect(sessionCalls, greaterThanOrEqualTo(3));
+    expect(
+      await local.readDoc('u-partner', 'calendar'),
+      'partner:active:owner-b:owner-b@example.com',
+    );
+    expect(find.text('owner-b recovered note'), findsWidgets);
+  });
+
+  testWidgets(
+      'successful acceptShare persists share and role so an offline follow-up '
+      'session refresh stays on the joined calendar', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(412, 915);
+    addTearDown(tester.view.reset);
+
+    FlutterSecureStorage.setMockInitialValues({'session_token': 'tok'});
+    final local = MemoryLocalStore();
+    await local.writeDoc(localGlobalUser, 'last_user', 'u-partner');
+    await local.writeDoc(
+      'u-partner',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-partner',
+          'email': 'partner@example.com',
+          'role': 'partner',
+        },
+        'share': {'status': 'none'},
+      }),
+    );
+    await local.writeDoc('u-partner', 'calendar', 'partner:none:');
+
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: local,
+      httpClient: MockClient((request) async {
+        switch (request.url.path) {
+          case '/api/share/accept':
+            return http.Response(
+              jsonEncode({
+                'status': 'active',
+                'owner_id': 'owner-b',
+                'owner_email': 'owner-b@example.com',
+                'owner_name': 'Owner B',
+                'can_edit_calendar': false,
+              }),
+              200,
+            );
+          case '/api/auth/session':
+          case '/api/auth/config':
+          case '/api/entries':
+          case '/api/cycle':
+            // Network drops right after accepting the invite.
+            return http.Response('unavailable', 503);
+          default:
+            return http.Response('{}', 200);
+        }
+      }),
+    );
+
+    await tester.pumpWidget(App217(
+      config: api.config,
+      api: api,
+      clock: () => DateTime(2026, 11, 15, 10, 0),
+    ));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+    expect(find.byType(PartnerJoinScreen), findsOneWidget);
+
+    await tester.enterText(
+      find.byKey(const ValueKey('partner-join-code')),
+      'INVITEB',
+    );
+    await tester.tap(find.byType(FilledButton));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+
+    // Even though /api/auth/session returned 503 after acceptShare succeeded,
+    // the partner stays on Owner B's calendar instead of rolling back.
+    expect(find.byType(CalendarScreen), findsOneWidget);
+    expect(find.byType(PartnerJoinScreen), findsNothing);
+    expect(
+      await local.readDoc('u-partner', 'calendar'),
+      'partner:active:owner-b:owner-b@example.com',
+    );
+    final persisted = await api.cachedSession();
+    expect(persisted?.share?.isActive, isTrue);
+    expect(persisted?.share?.ownerId, 'owner-b');
+    expect(persisted?.user?.role, 'partner');
+  });
+
+  test(
+      'routine 200 /api/auth/session from before withdrawal does not discard '
+      'a concurrent 403 consent required, while explicit acceptConsent still '
+      'discards older 403s', () async {
+    FlutterSecureStorage.setMockInitialValues({'session_token': 'tok'});
+    final local = MemoryLocalStore();
+    await local.writeDoc(localGlobalUser, 'last_user', 'u-owner');
+    await local.writeDoc(
+      'u-owner',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-owner',
+          'email': 'owner@example.com',
+          'role': 'owner',
+        },
+        'share': {'status': 'none'},
+        'consent': {'version': 1, 'required': false},
+      }),
+    );
+    await local.writeDoc('u-owner', 'calendar', 'own');
+    await local.replaceMonth('u-owner', 2026, 11, const [
+      Entry(date: '2026-11-15', taken: true, notes: 'owner private note'),
+    ]);
+
+    final entry403Gate = Completer<void>();
+    final stale403Gate = Completer<void>();
+    var entriesCalls = 0;
+    var offlineNow = false;
+    var consentCallbacks = 0;
+
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: local,
+      httpClient: MockClient((request) async {
+        if (request.url.path == '/api/auth/session') {
+          return http.Response(
+            jsonEncode({
+              'user': {
+                'id': 'u-owner',
+                'email': 'owner@example.com',
+                'role': 'owner',
+              },
+              'share': {'status': 'none'},
+              'consent': {'version': 1, 'required': false},
+            }),
+            200,
+          );
+        }
+        if (request.url.path == '/api/account/consent' &&
+            request.method == 'PUT') {
+          return http.Response(
+            jsonEncode({
+              'user': {
+                'id': 'u-owner',
+                'email': 'owner@example.com',
+                'role': 'owner',
+              },
+              'share': {'status': 'none'},
+              'consent': {'version': 2, 'required': false},
+            }),
+            200,
+          );
+        }
+        if (request.url.path == '/api/entries') {
+          entriesCalls++;
+          if (entriesCalls == 1) {
+            await entry403Gate.future;
+            return http.Response(
+              '{"error":"consent required","consent_version":2}',
+              403,
+            );
+          }
+          if (offlineNow) {
+            return http.Response('unavailable', 503);
+          }
+          await stale403Gate.future;
+          return http.Response(
+            '{"error":"consent required","consent_version":2}',
+            403,
+          );
+        }
+        return http.Response('{}', 200);
+      }),
+    )..onConsentRequired = () => consentCallbacks++;
+
+    expect((await api.cachedSession())?.consentRequired, isFalse);
+
+    // Start calendar request concurrently with a routine session refresh.
+    final concurrentEntries = api.listEntries(2026, 11);
+    final session = await api.currentSession();
+    expect(session.consentRequired, isFalse);
+
+    // The concurrent calendar request now returns 403 consent required.
+    entry403Gate.complete();
+    await expectLater(
+      concurrentEntries,
+      throwsA(isA<ApiException>()
+          .having((e) => e.message, 'message', 'consent required')),
+    );
+
+    // Routine session refresh must NOT have caused this 403 to be ignored.
+    expect(consentCallbacks, 1);
+    expect(await api.cachedMonth(2026, 11), isNull);
+    offlineNow = true;
+    await expectLater(
+      api.listEntries(2026, 11),
+      throwsA(isA<ApiException>().having((e) => e.statusCode, 'status', 503)),
+    );
+
+    // Now start another request that will arrive late with 403, then accept
+    // consent explicitly before releasing it: the late 403 must be ignored.
+    offlineNow = false;
+    final staleEntries = api.listEntries(2026, 11);
+    final accepted = await api.acceptConsent(2);
+    expect(accepted.consentRequired, isFalse);
+    stale403Gate.complete();
+    await expectLater(
+      staleEntries,
+      throwsA(isA<ApiException>()
+          .having((e) => e.message, 'message', 'consent required')),
+    );
+    expect(consentCallbacks, 1);
+    expect(
+      (await api.cachedMonth(2026, 11))?.single.notes,
+      'owner private note',
+    );
+  });
+
+  test(
+      'offline 503 recovery after failing to persist 403 consent required '
+      'keeps consent blocked and blocks offline calendar reads', () async {
+    FlutterSecureStorage.setMockInitialValues({'session_token': 'tok'});
+    final local = _FailingSessionWriteStore();
+    await local.writeDoc(localGlobalUser, 'last_user', 'u-owner');
+    await local.writeDoc(
+      'u-owner',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-owner',
+          'email': 'owner@example.com',
+          'role': 'owner',
+        },
+        'share': {'status': 'none'},
+        'consent': {'version': 1, 'required': false},
+      }),
+    );
+    await local.writeDoc('u-owner', 'calendar', 'own');
+    await local.replaceMonth('u-owner', 2026, 11, const [
+      Entry(date: '2026-11-15', taken: true, notes: 'owner private note'),
+    ]);
+    local.failSessionWrite = true;
+
+    var entriesOffline = false;
+    var sessionOffline = true;
+
+    ApiClient makeClient() => ApiClient(
+          AppConfig(
+            apiBaseUrl: 'https://api.example',
+            workosClientId: 'client',
+            redirectUri: 'com.caldasstudios.app217://auth/callback',
+          ),
+          localStore: local,
+          httpClient: MockClient((request) async {
+            if (request.url.path == '/api/entries') {
+              if (entriesOffline) return http.Response('unavailable', 503);
+              return http.Response(
+                '{"error":"consent required","consent_version":2}',
+                403,
+              );
+            }
+            if (request.url.path == '/api/auth/session') {
+              if (sessionOffline) return http.Response('unavailable', 503);
+              return http.Response(
+                jsonEncode({
+                  'user': {
+                    'id': 'u-owner',
+                    'email': 'owner@example.com',
+                    'role': 'owner',
+                  },
+                  'share': {'status': 'none'},
+                  'consent': {'version': 2, 'required': false},
+                }),
+                200,
+              );
+            }
+            return http.Response('{}', 200);
+          }),
+        );
+
+    final api = makeClient();
+    expect((await api.cachedSession())?.consentRequired, isFalse);
+
+    // 403 consent required arrives while persisting the session doc fails.
+    await expectLater(
+      api.listEntries(2026, 11),
+      throwsA(isA<ApiException>()
+          .having((e) => e.message, 'message', 'consent required')),
+    );
+
+    // Offline recovery (503) must NOT lift the consent block back to false.
+    final recovered = await api.currentSession();
+    expect(recovered.fromCache, isTrue);
+    expect(recovered.consentRequired, isTrue);
+    expect(recovered.consentVersion, 2);
+
+    // Subsequent offline calendar load must remain blocked.
+    entriesOffline = true;
+    expect(await api.cachedMonth(2026, 11), isNull);
+    await expectLater(
+      api.listEntries(2026, 11),
+      throwsA(isA<ApiException>().having((e) => e.statusCode, 'status', 503)),
+    );
+
+    // A fresh client restarting offline also observes the persisted fallback.
+    final restarted = makeClient();
+    final restartedSession = await restarted.cachedSession();
+    expect(restartedSession?.consentRequired, isTrue);
+    expect(restartedSession?.consentVersion, 2);
+    expect(await restarted.cachedMonth(2026, 11), isNull);
+
+    // Once disk writes heal and the server confirms consent again, the block
+    // clears and retained local rows become readable again.
+    local.failSessionWrite = false;
+    sessionOffline = false;
+    final confirmed = await restarted.currentSession();
+    expect(confirmed.consentRequired, isFalse);
+    expect(
+      (await restarted.cachedMonth(2026, 11))?.single.notes,
+      'owner private note',
+    );
+  });
+
+  testWidgets(
+      'pending outbox edit does not loop consent recovery when session '
+      'confirms consent required and flushes after consent is accepted',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(412, 915);
+    addTearDown(tester.view.reset);
+
+    FlutterSecureStorage.setMockInitialValues({'session_token': 'tok'});
+    final local = MemoryLocalStore();
+    await local.writeDoc(localGlobalUser, 'last_user', 'u-owner');
+    await local.writeDoc(
+      'u-owner',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-owner',
+          'email': 'owner@example.com',
+          'role': 'owner',
+        },
+        'share': {'status': 'none'},
+        'consent': {'version': 1, 'required': false},
+      }),
+    );
+    await local.writeDoc('u-owner', 'calendar', 'own');
+    await local.replaceMonth('u-owner', 2026, 11, const [
+      Entry(date: '2026-11-15', taken: true, notes: 'queued note'),
+    ]);
+    await local.enqueue(
+      'u-owner',
+      const PendingWrite(
+        date: '2026-11-15',
+        entry: Entry(date: '2026-11-15', taken: true, notes: 'queued note'),
+      ),
+    );
+
+    var consented = false;
+    var sessionCalls = 0;
+    var upsertEntryCalls = 0;
+
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: local,
+      httpClient: MockClient((request) async {
+        switch (request.url.path) {
+          case '/api/auth/config':
+            return http.Response(
+              jsonEncode({'authkit': true, 'privacy_contact': ''}),
+              200,
+            );
+          case '/api/auth/session':
+            sessionCalls++;
+            return http.Response(
+              jsonEncode({
+                'user': {
+                  'id': 'u-owner',
+                  'email': 'owner@example.com',
+                  'role': 'owner',
+                },
+                'share': {'status': 'none'},
+                'consent': {'version': 2, 'required': !consented},
+              }),
+              200,
+            );
+          case '/api/account/consent':
+            consented = true;
+            return http.Response(
+              jsonEncode({
+                'user': {
+                  'id': 'u-owner',
+                  'email': 'owner@example.com',
+                  'role': 'owner',
+                },
+                'share': {'status': 'none'},
+                'consent': {'version': 2, 'required': false},
+              }),
+              200,
+            );
+          case '/api/entries/2026-11-15':
+            if (request.method == 'POST') {
+              upsertEntryCalls++;
+              if (!consented) {
+                return http.Response(
+                  '{"error":"consent required","consent_version":2}',
+                  403,
+                );
+              }
+              return http.Response(
+                jsonEncode({
+                  'date': '2026-11-15',
+                  'taken': true,
+                  'notes': 'queued note',
+                  'period': false,
+                }),
+                200,
+              );
+            }
+            return http.Response('{}', 200);
+          case '/api/entries':
+            if (!consented) {
+              return http.Response(
+                '{"error":"consent required","consent_version":2}',
+                403,
+              );
+            }
+            return http.Response(
+              jsonEncode({
+                'subject_id': 'u-owner',
+                'entries': [
+                  {
+                    'date': '2026-11-15',
+                    'taken': true,
+                    'notes': 'queued note',
+                    'period': false,
+                  },
+                ],
+              }),
+              200,
+            );
+          case '/api/cycle':
+            if (!consented) {
+              return http.Response(
+                '{"error":"consent required","consent_version":2}',
+                403,
+              );
+            }
+            return http.Response(
+              jsonEncode({
+                'subject_id': 'u-owner',
+                'cycle_length': 28,
+                'period_length': 5,
+                'period_starts': [],
+                'predictions': [],
+              }),
+              200,
+            );
+          default:
+            return http.Response('{}', 200);
+        }
+      }),
+    );
+
+    await tester.pumpWidget(App217(
+      config: api.config,
+      api: api,
+      clock: () => DateTime(2026, 11, 15, 10, 0),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(ConsentScreen), findsOneWidget);
+    // Outbox sync must not run while consent is required, and session recovery
+    // must settle without looping.
+    expect(upsertEntryCalls, 0);
+    expect(sessionCalls, lessThanOrEqualTo(2));
+    expect((await local.pendingWrites('u-owner')).length, 1);
+
+    // Accepting consent resumes outbox sync and drains the queued edit.
+    final accept = find.byKey(const ValueKey('consent-accept'));
+    await tester.scrollUntilVisible(accept, 200);
+    await tester.tap(accept);
+    await tester.pumpAndSettle();
+
+    expect(find.byType(CalendarScreen), findsOneWidget);
+    expect(upsertEntryCalls, 1);
+    expect(await local.pendingWrites('u-owner'), isEmpty);
+  });
+
+  test(
+      'delayed profile, role, and stage 200 responses cannot undo a newer '
+      '403 consent required or clear its fallback marker', () async {
+    FlutterSecureStorage.setMockInitialValues({'session_token': 'tok'});
+    final local = _FailingSessionWriteStore();
+    await local.writeDoc(localGlobalUser, 'last_user', 'u-owner');
+    await local.writeDoc(
+      'u-owner',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-owner',
+          'email': 'owner@example.com',
+          'role': 'owner',
+        },
+        'share': {'status': 'none'},
+        'consent': {'version': 1, 'required': false},
+      }),
+    );
+    await local.writeDoc('u-owner', 'calendar', 'own');
+    await local.replaceMonth('u-owner', 2026, 11, const [
+      Entry(date: '2026-11-15', taken: true, notes: 'owner private note'),
+    ]);
+
+    final mutationGate = Completer<void>();
+    var reached = 0;
+    final allReached = Completer<void>();
+
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: local,
+      httpClient: MockClient((request) async {
+        if (request.url.path == '/api/account/profile' ||
+            request.url.path == '/api/account/role' ||
+            request.url.path == '/api/account/stage') {
+          reached++;
+          if (reached == 3 && !allReached.isCompleted) allReached.complete();
+          await mutationGate.future;
+          // Stale 200 generated before consent was withdrawn.
+          return http.Response(
+            jsonEncode({
+              'user': {
+                'id': 'u-owner',
+                'email': 'owner@example.com',
+                'role': 'owner',
+                'display_name': 'Stale Name',
+                'stage': 'regular',
+              },
+              'share': {'status': 'none'},
+              'consent': {'version': 1, 'required': false},
+            }),
+            200,
+          );
+        }
+        if (request.url.path == '/api/entries') {
+          return http.Response(
+            '{"error":"consent required","consent_version":2}',
+            403,
+          );
+        }
+        return http.Response('{}', 200);
+      }),
+    );
+
+    expect((await api.cachedSession())?.consentRequired, isFalse);
+
+    // Start profile, role, and stage updates before consent is withdrawn.
+    final fProfile = api.updateProfile(displayName: 'Stale Name');
+    final fRole = api.setRole('owner');
+    final fStage = api.setStage('regular');
+    final expects = [
+      expectLater(fProfile, throwsA(isA<StaleAuthScopeException>())),
+      expectLater(fRole, throwsA(isA<StaleAuthScopeException>())),
+      expectLater(fStage, throwsA(isA<StaleAuthScopeException>())),
+    ];
+    await allReached.future;
+
+    // Force fallback-marker persistence on the 403, then heal disk writes
+    // before the delayed 200 mutations return so they would have overwritten
+    // both the session doc and the fallback marker if unguarded.
+    local.failSessionWrite = true;
+    await expectLater(
+      api.listEntries(2026, 11),
+      throwsA(isA<ApiException>()
+          .having((e) => e.message, 'message', 'consent required')),
+    );
+    local.failSessionWrite = false;
+
+    mutationGate.complete();
+    await Future.wait(expects);
+
+    expect(await api.cachedMonth(2026, 11), isNull);
+    final restarted = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: local,
+      httpClient: MockClient((_) async => http.Response('unavailable', 503)),
+    );
+    final restartedSession = await restarted.cachedSession();
+    expect(restartedSession?.consentRequired, isTrue);
+    expect(restartedSession?.consentVersion, 2);
+    expect(await restarted.cachedMonth(2026, 11), isNull);
+  });
+
+  testWidgets(
+      'confirmed session consentRequired still blocks calendar and persists '
+      'fallback marker when local session write fails', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(412, 915);
+    addTearDown(tester.view.reset);
+
+    FlutterSecureStorage.setMockInitialValues({'session_token': 'tok'});
+    final local = _FailingSessionWriteStore();
+    await local.writeDoc(localGlobalUser, 'last_user', 'u-owner');
+    await local.writeDoc(
+      'u-owner',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-owner',
+          'email': 'owner@example.com',
+          'role': 'owner',
+        },
+        'share': {'status': 'none'},
+        'consent': {'version': 1, 'required': false},
+      }),
+    );
+    await local.writeDoc('u-owner', 'calendar', 'own');
+    await local.replaceMonth('u-owner', 2026, 11, const [
+      Entry(date: '2026-11-15', taken: true, notes: 'owner private note'),
+    ]);
+    await local.replaceMonth('u-owner', 2026, 10, const []);
+    await local.replaceMonth('u-owner', 2026, 12, const []);
+    local.failSessionWrite = true;
+
+    final sessionGate = Completer<void>();
+
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: local,
+      httpClient: MockClient((request) async {
+        if (request.url.path == '/api/auth/config') {
+          return http.Response(
+            jsonEncode({'authkit': true, 'privacy_contact': ''}),
+            200,
+          );
+        }
+        if (request.url.path == '/api/auth/session') {
+          await sessionGate.future;
+          return http.Response(
+            jsonEncode({
+              'user': {
+                'id': 'u-owner',
+                'email': 'owner@example.com',
+                'role': 'owner',
+              },
+              'share': {'status': 'none'},
+              'consent': {'version': 2, 'required': true},
+            }),
+            200,
+          );
+        }
+        return http.Response('unavailable', 503);
+      }),
+    );
+
+    await tester.pumpWidget(App217(
+      config: api.config,
+      api: api,
+      clock: () => DateTime(2026, 11, 15, 10, 0),
+    ));
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.byType(CalendarScreen), findsOneWidget);
+    expect(find.text('owner private note'), findsWidgets);
+
+    // Server confirms consentRequired: true while session-doc persistence fails.
+    sessionGate.complete();
+    await tester.pumpAndSettle();
+
+    expect(find.byType(ConsentScreen), findsOneWidget);
+    expect(find.byType(CalendarScreen), findsNothing);
+    expect(find.text('owner private note'), findsNothing);
+    expect(await api.cachedMonth(2026, 11), isNull);
+
+    // Fresh offline restart also observes the secure-storage fallback marker.
+    final restarted = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: local,
+      httpClient: MockClient((_) async => http.Response('unavailable', 503)),
+    );
+    final restartedSession = await restarted.cachedSession();
+    expect(restartedSession?.consentRequired, isTrue);
+    expect(restartedSession?.consentVersion, 2);
+    expect(await restarted.cachedMonth(2026, 11), isNull);
+  });
+
+  test(
+      'unreadable consent_blocked_user fallback marker fails closed and '
+      'refuses to adopt a cached consented session', () async {
+    final prevPlatform = FlutterSecureStoragePlatform.instance;
+    final storage = _FailingKeyStorage(
+      {'session_token': 'tok'},
+      failReadKeys: {'consent_blocked_user'},
+    );
+    FlutterSecureStoragePlatform.instance = storage;
+    addTearDown(() => FlutterSecureStoragePlatform.instance = prevPlatform);
+
+    final local = MemoryLocalStore();
+    await local.writeDoc(localGlobalUser, 'last_user', 'u-owner');
+    await local.writeDoc(
+      'u-owner',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-owner',
+          'email': 'owner@example.com',
+          'role': 'owner',
+        },
+        'share': {'status': 'none'},
+        'consent': {'version': 1, 'required': false},
+      }),
+    );
+    await local.writeDoc('u-owner', 'calendar', 'own');
+    await local.replaceMonth('u-owner', 2026, 11, const [
+      Entry(date: '2026-11-15', taken: true, notes: 'owner private note'),
+    ]);
+
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: local,
+      httpClient: MockClient((_) async => http.Response('unavailable', 503)),
+    );
+
+    // Must not adopt a cached snapshot that claims consent when the fallback
+    // denial marker cannot be read.
+    expect(await api.cachedSession(), isNull);
+    expect(await api.cachedMonth(2026, 11), isNull);
+    final offlineSession = await api.currentSession();
+    expect(offlineSession.user, isNull);
+    expect(await api.cachedMonth(2026, 11), isNull);
+  });
+
+  test(
+      'in-flight outbox edit receiving pre-acceptance 403 retries immediately '
+      'after acceptConsent calls syncPending', () async {
+    FlutterSecureStorage.setMockInitialValues({'session_token': 'tok'});
+    final local = MemoryLocalStore();
+    await local.writeDoc(localGlobalUser, 'last_user', 'u-owner');
+    await local.writeDoc(
+      'u-owner',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-owner',
+          'email': 'owner@example.com',
+          'role': 'owner',
+        },
+        'share': {'status': 'none'},
+        'consent': {'version': 1, 'required': false},
+      }),
+    );
+    await local.writeDoc('u-owner', 'calendar', 'own');
+    await local.enqueue(
+      'u-owner',
+      const PendingWrite(
+        date: '2026-11-15',
+        entry: Entry(date: '2026-11-15', taken: true, notes: 'queued note'),
+      ),
+    );
+
+    final firstUpsertReached = Completer<void>();
+    final firstUpsertGate = Completer<void>();
+    var upsertCalls = 0;
+
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: local,
+      httpClient: MockClient((request) async {
+        if (request.url.path == '/api/entries/2026-11-15' &&
+            request.method == 'POST') {
+          upsertCalls++;
+          if (upsertCalls == 1) {
+            if (!firstUpsertReached.isCompleted) firstUpsertReached.complete();
+            await firstUpsertGate.future;
+            return http.Response(
+              '{"error":"consent required","consent_version":2}',
+              403,
+            );
+          }
+          return http.Response(
+            jsonEncode({
+              'date': '2026-11-15',
+              'taken': true,
+              'notes': 'queued note',
+              'period': false,
+            }),
+            200,
+          );
+        }
+        if (request.url.path == '/api/account/consent' &&
+            request.method == 'PUT') {
+          return http.Response(
+            jsonEncode({
+              'user': {
+                'id': 'u-owner',
+                'email': 'owner@example.com',
+                'role': 'owner',
+              },
+              'share': {'status': 'none'},
+              'consent': {'version': 2, 'required': false},
+            }),
+            200,
+          );
+        }
+        return http.Response('{}', 200);
+      }),
+    );
+
+    expect((await api.cachedSession())?.consentRequired, isFalse);
+
+    // Start draining the queued edit; pause request #1 in flight.
+    final syncFuture = api.syncPending();
+    await firstUpsertReached.future;
+    expect(upsertCalls, 1);
+
+    // Accept consent while outbox request #1 is still in flight. This bumps
+    // _consentRevision and calls syncPending(), setting _syncAgain = true.
+    final accepted = await api.acceptConsent(2);
+    expect(accepted.consentRequired, isFalse);
+
+    // Release request #1's pre-acceptance 403. _drainQueue must honor
+    // _syncAgain and immediately send request #2 to flush the edit.
+    firstUpsertGate.complete();
+    await syncFuture;
+
+    expect(upsertCalls, 2);
+    expect(await local.pendingWrites('u-owner'), isEmpty);
+    expect(api.pendingWrites.value, 0);
+  });
+
+  test('late consent acceptance cannot override a newer denial', () async {
+    final local = MemoryLocalStore();
+    final accepted = Completer<void>();
+    final sent = Completer<void>();
+    String session(bool required) => jsonEncode({
+          'user': {'id': 'u1', 'email': 'owner@example.invalid', 'role': 'owner'},
+          'consent': {'version': 1, 'required': required},
+        });
+    await local.writeDoc(localGlobalUser, 'last_user', 'u1');
+    await local.writeDoc('u1', 'session', session(true));
+    await local.writeDoc('u1', 'calendar', 'own');
+    final api = ApiClient(AppConfig.fromEnvironment(), localStore: local,
+        httpClient: MockClient((request) async {
+      if (request.url.path == '/api/account/consent') {
+        sent.complete();
+        await accepted.future;
+        return http.Response(session(false), 200);
+      }
+      return http.Response(session(true), 200);
+    }));
+    await api.cachedSession();
+    final pending = api.acceptConsent(1);
+    final rejected = expectLater(pending, throwsA(isA<StaleAuthScopeException>()));
+    await sent.future;
+    expect((await api.currentSession()).consentRequired, isTrue);
+    accepted.complete();
+    await rejected;
+    expect((await api.cachedSession())?.consentRequired, isTrue);
+  });
+
+  test('routine refresh does not discard a successful role change', () async {
+    final local = MemoryLocalStore();
+    final gate = Completer<void>();
+    final sent = Completer<void>();
+    String session(String role) => jsonEncode({
+          'user': {'id': 'u1', 'email': 'owner@example.invalid', 'role': role},
+          'consent': {'version': 1, 'required': false},
+        });
+    await local.writeDoc(localGlobalUser, 'last_user', 'u1');
+    await local.writeDoc('u1', 'session', session(''));
+    await local.writeDoc('u1', 'calendar', 'own');
+    final api = ApiClient(AppConfig.fromEnvironment(), localStore: local,
+        httpClient: MockClient((request) async {
+      if (request.url.path == '/api/account/role') {
+        sent.complete();
+        await gate.future;
+        return http.Response(session('owner'), 200);
+      }
+      return http.Response(session(''), 200);
+    }));
+    await api.cachedSession();
+    final pending = api.setRole('owner');
+    await sent.future;
+    await api.currentSession();
+    gate.complete();
+    expect((await pending).user?.role, 'owner');
+    expect((await api.cachedSession())?.user?.role, 'owner');
+  });
+
+  test('transient status retains cache but 401 clears credentials and data', () async {
+    final local = MemoryLocalStore();
+    final session = jsonEncode({
+      'user': {'id': 'u1', 'email': 'owner@example.invalid', 'role': 'owner'},
+    });
+    await local.writeDoc(localGlobalUser, 'last_user', 'u1');
+    await local.writeDoc('u1', 'session', session);
+    await local.writeDoc('u1', 'calendar', 'own');
+    await local.replaceMonth('u1', 2026, 11, const [
+      Entry(date: '2026-11-15', taken: true, notes: ''),
+    ]);
+    var status = 408;
+    final api = ApiClient(AppConfig.fromEnvironment(), localStore: local,
+        httpClient: MockClient((_) async => http.Response('', status)));
+    await api.cachedSession();
+    expect((await api.currentSession()).user?.id, 'u1');
+    expect(await api.cachedMonth(2026, 11), isNotNull);
+    status = 401;
+    expect((await api.currentSession()).user, isNull);
+    expect(await api.readSessionToken(), isNull);
+    expect(await api.cachedSession(), isNull);
+    expect(await local.readDoc(localGlobalUser, 'last_user'), isNull);
+  });
+
+  testWidgets('stalled session body times out', (tester) async {
+    FlutterSecureStorage.setMockInitialValues({});
+    final api = ApiClient(AppConfig.fromEnvironment(), httpClient: _StalledBodyClient());
+    final result = api.currentSession();
+    final expectation = expectLater(result, throwsA(isA<TimeoutException>()));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 21));
+    await expectation;
+  });
+
+  testWidgets('cookie session survives transient account refresh and retries', (tester) async {
+    FlutterSecureStorage.setMockInitialValues({});
+    var sessionCalls = 0;
+    var syncCalls = 0;
+    final api = ApiClient(AppConfig.fromEnvironment(), httpClient: MockClient((request) async {
+      if (request.url.path == '/api/auth/session') {
+        sessionCalls++;
+        if (sessionCalls == 2) return http.Response('unavailable', 503);
+        return http.Response(jsonEncode({'user': {'id': 'u1', 'email': 'owner@example.invalid', 'role': 'owner'}}), 200);
+      }
+      if (request.url.path == '/api/sync/status') {
+        syncCalls++;
+        return http.Response(jsonEncode({'etag': 'e$syncCalls', 'user_id': 'u1', 'role': 'owner', 'share_active': false, 'subject_consent': true, 'tags': {'account': 'a$syncCalls', 'inbox': 'i', 'calendar': 'c', 'prefs': 'p'}}), 200);
+      }
+      return http.Response('{}', 200);
+    }));
+    await tester.pumpWidget(App217(config: api.config, api: api, webStartup: true));
+    for (var i = 0; i < 15; i++) { await tester.pump(); }
+    expect(find.byType(CalendarScreen), findsOneWidget);
+    await tester.pump(const Duration(minutes: 2));
+    for (var i = 0; i < 15; i++) { await tester.pump(); }
+    expect(sessionCalls, 2);
+    expect(find.byType(CalendarScreen), findsOneWidget);
+    await tester.pump(const Duration(minutes: 2));
+    for (var i = 0; i < 15; i++) { await tester.pump(); }
+    expect(sessionCalls, greaterThanOrEqualTo(3));
+    expect(find.byType(CalendarScreen), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('web startup applies session before stalled auth config', (tester) async {
+    final configGate = Completer<void>();
+    final api = ApiClient(AppConfig.fromEnvironment(),
+        httpClient: MockClient((request) async {
+      if (request.url.path == '/api/auth/config') {
+        await configGate.future;
+        return http.Response('{"authkit":true}', 200);
+      }
+      if (request.url.path == '/api/auth/session') {
+        return http.Response(jsonEncode({
+          'user': {'id': 'u1', 'email': 'owner@example.invalid', 'role': 'owner'},
+        }), 200);
+      }
+      return http.Response('{}', 200);
+    }));
+    await tester.pumpWidget(App217(config: api.config, api: api, webStartup: true));
+    for (var i = 0; i < 10; i++) { await tester.pump(); }
+    expect(find.byType(CalendarScreen), findsOneWidget);
+    configGate.complete();
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+  });
+}
+
+class _StalledBodyClient extends http.BaseClient {
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async =>
+      http.StreamedResponse(StreamController<List<int>>().stream, 200);
+}
+
+class _FailingKeyStorage extends FlutterSecureStoragePlatform {
+  _FailingKeyStorage(
+    Map<String, String> initial, {
+    this.failReadKeys = const {},
+  }) : _values = Map.of(initial);
+
+  final Map<String, String> _values;
+  final Set<String> failReadKeys;
+
+  @override
+  Future<String?> read({
+    required String key,
+    required Map<String, String> options,
+  }) async {
+    if (failReadKeys.contains(key)) {
+      throw StateError('storage read failed for $key');
+    }
+    return _values[key];
+  }
+
+  @override
+  Future<void> write({
+    required String key,
+    required String value,
+    required Map<String, String> options,
+  }) async {
+    _values[key] = value;
+  }
+
+  @override
+  Future<bool> containsKey({
+    required String key,
+    required Map<String, String> options,
+  }) async =>
+      _values.containsKey(key);
+
+  @override
+  Future<void> delete({
+    required String key,
+    required Map<String, String> options,
+  }) async {
+    _values.remove(key);
+  }
+
+  @override
+  Future<Map<String, String>> readAll({
+    required Map<String, String> options,
+  }) async =>
+      Map.of(_values);
+
+  @override
+  Future<void> deleteAll({required Map<String, String> options}) async {
+    _values.clear();
+  }
+}
+
+class _FailingSessionWriteStore extends MemoryLocalStore {
+  bool failSessionWrite = false;
+
+  @override
+  Future<void> writeDoc(String userId, String key, String value) async {
+    if (failSessionWrite && key == 'session') {
+      throw StateError('session doc write failed');
+    }
+    return super.writeDoc(userId, key, value);
+  }
+}
+
+class _FailingClearCalendarStore extends MemoryLocalStore {
+  bool failClear = true;
+
+  @override
+  Future<void> clearCalendar(String userId) async {
+    if (failClear) throw StateError('disk clear failed');
+    return super.clearCalendar(userId);
+  }
+}
+
+class _RecordingLocalStore extends MemoryLocalStore {
+  _RecordingLocalStore({required this.onOp});
+
+  final void Function(String op) onOp;
+
+  @override
+  Future<void> writeDoc(String userId, String key, String value) {
+    onOp('writeDoc:$userId:$key');
+    return super.writeDoc(userId, key, value);
+  }
+
+  @override
+  Future<void> clearCalendar(String userId) {
+    onOp('clearCalendar:$userId');
+    return super.clearCalendar(userId);
+  }
+}
+
+class _GatedPendingWritesStore extends MemoryLocalStore {
+  _GatedPendingWritesStore({required this.onPendingWrites});
+
+  final Future<void>? Function() onPendingWrites;
+
+  @override
+  Future<List<PendingWrite>> pendingWrites(String userId) async {
+    final gate = onPendingWrites();
+    if (gate != null) await gate;
+    return super.pendingWrites(userId);
+  }
+}
+
+class _RecordingDeviceKey extends DeviceKey {
+  int deletedCount = 0;
+
+  @override
+  Future<String?> create() async => null;
+
+  @override
+  Future<String?> sign(String message) async => null;
+
+  @override
+  Future<void> delete() async {
+    deletedCount++;
+  }
+}
+
+class _RecordingStorage extends FlutterSecureStoragePlatform {
+  _RecordingStorage(
+    Map<String, String> values, {
+    required this.onOp,
+  }) : _values = Map.of(values);
+
+  final Map<String, String> _values;
+  final void Function(String op, String key, String? value) onOp;
+
+  @override
+  Future<String?> read({
+    required String key,
+    required Map<String, String> options,
+  }) async {
+    onOp('read', key, _values[key]);
+    return _values[key];
+  }
+
+  @override
+  Future<void> write({
+    required String key,
+    required String value,
+    required Map<String, String> options,
+  }) async {
+    onOp('write', key, value);
+    _values[key] = value;
+  }
+
+  @override
+  Future<bool> containsKey({
+    required String key,
+    required Map<String, String> options,
+  }) async =>
+      _values.containsKey(key);
+
+  @override
+  Future<void> delete({
+    required String key,
+    required Map<String, String> options,
+  }) async {
+    onOp('delete', key, null);
+    _values.remove(key);
+  }
+
+  @override
+  Future<Map<String, String>> readAll({
+    required Map<String, String> options,
+  }) async =>
+      Map.of(_values);
+
+  @override
+  Future<void> deleteAll({required Map<String, String> options}) async {
+    _values.clear();
+  }
+}
+
+class _GatedTokenReadStorage extends FlutterSecureStoragePlatform {
+  _GatedTokenReadStorage(
+    Map<String, String> values, {
+    required this.shouldPauseRead,
+  }) : _values = Map.of(values);
+
+  final Map<String, String> _values;
+  final Future<void>? Function(String key, int readCount) shouldPauseRead;
+  int _tokenReads = 0;
+
+  @override
+  Future<String?> read({
+    required String key,
+    required Map<String, String> options,
+  }) async {
+    final value = _values[key];
+    if (key == 'session_token') {
+      _tokenReads++;
+      final gate = shouldPauseRead(key, _tokenReads);
+      if (gate != null) await gate;
+    }
+    return value;
+  }
+
+  @override
+  Future<void> write({
+    required String key,
+    required String value,
+    required Map<String, String> options,
+  }) async {
+    _values[key] = value;
+  }
+
+  @override
+  Future<bool> containsKey({
+    required String key,
+    required Map<String, String> options,
+  }) async =>
+      _values.containsKey(key);
+
+  @override
+  Future<void> delete({
+    required String key,
+    required Map<String, String> options,
+  }) async {
+    _values.remove(key);
+  }
+
+  @override
+  Future<Map<String, String>> readAll({
+    required Map<String, String> options,
+  }) async =>
+      Map.of(_values);
+
+  @override
+  Future<void> deleteAll({required Map<String, String> options}) async {
+    _values.clear();
+  }
+}
+
+/// Throws only when reading `api_base_url`; other keys (like `session_token`)
+/// still read cleanly to test partial storage failure.
+class _ThrowOnApiBaseOnly extends FlutterSecureStoragePlatform {
+  _ThrowOnApiBaseOnly(Map<String, String> values) : _values = Map.of(values);
+
+  final Map<String, String> _values;
+
+  @override
+  Future<String?> read({
+    required String key,
+    required Map<String, String> options,
+  }) async {
+    if (key == 'api_base_url') throw StateError('api_base_url read failed');
+    return _values[key];
+  }
+
+  @override
+  Future<void> write({
+    required String key,
+    required String value,
+    required Map<String, String> options,
+  }) async {
+    _values[key] = value;
+  }
+
+  @override
+  Future<bool> containsKey({
+    required String key,
+    required Map<String, String> options,
+  }) async =>
+      _values.containsKey(key);
+
+  @override
+  Future<void> delete({
+    required String key,
+    required Map<String, String> options,
+  }) async {
+    _values.remove(key);
+  }
+
+  @override
+  Future<Map<String, String>> readAll({
+    required Map<String, String> options,
+  }) async =>
+      Map.of(_values);
+
+  @override
+  Future<void> deleteAll({required Map<String, String> options}) async {
+    _values.clear();
+  }
+}
+
+/// Every storage read throws, as a broken platform keystore would.
+class _ThrowingOnRead extends FlutterSecureStoragePlatform {
+  @override
+  Future<String?> read({
+    required String key,
+    required Map<String, String> options,
+  }) async =>
+      throw StateError('storage broken');
+
+  @override
+  Future<void> write({
+    required String key,
+    required String value,
+    required Map<String, String> options,
+  }) async =>
+      throw StateError('storage broken');
+
+  @override
+  Future<bool> containsKey({
+    required String key,
+    required Map<String, String> options,
+  }) async =>
+      false;
+
+  @override
+  Future<void> delete({
+    required String key,
+    required Map<String, String> options,
+  }) async {}
+
+  @override
+  Future<Map<String, String>> readAll({
+    required Map<String, String> options,
+  }) async =>
+      {};
+
+  @override
+  Future<void> deleteAll({required Map<String, String> options}) async {}
+}
+
+/// Every local-store read throws, as a corrupt database would.
+class _ThrowingLocalStore implements LocalStore {
+  @override
+  dynamic noSuchMethod(Invocation invocation) =>
+      throw StateError('store broken');
+}
+
+class _GatedStorage extends FlutterSecureStoragePlatform {
+  _GatedStorage(
+    Map<String, String> initial, {
+    this.onWrite,
+    this.onDelete,
+  }) : values = Map.of(initial);
+
+  final Map<String, String> values;
+  final Future<void>? Function(String key, String value)? onWrite;
+  final Future<void>? Function(String key)? onDelete;
+
+  @override
+  Future<String?> read({
+    required String key,
+    required Map<String, String> options,
+  }) async =>
+      values[key];
+
+  @override
+  Future<void> write({
+    required String key,
+    required String value,
+    required Map<String, String> options,
+  }) async {
+    final gate = onWrite?.call(key, value);
+    if (gate != null) await gate;
+    values[key] = value;
+  }
+
+  @override
+  Future<bool> containsKey({
+    required String key,
+    required Map<String, String> options,
+  }) async =>
+      values.containsKey(key);
+
+  @override
+  Future<void> delete({
+    required String key,
+    required Map<String, String> options,
+  }) async {
+    final gate = onDelete?.call(key);
+    if (gate != null) await gate;
+    values.remove(key);
+  }
+
+  @override
+  Future<Map<String, String>> readAll({
+    required Map<String, String> options,
+  }) async =>
+      Map.of(values);
+
+  @override
+  Future<void> deleteAll({required Map<String, String> options}) async {
+    values.clear();
+  }
+}

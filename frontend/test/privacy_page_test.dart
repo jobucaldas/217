@@ -220,4 +220,47 @@ void main() {
     expect(returns, ['/app/account/delete?lang=es&confirm=delete']);
     expect(deleted, 0);
   });
+
+  testWidgets('confirm action opens once when web session arrives after mount',
+      (tester) async {
+    final server = _Server(recent: true);
+    final api = server.client();
+    FlutterSecureStorage.setMockInitialValues({});
+    tester.view.physicalSize = const Size(800, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    Widget buildWithUser(User? user) => MaterialApp(
+          theme: buildApp217Theme(brightness: Brightness.light),
+          home: PrivacyPage(
+            api: api,
+            strings: const Strings(AppLanguage.en),
+            web: PrivacyWebSession(
+              user: user,
+              consentRequired: false,
+              initialAction: PrivacyAction.delete,
+              onSignIn: (_) async {},
+              onSessionChanged: (_) {},
+              onDeleted: () {},
+            ),
+          ),
+        );
+
+    await tester.pumpWidget(buildWithUser(null));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('privacy-confirm')), findsNothing);
+
+    await tester.pumpWidget(buildWithUser(_user));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('privacy-confirm')), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('privacy-cancel')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('privacy-confirm')), findsNothing);
+
+    // Subsequent rebuild must not re-open the warning.
+    await tester.pumpWidget(buildWithUser(_user));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('privacy-confirm')), findsNothing);
+  });
 }

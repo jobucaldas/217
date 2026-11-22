@@ -342,3 +342,72 @@ func TestOwnerReminderRepeatPreference(t *testing.T) {
 		t.Fatalf("repeat fields reset by old client: %+v", pref)
 	}
 }
+
+func TestCalendarSubjectScopeInResponses(t *testing.T) {
+	h, s := newTestHandler(t)
+	owner := newUser(t, s, "owner-scope@example.com", "owner")
+	partner := newUser(t, s, "partner-scope@example.com", "partner")
+	if _, err := s.RecordConsent(owner.ID, model.ConsentVersion); err != nil {
+		t.Fatalf("record owner consent: %v", err)
+	}
+	if _, err := s.RecordConsent(partner.ID, model.ConsentVersion); err != nil {
+		t.Fatalf("record partner consent: %v", err)
+	}
+	invite, err := s.EnableShare(owner.ID)
+	if err != nil {
+		t.Fatalf("enable share: %v", err)
+	}
+	if _, err := s.AcceptShare(partner.ID, invite.InviteCode); err != nil {
+		t.Fatalf("accept share: %v", err)
+	}
+	ownerCookie := sessionCookie(t, s, owner.ID)
+	partnerCookie := sessionCookie(t, s, partner.ID)
+
+	w := call(t, h, h.CurrentSession, http.MethodGet, "/api/auth/session", partnerCookie, "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("partner session: %d %s", w.Code, w.Body.String())
+	}
+	var sess struct {
+		Share model.ShareState `json:"share"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &sess); err != nil {
+		t.Fatalf("decode session: %v", err)
+	}
+	if sess.Share.OwnerID != owner.ID {
+		t.Fatalf("share.owner_id = %q, want %q", sess.Share.OwnerID, owner.ID)
+	}
+
+	for _, tc := range []struct {
+		name   string
+		cookie *http.Cookie
+	}{
+		{name: "owner", cookie: ownerCookie},
+		{name: "partner", cookie: partnerCookie},
+	} {
+		w := call(t, h, h.ListEntries, http.MethodGet, "/api/entries?year=2026&month=11", tc.cookie, "")
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s entries: %d %s", tc.name, w.Code, w.Body.String())
+		}
+		var entries model.MonthEntries
+		if err := json.Unmarshal(w.Body.Bytes(), &entries); err != nil {
+			t.Fatalf("%s decode entries: %v", tc.name, err)
+		}
+		if entries.SubjectID != owner.ID {
+			t.Fatalf("%s entries subject_id = %q, want %q", tc.name, entries.SubjectID, owner.ID)
+		}
+
+		cw := call(t, h, h.GetCycle, http.MethodGet, "/api/cycle", tc.cookie, "")
+		if cw.Code != http.StatusOK {
+			t.Fatalf("%s cycle: %d %s", tc.name, cw.Code, cw.Body.String())
+		}
+		var cyc struct {
+			SubjectID string `json:"subject_id"`
+		}
+		if err := json.Unmarshal(cw.Body.Bytes(), &cyc); err != nil {
+			t.Fatalf("%s decode cycle: %v", tc.name, err)
+		}
+		if cyc.SubjectID != owner.ID {
+			t.Fatalf("%s cycle subject_id = %q, want %q", tc.name, cyc.SubjectID, owner.ID)
+		}
+	}
+}

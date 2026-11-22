@@ -92,7 +92,7 @@ func (s *MemoryStore) MarkMessageRead(userID, messageID string) error {
 	defer s.mu.Unlock()
 	m, ok := s.messages[messageID]
 	if !ok || m.RecipientID() != userID {
-		return fmt.Errorf("message not found")
+		return ErrMessageNotFound
 	}
 	if m.ReadAt == nil {
 		now := time.Now().UTC()

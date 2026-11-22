@@ -42,6 +42,9 @@ class App217 extends StatefulWidget {
     this.partnerAlertScheduler,
     this.updateClient,
     this.installedVersion,
+    this.clock = DateTime.now,
+    this.webPage,
+    this.webStartup = kIsWeb,
   });
 
   final AppConfig config;
@@ -58,13 +61,24 @@ class App217 extends StatefulWidget {
   /// Installed release tag; tests pass an older one. Defaults to [appVersion].
   final String? installedVersion;
 
+  /// Current time; only tests replace it.
+  final DateTime Function() clock;
+
+  /// Standalone privacy page override; only tests replace it.
+  final WebPage? webPage;
+
+  /// Exercises the web bootstrap path in widget tests.
+  final bool webStartup;
+
   @override
   State<App217> createState() => _App217State();
 }
 
 class _App217State extends State<App217> with WidgetsBindingObserver {
   late final ApiClient _api = (widget.api ?? ApiClient(widget.config))
-    ..onConsentRequired = _onOwnConsentRequired;
+    ..onConsentRequired = _onOwnConsentRequired
+    ..onCalendarScopeMismatch = _onCalendarScopeMismatch
+    ..onCalendarAccessDenied = _onCalendarAccessDenied;
   late final AppearancePrefs _prefs = AppearancePrefs();
   late final http.Client _updateHttp = widget.updateClient ?? http.Client();
   final GlobalKey<NavigatorState> _navKey = GlobalKey<NavigatorState>();
@@ -115,16 +129,48 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
 
   /// Web opened on one of the standalone privacy pages (`/app/privacy`,
   /// `/app/account/delete`): shown instead of the app, signed in or not.
-  final WebPage? _webPage = kIsWeb ? webPageFor(Uri.base) : null;
+  late final WebPage? _webPage =
+      widget.webPage ?? (kIsWeb ? webPageFor(Uri.base) : null);
 
   /// Changes only when the signed-in account does (logout, deletion, server
   /// switch, sign-in), so a late session refresh cannot restore the old one.
   int _accountEpoch = 0;
 
+  /// In-flight persistence of a `?invite=` URL parameter, awaited before
+  /// reading pending invites or redirecting to sign in.
+  Future<void>? _pendingInviteWrite;
+
+  /// Preloaded local calendar state from bootstrap so the very first calendar
+  /// frame renders populated with zero layout shift. Single-use and bound to
+  /// the exact calendar scope it was read for.
+  String? _initialCalendarScopeKey;
+  Map<String, Map<String, Entry>>? _initialCalendarMonths;
+  CycleInfo? _initialCalendarCycle;
+
+  static String? _calendarScopeKey(
+    User? user,
+    ShareState share,
+    bool consentRequired,
+  ) {
+    if (user == null || consentRequired || !user.hasRole) return null;
+    if (user.isPartner) {
+      if (!share.isActive) return null;
+      return '${user.id}:partner:${share.status}:${share.ownerId}:${share.ownerEmail}';
+    }
+    return '${user.id}:owner';
+  }
+
+  void _clearInitialCalendarCache() {
+    _initialCalendarScopeKey = null;
+    _initialCalendarMonths = null;
+    _initialCalendarCycle = null;
+  }
+
   /// Routes pushed on top of home (Settings) are built once, so they listen
   /// here to pick up theme, language and session changes made from them.
   final _changes = _ChangeTicker();
   final ValueNotifier<int> _stageChanges = ValueNotifier(0);
+  final ValueNotifier<int> _calendarScopeReset = ValueNotifier(0);
   late final StageSuggestion _stageSuggestion = StageSuggestion(prefs: _prefs);
   // Automatic replans never prompt for the notification permission (the
   // default); only plans the user asked for do, through the second scheduler.
@@ -213,13 +259,17 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     } catch (_) {
       return; // offline: the next resume checks again
     }
-    if (!mounted || epoch != _accountEpoch) return;
+    if (!mounted ||
+        epoch != _accountEpoch ||
+        (session.fromCache && !session.consentRequired)) {
+      return;
+    }
     final user = session.user;
     if (user != null && user.id == _user?.id && !session.consentRequired) {
       return;
     }
     _privacyPageOpened = false;
-    await _recoverConsent();
+    await _recoverSession();
   }
 
   /// Tells the background worker whether the app is in the foreground (it
@@ -276,7 +326,9 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
       var handled = true;
       if (changed((t) => t.account)) {
         try {
-          await _refreshSession();
+          if (await _refreshSession(keepWhenOffline: true) == null) {
+            handled = false;
+          }
         } catch (_) {
           handled = false;
         }
@@ -292,7 +344,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
       }
     } on ApiException catch (e) {
       if (e.statusCode == 401 && mounted && epoch == _accountEpoch) {
-        unawaited(_recoverConsent());
+        unawaited(_recoverSession());
       }
     } catch (_) {
       // Offline or refused: the next check tries again.
@@ -452,65 +504,107 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     _calendarChanges.dispose();
     _changes.dispose();
     _stageChanges.dispose();
+    _calendarScopeReset.dispose();
     _stageSuggestion.dispose();
     if (widget.updateClient == null) _updateHttp.close();
     super.dispose();
   }
 
   Future<void> _bootstrap() async {
-    // Local prefs first, so theme and language hold even when offline.
-    try {
-      // Web invite link (`/app/?invite=CODE`): keep the code across sign-in.
-      final linkInvite = Uri.base.queryParameters['invite']?.trim() ?? '';
-      if (linkInvite.isNotEmpty) await _prefs.savePendingInvite(linkInvite);
-      final appearance = await _prefs.load();
-      final language = await _prefs.loadLanguage();
-      final hintGone = await _prefs.reminderHintDismissed();
-      final autoUpdate = await _prefs.autoUpdateEnabled();
-      final messageNotifs = await _prefs.messageNotificationsEnabled();
-      if (!mounted) return;
-      // A privacy page link names its language (`?lang=`), e.g. from the
-      // app or a store listing; it wins without being saved.
-      final pageLanguage = _webPage == null
-          ? null
-          : AppLanguageX.tryFromId(Uri.base.queryParameters['lang']);
-      setState(() {
-        _themeMode = appearance.mode;
-        _palette = appearance.palette;
-        _language = pageLanguage ?? language ?? _deviceLanguage();
-        _reminderHintDismissed = hintGone;
-        _autoUpdate = autoUpdate;
-        _messageNotifs = messageNotifs;
-      });
-    } catch (_) {
-      // Keep defaults.
-    }
-
     User? user;
     var share = const ShareState(status: 'none');
     SessionSnapshot? session;
-    var fromDevice = false;
-    try {
-      await _api.loadPersistedApiBase();
-      if (!_api.config.needsServerSetup) {
-        // A session kept on the device opens the app at once; the server is
-        // asked in the background (it may be off, and each try waits).
-        final cached = _webPage == null ? await _api.cachedSession() : null;
-        if (cached?.user != null) {
-          session = cached;
-          fromDevice = true;
-        } else {
-          session = await _loadConfigAndSession();
-          _clearRemindersIfConsentRequired(session);
-          if (session.user == null) unawaited(_cancelAllNotifications());
-        }
-        user = session?.user;
-        share = session?.share ?? share;
-      }
-    } catch (_) {
-      // Unreachable server: show the signed-out screen.
-    }
+    // Whether [session] came from this start's own server answer (web) —
+    // then the trailing revalidation below would ask the same thing twice.
+    var sessionFromWebServer = false;
+    // Prefs, api base and cached session are independent local reads: start
+    // them together so cold start waits one storage round trip, not five.
+    // Nothing here touches the network; the server is asked afterwards.
+    // Each read falls back to its default on error, so a failing store
+    // never leaves the app stuck on the loading screen.
+    final results = await Future.wait([
+      _prefs.load().catchError(
+            (Object _) => (mode: ThemeMode.system, palette: AppPalette.blue),
+          ),
+      _prefs.loadLanguage().catchError((Object _) => null),
+      _prefs.reminderHintDismissed().catchError((Object _) => false),
+      _prefs.autoUpdateEnabled().catchError((Object _) => false),
+      _prefs.messageNotificationsEnabled().catchError((Object _) => true),
+      _api.loadPersistedApiBase().catchError((Object _) => false),
+      _cachedSessionSafe(),
+    ]);
     if (!mounted) return;
+    final appearance = results[0] as ({ThemeMode mode, AppPalette palette});
+    final language = results[1] as AppLanguage?;
+    final hintGone = results[2] as bool;
+    final autoUpdate = results[3] as bool;
+    final messageNotifs = results[4] as bool;
+    final apiBaseResolved = results[5] as bool;
+    final cached = results[6] as SessionSnapshot?;
+    // A privacy page link names its language (`?lang=`), e.g. from the
+    // app or a store listing; it wins without being saved.
+    final pageLanguage = _webPage == null
+        ? null
+        : AppLanguageX.tryFromId(Uri.base.queryParameters['lang']);
+    setState(() {
+      _themeMode = appearance.mode;
+      _palette = appearance.palette;
+      _language = pageLanguage ?? language ?? _deviceLanguage();
+      _reminderHintDismissed = hintGone;
+      _autoUpdate = autoUpdate;
+      _messageNotifs = messageNotifs;
+    });
+    // Web invite link (`/app/?invite=CODE`): keep the code across sign-in.
+    // Tracked so _offerPendingInvite and _signIn wait for it before reading
+    // or navigating away, without blocking cold starts that have no invite.
+    final linkInvite = Uri.base.queryParameters['invite']?.trim() ?? '';
+    if (linkInvite.isNotEmpty) {
+      _pendingInviteWrite =
+          _prefs.savePendingInvite(linkInvite).catchError((Object _) {});
+    }
+    // A session kept on the device opens the app at once; the server is
+    // asked in the background (it may be off, and each try waits). No
+    // server configured, or server override failed to read: never send
+    // authenticated requests to an unverified default host.
+    if (apiBaseResolved &&
+        !_api.config.needsServerSetup &&
+        cached?.user != null) {
+      session = cached;
+      await _preloadCalendarCache(cached!);
+      if (!mounted) return;
+    } else if (apiBaseResolved && !_api.config.needsServerSetup) {
+      final hasWebConfirmAction = _webPage != null &&
+          privacyActionFrom(Uri.base.queryParameters['confirm']) != null;
+      if (widget.webStartup && (_webPage == null || hasWebConfirmAction)) {
+        // Web keeps no offline copy (memory-only store), so a cached
+        // session is always null here and the server's answer decides:
+        // waiting for it (bounded by the request timeout) avoids flashing
+        // the sign-in screen for a signed-in cookie user and ensures
+        // `?confirm=` privacy return links mount with their session ready.
+        try {
+          session = await _loadConfigAndSession();
+          sessionFromWebServer = true;
+        } catch (_) {
+          // Unreachable server: show the signed-out screen.
+        }
+        if (!mounted) return;
+        if (session?.user == null) unawaited(_cancelAllNotifications());
+        if (session != null) _clearRemindersIfConsentRequired(session);
+      } else {
+        final probeEpoch = _accountEpoch;
+        unawaited(_api.loadAuthConfig().then((_) {
+          if (mounted && probeEpoch == _accountEpoch) setState(() {});
+        }));
+        unawaited(_api
+            .currentSession()
+            .then<void>((fresh) => _applyBootstrapSession(fresh, probeEpoch))
+            .catchError((Object _) {}));
+      }
+    }
+    if (session != null) {
+      user = session.user;
+      share = session.share ?? share;
+    }
     _sessionGeneration++;
     setState(() {
       _user = user;
@@ -518,10 +612,11 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
       _setConsent(session);
       _loading = false;
     });
-    // Re-registers each launch (once the account is known) so an updated app
-    // runs its own worker; nothing is registered while signed out.
+    // Re-register only after the account is known.
     unawaited(_syncBackgroundWorker());
-    if (fromDevice) {
+    // The web wait above already has the server's answer; only a session
+    // that came from the device's copy is revalidated against the server.
+    if (session != null && !sessionFromWebServer && apiBaseResolved) {
       final epoch = _accountEpoch;
       try {
         // Null: the server was out of reach, the device's copy stands.
@@ -532,7 +627,87 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     }
     // The privacy pages stand alone: no invite offer, reminders or updates.
     if (_webPage != null) return;
-    if (user != null && !_consentRequired) {
+    if (user != null && !_consentRequired && apiBaseResolved) {
+      unawaited(_loadRemindersState());
+      unawaited(_maybeCheckForUpdate());
+      unawaited(_checkMessages());
+      unawaited(_checkSync(seedOnly: true));
+      await _offerPendingInvite();
+    }
+  }
+
+  /// Reads the three visible months and cached cycle predictions from the
+  /// device's local database before revealing [CalendarScreen], so the very
+  /// first painted frame already shows today's status, note, markers, and
+  /// predictions with no layout shift.
+  Future<void> _preloadCalendarCache(SessionSnapshot cached) async {
+    final share = cached.share ?? const ShareState(status: 'none');
+    final scopeKey =
+        _calendarScopeKey(cached.user, share, cached.consentRequired);
+    if (_webPage != null || scopeKey == null) {
+      _clearInitialCalendarCache();
+      return;
+    }
+    final epoch = _accountEpoch;
+    final now = widget.clock();
+    final month = DateTime(now.year, now.month);
+    final prev = DateTime(now.year, now.month - 1);
+    final next = DateTime(now.year, now.month + 1);
+    final months = [month, prev, next];
+    final results = await Future.wait([
+      for (final m in months)
+        _api
+            .cachedMonth(m.year, m.month)
+            .then<List<Entry>?>((list) => list)
+            .catchError((Object _) => null),
+      _api.cachedCycle().catchError((Object _) => null),
+    ]);
+    if (!mounted || epoch != _accountEpoch) return;
+    final preloaded = <String, Map<String, Entry>>{};
+    for (var i = 0; i < months.length; i++) {
+      final list = results[i] as List<Entry>?;
+      if (list == null) continue;
+      preloaded['${months[i].year}-${months[i].month}'] = {
+        for (final e in list) e.date: e,
+      };
+    }
+    _initialCalendarScopeKey = scopeKey;
+    _initialCalendarMonths = preloaded;
+    _initialCalendarCycle = results.last as CycleInfo?;
+  }
+
+  /// The device's last session, or null on web (no offline copy) or when
+  /// the read fails — never blocks the start.
+  Future<SessionSnapshot?> _cachedSessionSafe() async {
+    if (_webPage != null) return null;
+    try {
+      return await _api.cachedSession();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// The server answered the cold-start session request (no cached session
+  /// on the device): apply what it decided — signed out, consent pending —
+  /// the same way the cached start does. Never runs when unmounted or when
+  /// the account changed while the request was in flight.
+  Future<void> _applyBootstrapSession(
+    SessionSnapshot session,
+    int epoch,
+  ) async {
+    if (!mounted || epoch != _accountEpoch) return;
+    _clearInitialCalendarCache();
+    _clearRemindersIfConsentRequired(session);
+    if (session.user == null) unawaited(_cancelAllNotifications());
+    _sessionGeneration++;
+    setState(() {
+      _user = session.user;
+      _share = session.share ?? const ShareState(status: 'none');
+      _setConsent(session);
+    });
+    // The privacy pages stand alone: no invite offer, reminders or updates.
+    if (_webPage != null) return;
+    if (session.user != null && !_consentRequired) {
       unawaited(_loadRemindersState());
       unawaited(_maybeCheckForUpdate());
       unawaited(_checkMessages());
@@ -592,31 +767,81 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     });
   }
 
-  Future<void>? _consentRecovery;
+  Future<void>? _sessionRecovery;
+  bool _sessionRecoveryAgain = false;
 
-  /// One session refresh at a time, however many requests were refused.
-  Future<void> _recoverConsent() => _consentRecovery ??= _refreshSession()
-      .then<void>((_) {})
-      .catchError((Object _) {})
-      .whenComplete(() => _consentRecovery = null);
+  /// One recovery refresh at a time; if a newer invalidation arrives while
+  /// one is in flight (or rejects it via [StaleAuthScopeException]), run a
+  /// follow-up refresh once it finishes so recovery can never stall.
+  Future<void> _recoverSession() {
+    if (_sessionRecovery != null) {
+      _sessionRecoveryAgain = true;
+      return _sessionRecovery!;
+    }
+    final epoch = _accountEpoch;
+    Future<void> run() async {
+      var attempts = 0;
+      while (attempts < 4) {
+        attempts++;
+        _sessionRecoveryAgain = false;
+        try {
+          await _refreshSession();
+        } catch (err) {
+          if (err is StaleAuthScopeException &&
+              mounted &&
+              epoch == _accountEpoch) {
+            _sessionRecoveryAgain = true;
+          }
+        }
+        if (!mounted || epoch != _accountEpoch || !_sessionRecoveryAgain) {
+          break;
+        }
+      }
+    }
 
-  void _onOwnConsentRequired() {
-    _sessionGeneration++;
-    unawaited(_cancelDailyReminder());
-    unawaited(_cancelPartnerAlerts());
-    unawaited(_recoverConsent());
+    late final Future<void> task;
+    task = run().whenComplete(() {
+      if (identical(_sessionRecovery, task)) _sessionRecovery = null;
+    });
+    return _sessionRecovery = task;
   }
 
-  /// Auth config and session asked together, so an unreachable server costs
-  /// one request timeout instead of two. The config load never throws.
-  Future<SessionSnapshot> _loadConfigAndSession() async {
-    final config = _api.loadAuthConfig();
-    final session = _api.currentSession();
-    try {
-      return await session;
-    } finally {
-      await config;
+  void _onOwnConsentRequired() {
+    _clearInitialCalendarCache();
+    _sessionGeneration++;
+    _calendarScopeReset.value++;
+    unawaited(_cancelDailyReminder());
+    unawaited(_cancelPartnerAlerts());
+    unawaited(_recoverSession());
+  }
+
+  void _onCalendarScopeMismatch() {
+    _clearInitialCalendarCache();
+    _sessionGeneration++;
+    _calendarScopeReset.value++;
+    _navKey.currentState?.popUntil((route) => route.isFirst);
+    if (_user?.isPartner == true) unawaited(_cancelPartnerAlerts());
+    unawaited(_recoverSession());
+  }
+
+  void _onCalendarAccessDenied({required bool refreshSession}) {
+    _clearInitialCalendarCache();
+    _calendarScopeReset.value++;
+    if (_user?.isPartner == true) unawaited(_cancelPartnerAlerts());
+    if (refreshSession) {
+      _sessionGeneration++;
+      _navKey.currentState?.popUntil((route) => route.isFirst);
+      unawaited(_recoverSession());
     }
+  }
+
+  /// Auth config updates independently of the session response.
+  Future<SessionSnapshot> _loadConfigAndSession() {
+    final epoch = _accountEpoch;
+    unawaited(_api.loadAuthConfig().then((_) {
+      if (mounted && epoch == _accountEpoch) setState(() {});
+    }));
+    return _api.currentSession();
   }
 
   /// Re-reads the session from the server and applies it. With
@@ -626,9 +851,17 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     bool keepWhenOffline = false,
   }) async {
     final epoch = _accountEpoch;
-    final session = await _loadConfigAndSession();
+    // Public auth config refreshes alongside the session without blocking a
+    // confirmed relink, consent change, or sign-out.
+    unawaited(_api.loadAuthConfig().then((_) {
+      if (mounted && epoch == _accountEpoch) setState(() {});
+    }));
+    final session = await _api.currentSession();
     if (!mounted || epoch != _accountEpoch) return null;
-    if (keepWhenOffline && _api.offline.value) return null;
+    if (session.fromCache &&
+        (keepWhenOffline || (_user != null && session.user == null && !session.consentRequired))) {
+      return null;
+    }
     final switchedAccount =
         _user != null && session.user != null && session.user!.id != _user!.id;
     _cancelOwnerReminderIfSessionLeavesOwner(session);
@@ -647,22 +880,43 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     if (session.user == null) _privacyPageOpened = false;
     // Consent withdrawn (e.g. on the privacy page): stop local reminders.
     _clearRemindersIfConsentRequired(session);
-    _sessionGeneration++;
-    setState(() {
-      _user = session.user;
-      _share = session.share ?? const ShareState(status: 'none');
-      _setConsent(session);
-    });
-    unawaited(_syncBackgroundWorker());
-    if (session.consentRequired || session.user == null || switchedAccount) {
+    final nextShare = session.share ?? const ShareState(status: 'none');
+    final prevScopeKey = _calendarScopeKey(_user, _share, _consentRequired);
+    final nextScopeKey =
+        _calendarScopeKey(session.user, nextShare, session.consentRequired);
+    final scopeChanged = prevScopeKey != nextScopeKey ||
+        _user?.id != session.user?.id ||
+        _user?.role != session.user?.role ||
+        _consentRequired != session.consentRequired ||
+        _share.canEditCalendar != nextShare.canEditCalendar;
+    final stageChanged = !scopeChanged &&
+        session.user != null &&
+        _user?.stage != session.user?.stage;
+    if (scopeChanged ||
+        _share.status != nextShare.status ||
+        _share.ownerId != nextShare.ownerId ||
+        _share.ownerEmail != nextShare.ownerEmail) {
+      _clearInitialCalendarCache();
+    }
+    if (scopeChanged) _sessionGeneration++;
+    if (scopeChanged || session.consentRequired || session.user == null) {
+      _calendarScopeReset.value++;
       _navKey.currentState?.popUntil((route) => route.isFirst);
     }
+    setState(() {
+      _user = session.user;
+      _share = nextShare;
+      _setConsent(session);
+    });
+    if (stageChanged) _stageChanges.value++;
+    unawaited(_syncBackgroundWorker());
     return session;
   }
 
   Future<void> _refreshConsentSession() async {
     final session = await _api.currentSession();
     if (!mounted) return;
+    _clearInitialCalendarCache();
     _sessionGeneration++;
     setState(() {
       _user = session.user;
@@ -706,14 +960,17 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
 
   void _cancelPartnerAlertsIfSessionLeavesPartner(SessionSnapshot session) {
     final nextUser = session.user;
-    final nextShareActive = session.share?.isActive ?? false;
-    if (_user?.isPartner == true &&
-        (nextUser == null ||
-            nextUser.id != _user!.id ||
-            !nextUser.isPartner ||
-            (_share.isActive && !nextShareActive))) {
+    final nextShare = session.share ?? const ShareState(status: 'none');
+    if (_user?.isPartner != true) return;
+    final leftPartner =
+        nextUser == null || nextUser.id != _user!.id || !nextUser.isPartner;
+    final calendarLostOrChanged = _share.isActive &&
+        (!nextShare.isActive ||
+            nextShare.ownerId != _share.ownerId ||
+            nextShare.ownerEmail != _share.ownerEmail);
+    if (leftPartner || calendarLostOrChanged || nextShare.isRevoked) {
       unawaited(_cancelPartnerAlerts());
-      if (_user != null && !nextShareActive) {
+      if (_user != null && !nextShare.isActive) {
         unawaited(_prefs
             .savePartnerOwnerName(_user!.id, '')
             .catchError((Object _) {}));
@@ -878,6 +1135,8 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
   Future<void> _offerPendingInvite() async {
     // Joining waits for consent; the code stays saved until then.
     if (_consentRequired) return;
+    await _pendingInviteWrite;
+    if (!mounted || _consentRequired) return;
     final code = (await _prefs.pendingInvite())?.trim() ?? '';
     final user = _user;
     if (code.isEmpty || user == null || !mounted) return;
@@ -924,6 +1183,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
   /// This account now views someone else's calendar: its role changed, so
   /// reload the session and return to the (partner) calendar.
   Future<void> _onJoinedCalendar(ShareState share) async {
+    _clearInitialCalendarCache();
     setState(() => _share = share);
     _navKey.currentState?.popUntil((route) => route.isFirst);
     _messengerKey.currentState?.showSnackBar(
@@ -934,6 +1194,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
   }
 
   void _applySession(SessionSnapshot session) {
+    _clearInitialCalendarCache();
     _cancelOwnerReminderIfSessionLeavesOwner(session);
     _cancelPartnerAlertsIfSessionLeavesPartner(session);
     _sessionGeneration++;
@@ -973,6 +1234,8 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
   /// dropped the old token, so show the signed-out state.
   void _onApiBaseChanged() {
     unawaited(_cancelAllNotifications());
+    _api.invalidatePendingAuth();
+    _clearInitialCalendarCache();
     _accountEpoch++;
     _sessionGeneration++;
     setState(() {
@@ -987,14 +1250,13 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
     required bool changed,
     String? inviteCode,
   }) async {
+    if (changed) _onApiBaseChanged();
+    final epoch = _accountEpoch;
     if (inviteCode != null) await _prefs.savePendingInvite(inviteCode);
+    if (!mounted || epoch != _accountEpoch) return;
     await _api.loadAuthConfig();
-    if (!mounted) return;
-    if (changed) {
-      _onApiBaseChanged();
-    } else {
-      setState(() {});
-    }
+    if (!mounted || epoch != _accountEpoch) return;
+    if (!changed) setState(() {});
   }
 
   Future<void> _openSelfHostGuide() async {
@@ -1026,15 +1288,25 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
   }
 
   Future<void> _signIn() async {
+    final epoch = ++_accountEpoch;
+    _api.invalidatePendingAuth();
+    _clearInitialCalendarCache();
     setState(() => _loading = true);
     try {
+      await _pendingInviteWrite;
+      if (!mounted || epoch != _accountEpoch) return;
+      if (!_api.apiBaseResolved && !(await _api.loadPersistedApiBase())) {
+        throw StateError('server URL could not be read from storage');
+      }
+      if (!mounted || epoch != _accountEpoch) return;
       await _api.loadAuthConfig();
+      if (!mounted || epoch != _accountEpoch) return;
       final user = await beginWorkOSSignIn(_api);
-      if (!mounted) return;
+      if (!mounted || epoch != _accountEpoch) return;
       if (user != null) {
         final session = await _api.currentSession();
+        if (!mounted || epoch != _accountEpoch) return;
         _clearRemindersIfConsentRequired(session);
-        if (!mounted) return;
         _accountEpoch++;
         _sessionGeneration++;
         setState(() {
@@ -1054,7 +1326,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
         setState(() => _loading = false);
       }
     } catch (err) {
-      if (!mounted) return;
+      if (!mounted || epoch != _accountEpoch) return;
       setState(() => _loading = false);
       // Closing the AuthKit browser tab is not an error worth announcing.
       if (err is PlatformException && err.code == 'CANCELED') return;
@@ -1067,6 +1339,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
 
   Future<void> _logout() async {
     _privacyPageOpened = false;
+    _clearInitialCalendarCache();
     _accountEpoch++;
     _sessionGeneration++;
     unawaited(_cancelAllNotifications());
@@ -1076,11 +1349,12 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
       _remindersOn = null;
       _user = null;
       _share = const ShareState(status: 'none');
-      _remindersOn = null;
     });
   }
 
   void _onAccountDeleted({bool announce = true}) {
+    _api.invalidatePendingAuth();
+    _clearInitialCalendarCache();
     _accountEpoch++;
     _sessionGeneration++;
     unawaited(_cancelAllNotifications());
@@ -1246,7 +1520,12 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
         onSwitchToOwner: _switchToOwner,
       );
     }
+    final calendarScopeKey =
+        _calendarScopeKey(_user, _share, _consentRequired);
+    final initialMatches = _initialCalendarScopeKey != null &&
+        _initialCalendarScopeKey == calendarScopeKey;
     return CalendarScreen(
+      key: calendarScopeKey == null ? null : ValueKey(calendarScopeKey),
       api: _api,
       user: _user!,
       share: _share,
@@ -1256,7 +1535,19 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
       cycleRefreshSignal: _stageChanges,
       calendarSyncSignal: _calendarChanges,
       onPartnerAlertPrefs: _onPartnerAlertPrefs,
-      onShareChanged: (share) => setState(() => _share = share),
+      scopeResetSignal: _calendarScopeReset,
+      onShareChanged: (share) {
+        final nextKey = _calendarScopeKey(_user, share, _consentRequired);
+        if (nextKey != calendarScopeKey) {
+          if (_user?.isPartner == true && _share.isActive) {
+            unawaited(_cancelPartnerAlerts());
+          }
+          _calendarScopeReset.value++;
+          _navKey.currentState?.popUntil((route) => route.isFirst);
+        }
+        _clearInitialCalendarCache();
+        setState(() => _share = share);
+      },
       onInboxSynced: (messages) {
         unawaited(_askMessagePermissionOnce());
         _onMessagesSynced(_user!.id, messages);
@@ -1277,6 +1568,10 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
       onDismissReminderHint: _dismissReminderHint,
       stageSuggestion: _stageSuggestion,
       onStageSuggestionAccepted: _onStageSuggestionAccepted,
+      clock: widget.clock,
+      initialMonths: initialMatches ? _initialCalendarMonths : null,
+      initialCycle: initialMatches ? _initialCalendarCycle : null,
+      onInitialCacheConsumed: _clearInitialCalendarCache,
     );
   }
 
@@ -1299,6 +1594,7 @@ class _App217State extends State<App217> with WidgetsBindingObserver {
           await beginWorkOSSignIn(_api, returnTo: returnTo);
         },
         onSessionChanged: (session) {
+          _clearInitialCalendarCache();
           _sessionGeneration++;
           setState(() {
             _user = session.user;

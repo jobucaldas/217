@@ -19,6 +19,7 @@ type ShareState struct {
 	InviteURL       string `json:"invite_url,omitempty"`
 	PartnerEmail    string `json:"partner_email,omitempty"`
 	PartnerName     string `json:"partner_name,omitempty"`
+	OwnerID         string `json:"owner_id,omitempty"`
 	OwnerName       string `json:"owner_name,omitempty"`
 	OwnerEmail      string `json:"owner_email,omitempty"`
 	CanEditCalendar bool   `json:"can_edit_calendar"`

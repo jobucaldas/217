@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -44,6 +45,10 @@ class CalendarScreen extends StatefulWidget {
     this.stageSuggestion,
     this.onStageSuggestionAccepted,
     this.clock = DateTime.now,
+    this.initialMonths,
+    this.initialCycle,
+    this.onInitialCacheConsumed,
+    this.scopeResetSignal,
   });
 
   final ApiClient api;
@@ -91,6 +96,21 @@ class CalendarScreen extends StatefulWidget {
 
   /// The current time; only tests replace it.
   final DateTime Function() clock;
+
+  /// Months already read from the device's store during bootstrap ("yyyy-M"),
+  /// so the very first calendar frame paints populated with no layout shift.
+  final Map<String, Map<String, Entry>>? initialMonths;
+
+  /// Last cycle predictions read from the device's store during bootstrap.
+  final CycleInfo? initialCycle;
+
+  /// Called once [initialMonths] and [initialCycle] have been applied so the
+  /// parent discards the startup snapshot immediately after first use.
+  final VoidCallback? onInitialCacheConsumed;
+
+  /// Fired by the parent when the active calendar scope changes (e.g. partner
+  /// relinked to another owner) so pushed day sheets and note dialogs dismiss.
+  final Listenable? scopeResetSignal;
 
   @override
   State<CalendarScreen> createState() => _CalendarScreenState();
@@ -183,9 +203,28 @@ class _CalendarScreenState extends State<CalendarScreen>
 
   final _liveNote = ValueNotifier<String>('');
 
-  /// Bumped whenever calendar access is cleared; the read-only day card
-  /// closes on it so it never keeps showing private data.
+  /// Bumped whenever calendar access is cleared or the calendar scope changes;
+  /// pushed day sheets and note dialogs close on it so they never outlive the
+  /// calendar they belong to.
   final _accessCleared = ValueNotifier<int>(0);
+  int _openOverlayCount = 0;
+  bool _disposed = false;
+  bool _notifiersDisposed = false;
+
+  void _dismissOverlays() {
+    if (_notifiersDisposed) return;
+    _liveNote.value = '';
+    _accessCleared.value++;
+  }
+
+  void _disposeLiveNotifiersIfIdle() {
+    if (_disposed && _openOverlayCount == 0 && !_notifiersDisposed) {
+      _notifiersDisposed = true;
+      _dayView.dispose();
+      _liveNote.dispose();
+      _accessCleared.dispose();
+    }
+  }
 
   /// Body height from which the note is drawn above the day tags.
   static const _inlineNoteMinBodyHeight = 640.0;
@@ -273,6 +312,24 @@ class _CalendarScreenState extends State<CalendarScreen>
     WidgetsBinding.instance.addObserver(this);
     widget.cycleRefreshSignal?.addListener(_onCycleRefresh);
     widget.calendarSyncSignal?.addListener(_onCalendarSync);
+    widget.scopeResetSignal?.addListener(_onScopeReset);
+    if (widget.initialMonths != null) {
+      for (final entry in widget.initialMonths!.entries) {
+        _monthCache[entry.key] = Map<String, Entry>.of(entry.value);
+      }
+      _todayEntry = _monthCache[_monthKey(_today)]?[_todayKey];
+      _showCachedMonths();
+    }
+    if (widget.initialCycle != null) {
+      _cycle = widget.initialCycle!;
+    }
+    if (widget.initialMonths != null || widget.initialCycle != null) {
+      widget.onInitialCacheConsumed?.call();
+    }
+    final needsLocal = widget.initialCycle == null ||
+        [_month, _prevMonth, _nextMonth]
+            .any((m) => !_monthCache.containsKey(_monthKey(m)));
+    if (needsLocal) _hydrateFromLocal();
     _load();
   }
 
@@ -283,13 +340,17 @@ class _CalendarScreenState extends State<CalendarScreen>
       oldWidget.cycleRefreshSignal?.removeListener(_onCycleRefresh);
       widget.cycleRefreshSignal?.addListener(_onCycleRefresh);
     }
+    if (oldWidget.scopeResetSignal != widget.scopeResetSignal) {
+      oldWidget.scopeResetSignal?.removeListener(_onScopeReset);
+      widget.scopeResetSignal?.addListener(_onScopeReset);
+    }
     if (oldWidget.calendarSyncSignal != widget.calendarSyncSignal) {
       oldWidget.calendarSyncSignal?.removeListener(_onCalendarSync);
       widget.calendarSyncSignal?.addListener(_onCalendarSync);
     }
     // Share revoked (or otherwise inactive): the day card must go.
     if (oldWidget.share.isActive && !widget.share.isActive) {
-      _accessCleared.value++;
+      _dismissOverlays();
     }
   }
 
@@ -370,19 +431,26 @@ class _CalendarScreenState extends State<CalendarScreen>
     return true;
   }
 
+  void _onScopeReset() {
+    _dismissOverlays();
+    if (!mounted) return;
+    _clearCalendarData(cancelPartnerAlerts: false);
+  }
+
   @override
   void dispose() {
+    _disposed = true;
     WidgetsBinding.instance.removeObserver(this);
     widget.cycleRefreshSignal?.removeListener(_onCycleRefresh);
+    widget.scopeResetSignal?.removeListener(_onScopeReset);
     widget.calendarSyncSignal?.removeListener(_onCalendarSync);
     _wheelIdle?.cancel();
     _midnight?.cancel();
-    _dayView.dispose();
     _loadDebounce?.cancel();
     _tapTimer?.cancel();
     _monthSnap.dispose();
-    _liveNote.dispose();
-    _accessCleared.dispose();
+    if (_openOverlayCount > 0) _dismissOverlays();
+    _disposeLiveNotifiersIfIdle();
     super.dispose();
   }
 
@@ -391,7 +459,7 @@ class _CalendarScreenState extends State<CalendarScreen>
     final epoch = _writeEpoch;
     // Silent reload: never insert a progress bar into the Column — that
     // reflows/shrinks the month carousel during swipe/chevron month changes.
-    setState(() => _error = null);
+    if (_error != null) setState(() => _error = null);
     try {
       // Months as requested now: the view may move while the reads fly.
       final requested = _month;
@@ -399,52 +467,59 @@ class _CalendarScreenState extends State<CalendarScreen>
       final requestedNext = _nextMonth;
       final year = requested.year;
       final month = requested.month;
-      final results = await Future.wait([
-        widget.api.listEntries(year, month),
-        widget.api.listEntries(
-          month == 1 ? year - 1 : year,
-          month == 1 ? 12 : month - 1,
-        ),
-        widget.api.listEntries(
-          month == 12 ? year + 1 : year,
-          month == 12 ? 1 : month + 1,
-        ),
-      ]);
-      if (!mounted || generation != _loadGeneration) return;
-      // Every month read here is fresh; today's month is one of the three
-      // unless the view is two or more months away, then it is read too.
-      final fresh = <String, Map<String, Entry>>{
-        _monthKey(requested): {for (final e in results[0]) e.date: e},
-        _monthKey(requestedPrev): {for (final e in results[1]) e.date: e},
-        _monthKey(requestedNext): {for (final e in results[2]) e.date: e},
-      };
-      final today = _today;
-      final todayMonth = _monthKey(today);
-      // The summary's day must be as fresh as the grid: read its month too
-      // when the view has moved away from it.
-      final selected = _selected;
-      final selectedMonth = selected == null ? null : _monthKey(selected);
-      for (final month in [
-        today,
-        if (selected != null) selected,
-      ]) {
-        if (fresh.containsKey(_monthKey(month))) continue;
+      Future<List<Entry>> fetchMonth(int y, int m) async {
         try {
-          final list = await widget.api.listEntries(month.year, month.month);
-          if (!mounted || generation != _loadGeneration) return;
-          fresh[_monthKey(month)] = {for (final e in list) e.date: e};
+          return await widget.api.listEntries(y, m);
         } catch (err) {
-          if (!mounted || generation != _loadGeneration) return;
-          if (_handleConsentFailure(err)) return;
-          // Today keeps _todayEntry, which is never older than the cached
-          // month (edits and reads update both). A selected day whose month
-          // could not be read falls back to today below.
+          if (mounted &&
+              (generation == _loadGeneration || _isCalendarAccessDenial(err))) {
+            _handleConsentFailure(err);
+          }
+          rethrow;
         }
       }
-      final todayFresh = fresh[todayMonth];
-      final todayEntry =
-          todayFresh != null ? todayFresh[_todayKey] : _todayEntry;
+      Future<void> applyNeighbour(DateTime date) async {
+        try {
+          final entries = await fetchMonth(date.year, date.month);
+          if (!mounted ||
+              generation != _loadGeneration ||
+              epoch != _writeEpoch ||
+              _pendingWrites > 0) {
+            return;
+          }
+          final fresh = {for (final e in entries) e.date: e};
+          setState(() {
+            _monthCache[_monthKey(date)] = fresh;
+            if (_monthKey(date) == _monthKey(_today)) {
+              _todayEntry = fresh[_todayKey];
+            }
+            _showCachedMonths();
+          });
+          if (widget.user.isPartner &&
+              _monthKey(date) == _monthKey(_today)) {
+            unawaited(_syncPartnerAlerts(
+              _cycle,
+              sessionGeneration: widget.sessionGeneration?.call() ?? 0,
+              queueRevision: widget.partnerAlertSyncQueue?.revision,
+            ));
+          }
+        } catch (_) {}
+      }
+      final neighbours = <String, DateTime>{
+        for (final date in [
+          requestedPrev,
+          requestedNext,
+          _today,
+          if (_selected != null) _selected!,
+        ])
+          if (_monthKey(date) != _monthKey(requested)) _monthKey(date): date,
+      };
+      for (final date in neighbours.values) {
+        unawaited(applyNeighbour(date));
+      }
+      final visible = await fetchMonth(year, month);
       if (!mounted || generation != _loadGeneration) return;
+      final fresh = {for (final e in visible) e.date: e};
       if (_pendingWrites > 0) {
         _reloadAfterWrites = true;
         return;
@@ -457,15 +532,11 @@ class _CalendarScreenState extends State<CalendarScreen>
       _confirmed.clear();
       _dataBlocked = false;
       setState(() {
-        // Today's month included, so its grid matches _todayEntry.
-        _monthCache.addAll(fresh);
-        if (selectedMonth != null &&
-            _selected == selected &&
-            !fresh.containsKey(selectedMonth)) {
-          _selected = null;
+        _monthCache[_monthKey(requested)] = fresh;
+        if (_monthKey(requested) == _monthKey(_today)) {
+          _todayEntry = fresh[_todayKey];
         }
         _showCachedMonths();
-        _todayEntry = todayEntry;
       });
     } catch (err) {
       if (!mounted || generation != _loadGeneration) return;
@@ -477,17 +548,41 @@ class _CalendarScreenState extends State<CalendarScreen>
     await _loadCycle();
   }
 
+  static bool _isCalendarAccessDenial(Object err) =>
+      err is CalendarScopeMismatchException ||
+      (err is ApiException &&
+          (err.statusCode == 401 ||
+              (err.statusCode == 403 &&
+                  (err.message == 'calendar owner consent required' ||
+                      err.message == 'consent required' ||
+                      err.message == 'share inactive' ||
+                      err.message == 'role not chosen'))));
+
   bool _handleConsentFailure(Object err, {bool closeDayEditor = false}) {
-    if (err is! ApiException || err.statusCode != 403) return false;
-    if (err.message == 'calendar owner consent required') {
+    if (err is CalendarScopeMismatchException) {
+      _clearCalendarData();
+      if (closeDayEditor && mounted) Navigator.of(context).maybePop();
+      return true;
+    }
+    if (err is! ApiException) return false;
+    if (err.statusCode == 403 &&
+        err.message == 'calendar owner consent required') {
       _clearCalendarData(
         error: widget.strings.sharedCalendarOwnerConsentRequired,
       );
       if (closeDayEditor && mounted) Navigator.of(context).maybePop();
       return true;
     }
-    if (err.message == 'consent required') {
+    if (err.statusCode == 403 && err.message == 'consent required') {
       _clearCalendarData(cancelPartnerAlerts: false);
+      if (closeDayEditor && mounted) Navigator.of(context).maybePop();
+      return true;
+    }
+    if ((err.statusCode == 403 &&
+            (err.message == 'share inactive' ||
+                err.message == 'role not chosen')) ||
+        err.statusCode == 401) {
+      _clearCalendarData(error: friendlyError(widget.strings, err));
       if (closeDayEditor && mounted) Navigator.of(context).maybePop();
       return true;
     }
@@ -538,8 +633,10 @@ class _CalendarScreenState extends State<CalendarScreen>
     try {
       cycle = await widget.api.getCycle(_todayKey);
     } catch (err) {
-      if (!mounted || generation != _cycleLoadGeneration) return;
-      _handleConsentFailure(err);
+      if (!mounted) return;
+      if (generation == _cycleLoadGeneration || _isCalendarAccessDenial(err)) {
+        _handleConsentFailure(err);
+      }
       return;
     }
     if (!mounted ||
@@ -835,7 +932,8 @@ class _CalendarScreenState extends State<CalendarScreen>
   }
 
   /// Months in view that were never fetched this session come from the
-  /// device's copy, so a fast swipe lands on days instead of an empty grid.
+  /// device's copy, so a fast swipe (and the cold start) lands on days
+  /// instead of an empty grid; the last cycle predictions join them.
   Future<void> _hydrateFromLocal() async {
     if (_dataBlocked) return;
     // Months shown since are read by their own call; this one stands down.
@@ -844,13 +942,16 @@ class _CalendarScreenState extends State<CalendarScreen>
       for (final month in [_month, _prevMonth, _nextMonth])
         if (!_monthCache.containsKey(_monthKey(month))) month,
     ];
-    final lists = await Future.wait([
+    final results = await Future.wait([
       for (final month in missing)
         widget.api
             .cachedMonth(month.year, month.month)
             .then<List<Entry>?>((list) => list)
             .catchError((Object _) => null),
+      widget.api.cachedCycle().catchError((Object _) => null),
     ]);
+    final lists = results.sublist(0, missing.length).cast<List<Entry>?>();
+    final cycle = results.last as CycleInfo?;
     if (!mounted || epoch != _dataEpoch || _dataBlocked) return;
     setState(() {
       for (var i = 0; i < missing.length; i++) {
@@ -860,6 +961,12 @@ class _CalendarScreenState extends State<CalendarScreen>
         if (list == null || _monthCache.containsKey(key)) continue;
         _monthCache[key] = {for (final e in list) e.date: e};
       }
+      // The server's predictions stand in until a fresh read lands; a
+      // fetch that landed meanwhile is never older.
+      if (cycle != null && _cycle == CycleInfo.empty) _cycle = cycle;
+      // The header status follows today's cached entry until a fetch or an
+      // edit sets it (never older than the cached month).
+      _todayEntry ??= _monthCache[_monthKey(_today)]?[_todayKey];
       _showCachedMonths();
     });
   }
@@ -1101,6 +1208,7 @@ class _CalendarScreenState extends State<CalendarScreen>
     final existing = _visibleEntry(key);
     _sheetKey = key;
     _dayView.value = _dayViewFor(key);
+    _openOverlayCount++;
     return showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -1127,6 +1235,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                 initialHeart: existing?.heart ?? false,
                 initialPeriod: existing?.period ?? false,
                 hadEntry: existing != null,
+                closeSignal: _accessCleared,
                 // Persist via onCommit — not the sheet's pop value. Nested
                 // note dialog → sheet pop races on web and can drop the
                 // result (note/heart "save" that only sticks after
@@ -1142,13 +1251,13 @@ class _CalendarScreenState extends State<CalendarScreen>
                 },
                 builder: (context, editing) => expandable(editing),
               );
-        // A partner's sheet closes when calendar access is cleared.
-        return partner
-            ? CloseOnSignal(signal: _accessCleared, child: sheet)
-            : sheet;
+        // Closes when calendar access is cleared or the calendar scope changes.
+        return CloseOnSignal(signal: _accessCleared, child: sheet);
       },
     ).whenComplete(() {
       if (_sheetKey == key) _sheetKey = null;
+      _openOverlayCount--;
+      _disposeLiveNotifiersIfIdle();
     });
   }
 
@@ -1570,11 +1679,20 @@ class _CalendarScreenState extends State<CalendarScreen>
                 isFuture: isFutureDay(selectedDay, _today),
                 note: selectedNotes,
                 noteAsTag: noteAsTag,
-                onOpenNote: () => showDayNoteCard(
-                  context,
-                  title: widget.strings.notes,
-                  notes: _liveNote,
-                ),
+                onOpenNote: () {
+                  _openOverlayCount++;
+                  unawaited(
+                    showDayNoteCard(
+                      context,
+                      title: widget.strings.notes,
+                      notes: _liveNote,
+                      closeSignal: _accessCleared,
+                    ).whenComplete(() {
+                      _openOverlayCount--;
+                      _disposeLiveNotifiersIfIdle();
+                    }),
+                  );
+                },
               ),
             ],
           ),
@@ -2014,6 +2132,7 @@ class DayEditorSheet extends StatefulWidget {
     this.initialPeriod = false,
     this.onCommit,
     this.builder,
+    this.closeSignal,
   });
 
   final Strings strings;
@@ -2034,6 +2153,9 @@ class DayEditorSheet extends StatefulWidget {
   /// Lays the editor out somewhere else (the calendar's expandable sheet)
   /// from its state and controls; without it, the plain editor is shown.
   final Widget Function(BuildContext context, DayEditing editing)? builder;
+
+  /// Closes the nested note dialog when calendar scope or access changes.
+  final ValueListenable<int>? closeSignal;
 
   @override
   State<DayEditorSheet> createState() => _DayEditorSheetState();
@@ -2137,16 +2259,24 @@ class _DayEditorSheetState extends State<DayEditorSheet> {
     // Capture before the dialog await — sheet may unmount on web when the
     // nested route settles, and we still must persist note/heart.
     final onCommit = widget.onCommit;
+    final closeSignal = widget.closeSignal;
+    final signalBefore = closeSignal?.value;
     String? draft;
     var result = await showDialog<String>(
       context: context,
       useRootNavigator: true,
-      builder: (context) => _NoteDialog(
-        strings: widget.strings,
-        initialNotes: _notes,
-        onChanged: (text) => draft = text,
-      ),
+      builder: (context) {
+        final dialog = _NoteDialog(
+          strings: widget.strings,
+          initialNotes: _notes,
+          onChanged: (text) => draft = text,
+        );
+        return closeSignal == null
+            ? dialog
+            : CloseOnSignal(signal: closeSignal, child: dialog);
+      },
     );
+    if (closeSignal != null && closeSignal.value != signalBefore) return;
     // Tapping outside or going back keeps what was typed.
     final typed = draft?.trim();
     if (result == null && typed != null && typed != _notes.trim()) {

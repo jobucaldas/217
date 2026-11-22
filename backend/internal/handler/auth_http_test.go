@@ -18,6 +18,48 @@ import (
 	"217/backend/internal/store"
 )
 
+type failingAuthStore struct {
+	store.Store
+	err error
+}
+
+func (s failingAuthStore) GetUserBySession(string) (*model.User, error) {
+	return nil, s.err
+}
+
+func (s failingAuthStore) SetDeviceChallenge(string, string, time.Time) error {
+	return s.err
+}
+
+func TestAuthStoreFailuresAreNotDenials(t *testing.T) {
+	for _, tc := range []struct {
+		name                        string
+		sessionErr, deviceErr       error
+		sessionStatus, deviceStatus int
+		clearCookie                 bool
+	}{
+		{"outage", fmt.Errorf("database unavailable"), fmt.Errorf("database unavailable"), 503, 503, false},
+		{"missing", store.ErrSessionNotFound, store.ErrDeviceKeyNotFound, 200, 401, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := failingAuthStore{Store: store.NewMemoryStore(), err: tc.sessionErr}
+			h := handler.New(s)
+			w := httptest.NewRecorder()
+			req := authedRequest(http.MethodGet, "/api/auth/session", &http.Cookie{Name: "217_session", Value: "token"}, nil)
+			h.CurrentSession(w, req)
+			if w.Code != tc.sessionStatus || (w.Header().Get("Set-Cookie") != "") != tc.clearCookie {
+				t.Fatalf("session status=%d cookie=%q", w.Code, w.Header().Get("Set-Cookie"))
+			}
+			s.err = tc.deviceErr
+			h = handler.New(s)
+			code, _ := postJSON(t, h.DeviceChallenge, "/api/auth/device/challenge", map[string]string{"key_id": "missing"}, "")
+			if code != tc.deviceStatus {
+				t.Fatalf("device status=%d", code)
+			}
+		})
+	}
+}
+
 type fakeOAuthProvider struct {
 	nonce          string
 	exchangeNonce  string

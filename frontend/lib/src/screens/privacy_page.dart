@@ -100,6 +100,7 @@ class _PrivacyPageState extends State<PrivacyPage> {
   String? _notice;
   String? _error;
   bool _deleted = false;
+  bool _initialActionHandled = false;
 
   PrivacyText get _t => PrivacyText(widget.strings.language);
   Strings get _s => widget.strings;
@@ -108,14 +109,25 @@ class _PrivacyPageState extends State<PrivacyPage> {
   @override
   void initState() {
     super.initState();
+    _maybeRunInitialAction();
+  }
+
+  @override
+  void didUpdateWidget(covariant PrivacyPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _maybeRunInitialAction();
+  }
+
+  void _maybeRunInitialAction() {
+    if (_initialActionHandled) return;
     final action = widget.web?.initialAction;
-    if (action != null && widget.web?.user != null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        // Handled once: a reload must not reopen the warning.
-        replaceWebPath(_pagePath());
-        if (mounted) _start(action);
-      });
-    }
+    if (action == null || widget.web?.user == null) return;
+    _initialActionHandled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      // Handled once: a reload must not reopen the warning.
+      replaceWebPath(_pagePath());
+      if (mounted) _start(action);
+    });
   }
 
   /// This page's own path, in the current language, with [action]'s warning

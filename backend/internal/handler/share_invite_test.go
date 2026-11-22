@@ -40,7 +40,7 @@ func TestEnableShareReturnsInviteURL(t *testing.T) {
 		t.Fatalf("invite_url = %q, want %q", state.InviteURL, want)
 	}
 
-	payload := h.sessionPayload(owner)
+	payload := h.sessionPayload(httptest.NewRecorder(), owner)
 	if got := payload["share"].(*model.ShareState).InviteURL; got != want {
 		t.Fatalf("session invite_url = %q, want %q", got, want)
 	}

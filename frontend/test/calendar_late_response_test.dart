@@ -1,0 +1,208 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:intl/intl.dart';
+
+import 'package:a217/src/api/client.dart';
+import 'package:a217/src/config.dart';
+import 'package:a217/src/i18n.dart';
+import 'package:a217/src/models.dart';
+import 'package:a217/src/notifications/partner_alert_plan.dart';
+import 'package:a217/src/notifications/reminder_schedule.dart';
+import 'package:a217/src/screens/calendar_screen.dart';
+import 'package:a217/src/theme/app_theme.dart';
+
+/// Serves the device's copy at once; the server answer waits on [gate].
+///
+/// This simulates the cold start on a slow network: the local store has
+/// yesterday's picture, the server's answer (held back) differs.
+class _DelayedServerApi extends ApiClient {
+  _DelayedServerApi({required this.gate, required this.seededMonth})
+      : super(AppConfig.fromEnvironment());
+
+  final Completer<void> gate;
+  final List<Entry> seededMonth;
+
+  @override
+  Future<List<Entry>?> cachedMonth(int year, int month) async => seededMonth;
+
+  @override
+  Future<List<Entry>> listEntries(int year, int month) async {
+    await gate.future;
+    return const [];
+  }
+
+  @override
+  Future<CycleInfo> getCycle(String today) async => CycleInfo.empty;
+}
+
+class _HangingNeighbourApi extends ApiClient {
+  _HangingNeighbourApi() : super(AppConfig.fromEnvironment());
+
+  final gate = Completer<void>();
+  final visibleGate = Completer<void>();
+  var cycles = 0;
+
+  @override
+  Future<List<Entry>?> cachedMonth(int year, int month) async => [
+        Entry(date: DateFormat('yyyy-MM-dd').format(DateTime.now()), taken: true, notes: ''),
+      ];
+
+  @override
+  Future<List<Entry>> listEntries(int year, int month) async {
+    final now = DateTime.now();
+    if (year != now.year || month != now.month) {
+      await gate.future;
+    } else {
+      await visibleGate.future;
+    }
+    return const [];
+  }
+
+  @override
+  Future<CycleInfo> getCycle(String today) async {
+    cycles++;
+    return CycleInfo.empty;
+  }
+}
+
+class _LateTodayApi extends ApiClient {
+  _LateTodayApi() : super(AppConfig.fromEnvironment());
+
+  final gate = Completer<void>();
+
+  @override
+  Future<List<Entry>?> cachedMonth(int year, int month) async =>
+      year == 2026 && month == 11
+          ? [const Entry(date: '2026-11-15', taken: true, notes: '')]
+          : [];
+
+  @override
+  Future<List<Entry>> listEntries(int year, int month) async {
+    if (year != 2026 || month != 11) return [];
+    await gate.future;
+    return [const Entry(date: '2026-11-15', taken: false, notes: '')];
+  }
+
+  @override
+  Future<CycleInfo> getCycle(String today) async => CycleInfo.empty;
+
+  @override
+  Future<PartnerAlertPreference> getPartnerAlerts() async =>
+      const PartnerAlertPreference(pillEnabled: true);
+}
+
+Future<void> _pump(WidgetTester tester, ApiClient api) async {
+  tester.view.devicePixelRatio = 1;
+  tester.view.physicalSize = const Size(800, 900);
+  addTearDown(tester.view.reset);
+  await tester.pumpWidget(MaterialApp(
+    theme: buildApp217Theme(brightness: Brightness.dark, palette: AppPalette.blue),
+    home: CalendarScreen(
+      api: api,
+      user: const User(id: 'u1', email: 'o@example.invalid', name: 'O'),
+      strings: const Strings(AppLanguage.en),
+      onOpenSettings: () {},
+    ),
+  ));
+}
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  GoogleFonts.config.allowRuntimeFetching = false;
+
+  testWidgets('late today month replans partner pill alerts', (tester) async {
+    final api = _LateTodayApi();
+    final plansForToday = <bool>[];
+    await tester.pumpWidget(MaterialApp(
+      theme: buildApp217Theme(
+        brightness: Brightness.dark,
+        palette: AppPalette.blue,
+      ),
+      home: CalendarScreen(
+        api: api,
+        user: const User(
+          id: 'p1', email: 'p@example.invalid', name: 'P', role: 'partner',
+        ),
+        share: const ShareState(status: 'active'),
+        strings: const Strings(AppLanguage.en),
+        onOpenSettings: () {},
+        clock: () => DateTime(2026, 11, 15, 10),
+        partnerAlertScheduler: (alerts) async {
+          plansForToday.add(alerts.any((alert) => alert.id == partnerPillIdBase));
+          return LocalReminderSyncStatus.scheduled;
+        },
+      ),
+    ));
+    await tester.pump();
+    await tester.tap(find.byIcon(Icons.chevron_right));
+    // Start the ticker, finish the month snap, then let the reload debounce.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+    await tester.pump(const Duration(milliseconds: 150));
+    expect(find.text('December 2026'), findsOneWidget);
+    expect(plansForToday, [false]);
+
+    api.gate.complete();
+    await tester.pump();
+    expect(find.text('December 2026'), findsOneWidget);
+    expect(plansForToday, [false, true]);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('hanging neighbouring months do not block visible month or cycle',
+      (tester) async {
+    final api = _HangingNeighbourApi();
+    await _pump(tester, api);
+    await tester.pump();
+    expect(find.text('Taken'), findsOneWidget);
+    api.visibleGate.complete();
+    for (var i = 0; i < 5; i++) {
+      await tester.pump();
+    }
+    expect(find.text('Taken'), findsNothing);
+    expect(api.cycles, greaterThan(0));
+    api.gate.complete();
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+  });
+
+  testWidgets('late network answer updates the calendar without input',
+      (tester) async {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final cachedDay = DateFormat('yyyy-MM-dd').format(today);
+    final api = _DelayedServerApi(
+      gate: Completer<void>(),
+      seededMonth: [
+        Entry(date: cachedDay, taken: true, notes: ''),
+      ],
+    );
+
+    await _pump(tester, api);
+    // First pumped frame: the cached copy is already on the grid, while the
+    // server request is still waiting.
+    await tester.pump();
+    final grid = find.byKey(ValueKey('${now.year}-${now.month}'));
+    expect(
+      find.descendant(of: grid, matching: find.text('${now.day}')),
+      findsOneWidget,
+    );
+    // Today's status comes from the cached entry, not a spinner.
+    expect(find.text('Taken'), findsOneWidget);
+
+    // The server finally answers — no tap, only frames passing.
+    api.gate.complete();
+    await tester.pump();
+    await tester.pump();
+
+    // The fresh (empty) month replaced the cached copy in place.
+    expect(find.byType(CalendarScreen), findsOneWidget);
+    expect(find.text('Taken'), findsNothing);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 1));
+  });
+}
