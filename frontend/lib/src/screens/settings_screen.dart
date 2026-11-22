@@ -41,6 +41,7 @@ class SettingsPage extends StatefulWidget {
     this.onRemindersToggled,
     this.dailyReminderSyncQueue,
     this.partnerAlertSyncQueue,
+    this.onPartnerAlertsChanged,
     this.consentPending = false,
     this.onPrivacyPageOpened,
     this.autoUpdate = false,
@@ -78,6 +79,10 @@ class SettingsPage extends StatefulWidget {
   final ValueChanged<bool>? onRemindersToggled;
   final DailyReminderSyncQueue? dailyReminderSyncQueue;
   final PartnerAlertSyncQueue? partnerAlertSyncQueue;
+
+  /// A partner saved their alert settings (the app re-evaluates its
+  /// background work).
+  final ValueChanged<PartnerAlertPreference>? onPartnerAlertsChanged;
 
   /// Signed in but the privacy notice is not agreed yet: the server refuses
   /// the data behind reminders, alerts, sharing, role and stage until then.
@@ -257,6 +262,7 @@ class _SettingsPageState extends State<SettingsPage> {
                             share: widget.share ??
                                 const ShareState(status: 'none'),
                             syncQueue: widget.partnerAlertSyncQueue,
+                            onAlertsChanged: widget.onPartnerAlertsChanged,
                             messageNotifications: widget.messageNotifications,
                             onMessageNotificationsChanged: _messageToggle,
                           ),

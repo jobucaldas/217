@@ -695,9 +695,9 @@ class Strings {
         'Se repite cada $minutes min hasta que registres la píldora, hasta el final del día',
       );
   String get partnerAlertsNote => _t(
-        'Notifications are scheduled on this phone from her latest calendar each time 217 syncs, so open it now and then.',
-        'As notificações são agendadas neste celular com o calendário mais recente dela sempre que o 217 sincroniza, então abra o app de vez em quando.',
-        'Las notificaciones se programan en este teléfono con su calendario más reciente cada vez que 217 se sincroniza, así que ábrelo de vez en cuando.',
+        'Notifications are scheduled on this phone from her latest calendar. 217 also checks in the background while the phone is online.',
+        'As notificações são agendadas neste celular com o calendário mais recente dela. O 217 também verifica em segundo plano enquanto o celular está online.',
+        'Las notificaciones se programan en este teléfono con su calendario más reciente. 217 también comprueba en segundo plano mientras el teléfono está en línea.',
       );
   String get partnerAlertsWeb => _t(
         'Notifications are delivered by the Android app.',
@@ -728,6 +728,18 @@ class Strings {
         '${partnerFirstName(name)}: sem registro às $time',
         '${partnerFirstName(name)}: sin registro a las $time',
       );
+  /// Quiet note replacing a "pill not logged" alert once it gets logged.
+  String pillLoggedClosureBody(String name) => name.trim().isEmpty
+      ? _t(
+          'Today\'s pill was logged',
+          'A pílula de hoje foi registrada',
+          'La píldora de hoy fue registrada',
+        )
+      : _t(
+          '${partnerFirstName(name)} logged today\'s pill',
+          '${partnerFirstName(name)} registrou a pílula de hoje',
+          '${partnerFirstName(name)} registró la píldora de hoy',
+        );
   String partnerFirstName(String name) =>
       partnerName(name).split(RegExp(r'\s+')).first;
 

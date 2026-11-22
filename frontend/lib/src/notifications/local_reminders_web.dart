@@ -16,6 +16,7 @@ Future<LocalReminderSyncResult> syncLocalDailyReminder({
   bool repeatEnabled = false,
   int repeatMinutes = 15,
   bool todayLogged = false,
+  bool requestPermission = false,
 }) async {
   if (!html.Notification.supported) {
     return const LocalReminderSyncResult(LocalReminderSyncStatus.unsupported);
@@ -27,7 +28,7 @@ Future<LocalReminderSyncResult> syncLocalDailyReminder({
 
   final permission = html.Notification.permission;
   var granted = permission == 'granted';
-  if (permission == 'default') {
+  if (permission == 'default' && requestPermission) {
     final result = await html.Notification.requestPermission();
     granted = result == 'granted';
   }
@@ -46,9 +47,18 @@ Future<LocalReminderSyncResult> syncLocalDailyReminder({
 
 /// Web pages cannot schedule future notifications.
 Future<LocalReminderSyncStatus> syncPartnerAlerts(
-  List<PlannedAlert> alerts,
-) async =>
+  List<PlannedAlert> alerts, {
+  bool requestPermission = false,
+}) async =>
     LocalReminderSyncStatus.unsupported;
+
+Future<bool> hasActivePartnerPillAlert() async => false;
+
+Future<bool> showPartnerPillTakenClosure({
+  required String title,
+  required String body,
+}) async =>
+    false;
 
 /// Web pages get no message notifications (the badge still updates).
 Future<bool> showMessageNotification({

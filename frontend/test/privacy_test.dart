@@ -99,6 +99,25 @@ class _ConsentServer {
               return consented
                   ? http.Response('{"notes":[]}', 200)
                   : http.Response('{"error":"consent required"}', 403);
+            case '/api/sync/status':
+              return consented
+                  ? http.Response(
+                      jsonEncode({
+                        'etag': 'e1',
+                        'user_id': 'u1',
+                        'role': role,
+                        'share_active': false,
+                        'subject_consent': true,
+                        'tags': {
+                          'account': 'a1',
+                          'inbox': 'i1',
+                          'calendar': 'none',
+                          'prefs': 'p1',
+                        },
+                      }),
+                      200,
+                    )
+                  : http.Response('{"error":"consent required"}', 403);
             case '/api/auth/logout':
               loggedOut = true;
               return http.Response('{"status":"ok"}', 200);

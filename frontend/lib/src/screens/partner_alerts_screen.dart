@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -7,6 +9,7 @@ import '../errors.dart';
 import '../i18n.dart';
 import '../models.dart';
 import '../notifications/local_reminders.dart';
+import '../notifications/message_worker.dart';
 import '../notifications/partner_alert_sync.dart';
 import '../notifications/partner_alert_sync_queue.dart';
 import 'message_notifications_tile.dart';
@@ -25,6 +28,7 @@ class PartnerAlertsScreen extends StatefulWidget {
     this.partnerAlertScheduler,
     this.cancelPartnerAlerts,
     this.syncQueue,
+    this.onAlertsChanged,
     this.messageNotifications = true,
     this.onMessageNotificationsChanged,
   });
@@ -40,6 +44,9 @@ class PartnerAlertsScreen extends StatefulWidget {
       partnerAlertScheduler;
   final Future<LocalReminderSyncStatus> Function()? cancelPartnerAlerts;
   final PartnerAlertSyncQueue? syncQueue;
+
+  /// The alert settings were saved: the app re-evaluates its background work.
+  final ValueChanged<PartnerAlertPreference>? onAlertsChanged;
 
   /// Android only: new-message notifications, also in the background.
   final bool messageNotifications;
@@ -152,6 +159,7 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
       final status = widget.reschedule != null
           ? await widget.reschedule!(saved)
           : await _reschedule(saved, revision: revision);
+      widget.onAlertsChanged?.call(saved);
       if (!mounted) return;
       setState(() {
         // A newer edit may have landed in `_pref` while this request was in
@@ -229,9 +237,11 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
                 await queue.scheduleIfCurrent(
                   revision: revision!,
                   alerts: alerts,
+                  // Saved by the user just now: may ask for the permission.
+                  requestPermission: true,
                 ) ??
                 LocalReminderSyncStatus.cancelled;
-    return syncPartnerAlertsFrom(
+    final status = await syncPartnerAlertsFrom(
       strings: widget.strings,
       pref: pref,
       cycle: cycle,
@@ -239,10 +249,15 @@ class _PartnerAlertsScreenState extends State<PartnerAlertsScreen> {
       todayLogged: todayLogged,
       ownerName: widget.share.ownerName,
       scheduler: scheduler,
+      requestPermission: true,
     );
+    unawaited(schedulePartnerPrecheck(
+        linked ? partnerPrecheckAt(DateTime.now(), pref, todayLogged) : null));
+    return status;
   }
 
   Future<LocalReminderSyncStatus> _cancelPartnerAlerts() async {
+    unawaited(schedulePartnerPrecheck(null));
     final queue = widget.syncQueue;
     if (queue != null) {
       return await queue.cancel() ?? LocalReminderSyncStatus.cancelled;

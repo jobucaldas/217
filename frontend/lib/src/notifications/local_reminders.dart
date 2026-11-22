@@ -15,6 +15,10 @@ bool get supportsLocalReminders => impl.supportsLocalReminders;
 /// Schedules or cancels a daily local reminder, and (when [repeatEnabled])
 /// its "pill not logged" repeats every [repeatMinutes] until [todayLogged]
 /// or 23:59 local. Never throws for UI callers.
+///
+/// Only an explicit user action passes [requestPermission]: it may then show
+/// the system permission prompt. Every automatic replan (resume, calendar
+/// refresh, background work) leaves it off and just reports a denial.
 Future<LocalReminderSyncResult> syncLocalDailyReminder({
   required bool enabled,
   required String timeHhMm,
@@ -23,6 +27,7 @@ Future<LocalReminderSyncResult> syncLocalDailyReminder({
   bool repeatEnabled = false,
   int repeatMinutes = 15,
   bool todayLogged = false,
+  bool requestPermission = false,
 }) =>
     impl.syncLocalDailyReminder(
       enabled: enabled,
@@ -32,11 +37,30 @@ Future<LocalReminderSyncResult> syncLocalDailyReminder({
       repeatEnabled: repeatEnabled,
       repeatMinutes: repeatMinutes,
       todayLogged: todayLogged,
+      requestPermission: requestPermission,
     );
 
 /// Replaces all scheduled partner alerts with [alerts]. Never throws.
-Future<LocalReminderSyncStatus> syncPartnerAlerts(List<PlannedAlert> alerts) =>
-    impl.syncPartnerAlerts(alerts);
+/// Cancelling needs no permission; [requestPermission] is for explicit user
+/// actions only (see [syncLocalDailyReminder]).
+Future<LocalReminderSyncStatus> syncPartnerAlerts(
+  List<PlannedAlert> alerts, {
+  bool requestPermission = false,
+}) =>
+    impl.syncPartnerAlerts(alerts, requestPermission: requestPermission);
+
+/// Whether today's "pill not logged" alert (or one of its repeats) is
+/// showing in the notification tray right now. False when unknown.
+Future<bool> hasActivePartnerPillAlert() => impl.hasActivePartnerPillAlert();
+
+/// Quiet, self-expiring replacement for a "pill not logged" alert that is
+/// already showing, once the pill gets logged. Never prompts for permission
+/// and never throws.
+Future<bool> showPartnerPillTakenClosure({
+  required String title,
+  required String body,
+}) =>
+    impl.showPartnerPillTakenClosure(title: title, body: body);
 
 /// Shows (or replaces) the "new message" notification now. Never prompts for
 /// permission and never throws: without permission nothing is shown.

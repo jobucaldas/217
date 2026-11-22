@@ -449,3 +449,72 @@ class ReminderPreference {
     );
   }
 }
+
+/// Opaque change tags from `GET /api/sync/status`: a tag changes when that
+/// part of the account does. Compared for equality only.
+class SyncTags {
+  const SyncTags({
+    this.account = '',
+    this.inbox = '',
+    this.calendar = '',
+    this.prefs = '',
+  });
+
+  final String account;
+  final String inbox;
+  final String calendar;
+  final String prefs;
+
+  Map<String, dynamic> toJson() => {
+        'account': account,
+        'inbox': inbox,
+        'calendar': calendar,
+        'prefs': prefs,
+      };
+
+  factory SyncTags.fromJson(Map<String, dynamic>? json) => SyncTags(
+        account: (json?['account'] as String?) ?? '',
+        inbox: (json?['inbox'] as String?) ?? '',
+        calendar: (json?['calendar'] as String?) ?? '',
+        prefs: (json?['prefs'] as String?) ?? '',
+      );
+}
+
+/// What changed since the ETag the client last saw (`GET /api/sync/status`).
+class SyncStatus {
+  const SyncStatus({
+    required this.etag,
+    required this.userId,
+    this.role = '',
+    this.shareActive = false,
+    this.subjectConsent = false,
+    this.tags = const SyncTags(),
+  });
+
+  final String etag;
+  final String userId;
+  final String role;
+  final bool shareActive;
+
+  /// The calendar's subject (the owner) has agreed to the current notice.
+  final bool subjectConsent;
+  final SyncTags tags;
+
+  Map<String, dynamic> toJson() => {
+        'etag': etag,
+        'user_id': userId,
+        'role': role,
+        'share_active': shareActive,
+        'subject_consent': subjectConsent,
+        'tags': tags.toJson(),
+      };
+
+  factory SyncStatus.fromJson(Map<String, dynamic> json) => SyncStatus(
+        etag: (json['etag'] as String?) ?? '',
+        userId: (json['user_id'] as String?) ?? '',
+        role: (json['role'] as String?) ?? '',
+        shareActive: json['share_active'] as bool? ?? false,
+        subjectConsent: json['subject_consent'] as bool? ?? false,
+        tags: SyncTags.fromJson(json['tags'] as Map<String, dynamic>?),
+      );
+}

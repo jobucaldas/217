@@ -14,6 +14,19 @@ import '../models.dart';
 import '../offline/local_store.dart';
 import 'platform_http.dart';
 
+enum SyncStatusKind { notModified, changed, unsupported }
+
+/// Answer to [ApiClient.syncStatus]; [status] is set only when [changed].
+class SyncStatusResult {
+  const SyncStatusResult(this.kind, [this.status]);
+
+  final SyncStatusKind kind;
+  final SyncStatus? status;
+
+  bool get notModified => kind == SyncStatusKind.notModified;
+  bool get unsupported => kind == SyncStatusKind.unsupported;
+}
+
 class ApiClient {
   ApiClient(this.config,
       {http.Client? httpClient,
@@ -143,14 +156,17 @@ class ApiClient {
   Future<bool> setApiBaseUrl(String value) async {
     final parsed = parseApiBase(value);
     final next = parsed.isEmpty ? config.defaultApiBaseUrl : parsed;
+    final changed = next != config.apiBaseUrl;
+    if (changed) {
+      await clearSession();
+    }
     if (next == config.defaultApiBaseUrl) {
       await _storage.delete(key: _apiBaseKey);
     } else {
       await _storage.write(key: _apiBaseKey, value: next);
     }
-    if (next == config.apiBaseUrl) return false;
+    if (!changed) return false;
     config.apiBaseUrl = next;
-    await clearSession();
     return true;
   }
 
@@ -364,10 +380,13 @@ class ApiClient {
     Uri uri, {
     Object? body,
     bool auth = true,
+    Map<String, String>? headers,
   }) async {
-    var response = await _sendOnce(method, uri, body: body, auth: auth);
+    var response =
+        await _sendOnce(method, uri, body: body, auth: auth, headers: headers);
     if (auth && response.statusCode == 401 && await _renewSession()) {
-      response = await _sendOnce(method, uri, body: body, auth: auth);
+      response = await _sendOnce(method, uri,
+          body: body, auth: auth, headers: headers);
     }
     if (auth &&
         response.statusCode == 403 &&
@@ -382,15 +401,19 @@ class ApiClient {
     Uri uri, {
     Object? body,
     bool auth = true,
+    Map<String, String>? headers,
   }) async {
-    final headers = <String, String>{'Content-Type': 'application/json'};
+    final requestHeaders = <String, String>{
+      'Content-Type': 'application/json',
+      ...?headers,
+    };
     if (auth) {
       final token = await readSessionToken();
       if (token != null && token.isNotEmpty) {
-        headers['Authorization'] = 'Bearer $token';
+        requestHeaders['Authorization'] = 'Bearer $token';
       }
     }
-    final request = http.Request(method, uri)..headers.addAll(headers);
+    final request = http.Request(method, uri)..headers.addAll(requestHeaders);
     if (body != null) {
       request.body = jsonEncode(body);
     }
@@ -687,6 +710,33 @@ class ApiClient {
     return (decoded['notes'] as List<dynamic>? ?? const [])
         .map((e) => InboxMessage.fromJson(e as Map<String, dynamic>))
         .toList();
+  }
+
+  /// Asks what changed since [etag] (`GET /api/sync/status`). A 304 costs the
+  /// server no database work, so this is what the periodic checks send
+  /// instead of reading the inbox or the calendar. An older server without
+  /// the endpoint answers [SyncStatusKind.unsupported]; offline, 401 after a
+  /// failed renewal and 403 throw like any other call.
+  Future<SyncStatusResult> syncStatus({String? etag}) async {
+    final response = await _send(
+      'GET',
+      _uri('/api/sync/status'),
+      headers: {
+        if (etag != null && etag.isNotEmpty) 'If-None-Match': '"$etag"',
+      },
+    );
+    switch (response.statusCode) {
+      case 304:
+        return const SyncStatusResult(SyncStatusKind.notModified);
+      case 404:
+        return const SyncStatusResult(SyncStatusKind.unsupported);
+      case 200:
+        return SyncStatusResult(
+          SyncStatusKind.changed,
+          SyncStatus.fromJson(jsonDecode(response.body) as Map<String, dynamic>),
+        );
+    }
+    throw ApiException('sync status', response);
   }
 
   /// Sends a message to the other person of the active share.
