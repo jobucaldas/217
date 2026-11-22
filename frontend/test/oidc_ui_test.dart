@@ -24,6 +24,7 @@ ApiClient client() => ApiClient(
       httpClient: MockClient((request) async {
         if (request.url.path == '/api/auth/config') {
           return http.Response(jsonEncode({
+            'authkit': false,
             'workos': false,
             'password': false,
             'oidc': {'name': 'Example'},
@@ -49,6 +50,10 @@ void main() {
     expect(find.text('Continue with Example'), findsOneWidget);
     expect(find.byKey(const ValueKey('auth-email')), findsNothing);
     expect(find.byKey(const ValueKey('auth-sign-in')), findsNothing);
+  });
+
+  test('an OIDC-only server passes the server check', () async {
+    expect(await client().checkServer(), ServerCheck.ok);
   });
 
   for (final linked in [false, true]) {

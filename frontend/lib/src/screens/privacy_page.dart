@@ -172,6 +172,7 @@ class _PrivacyPageState extends State<PrivacyPage> {
     // A password account re-enters its password; otherwise the provider
     // redirect (WorkOS, else the linked OIDC provider) gives the fresh sign-in.
     if (widget.api.passwordAuth &&
+        web.user != null &&
         ((web.user?.hasPassword ?? false) ||
             (!widget.api.workos && !(web.user?.oidcLinked ?? false)))) {
       final ok = await showDialog<bool>(
@@ -618,7 +619,7 @@ class _PrivacyPageState extends State<PrivacyPage> {
     final user = web.user;
     if (user == null || _deleted) {
       if (_deleted) return const [];
-      if (!widget.api.authkit) return [Text(t.signInUnavailable, style: muted)];
+      if (!widget.api.authkit && widget.api.oidcName == null) return [Text(t.signInUnavailable, style: muted)];
       return [
         Text(t.signInPrompt, style: muted),
         const SizedBox(height: 12),
