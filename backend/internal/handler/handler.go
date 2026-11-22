@@ -611,6 +611,10 @@ func (h *Handler) ExchangeWorkOS(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	payload := h.sessionPayload(w, user)
+	if payload == nil {
+		return
+	}
 	var deviceKeyID string
 	if devicePublicKey != nil {
 		if deviceKeyID, err = h.store.CreateDeviceKey(user.ID, devicePublicKey); err != nil {
@@ -623,10 +627,6 @@ func (h *Handler) ExchangeWorkOS(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Printf("create session failed: %v", err)
 		http.Error(w, `{"error":"cannot create session"}`, http.StatusInternalServerError)
-		return
-	}
-	payload := h.sessionPayload(w, user)
-	if payload == nil {
 		return
 	}
 	payload["session_token"] = sessionToken

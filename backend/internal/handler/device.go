@@ -124,14 +124,14 @@ func (h *Handler) DeviceSession(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	payload := h.sessionPayload(w, user)
+	if payload == nil {
+		return
+	}
 	token, err := h.createSessionForUser(w, r, user, body.KeyID)
 	if err != nil {
 		log.Printf("create device session failed: %v", err)
 		http.Error(w, `{"error":"cannot create session"}`, http.StatusInternalServerError)
-		return
-	}
-	payload := h.sessionPayload(w, user)
-	if payload == nil {
 		return
 	}
 	payload["session_token"] = token

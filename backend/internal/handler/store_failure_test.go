@@ -13,7 +13,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"217/backend/internal/auth"
 	"217/backend/internal/model"
 	"217/backend/internal/store"
 )
@@ -147,6 +149,70 @@ func TestSessionShareFailure(t *testing.T) {
 	h.CurrentSession(w, r)
 	if w.Code != 503 {
 		t.Fatalf("status = %d, want 503", w.Code)
+	}
+}
+
+type exchangeFailureProvider struct{}
+
+func (exchangeFailureProvider) AuthCodeURL(string, string, string) string { return "" }
+func (exchangeFailureProvider) Exchange(context.Context, string, string, string) (*auth.OAuthUserInfo, error) {
+	return &auth.OAuthUserInfo{Subject: "subject", Email: "user@example.com", EmailVerified: true}, nil
+}
+
+type trackingFailureStore struct {
+	*failingStore
+	keys, sessions int
+}
+
+func (s *trackingFailureStore) CreateDeviceKey(userID string, key []byte) (string, error) {
+	s.keys++
+	return s.Store.CreateDeviceKey(userID, key)
+}
+func (s *trackingFailureStore) CreateDeviceSession(userID, keyID, token string, expires time.Time) error {
+	s.sessions++
+	return s.Store.CreateDeviceSession(userID, keyID, token, expires)
+}
+
+func TestExchangeShareFailureDoesNotCreateDeviceKeyOrSession(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	der, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &trackingFailureStore{failingStore: &failingStore{Store: store.NewMemoryStore(), shareErr: errors.New("database unavailable")}}
+	h := New(s)
+	h.SetOAuthProvider(exchangeFailureProvider{})
+	body := `{"code":"code","code_verifier":"verifier","redirect_uri":"com.jobucaldas.a217://auth/callback","device_public_key":"` + base64.StdEncoding.EncodeToString(der) + `"}`
+	w := httptest.NewRecorder()
+	h.ExchangeWorkOS(w, httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body)))
+	if w.Code != http.StatusServiceUnavailable || s.keys != 0 || s.sessions != 0 {
+		t.Fatalf("status = %d, device keys = %d, sessions = %d: %s", w.Code, s.keys, s.sessions, w.Body.String())
+	}
+}
+
+func TestDeviceSessionShareFailureDoesNotCreateSession(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	der, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(deviceSignedMessage("key", "challenge"))
+	sig, err := ecdsa.SignASN1(rand.Reader, key, digest[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &trackingFailureStore{failingStore: &failingStore{Store: store.NewMemoryStore(), key: der, user: &model.User{ID: "user"}, shareErr: errors.New("database unavailable")}}
+	body := `{"key_id":"key","challenge":"challenge","signature":"` + base64.StdEncoding.EncodeToString(sig) + `"}`
+	w := httptest.NewRecorder()
+	New(s).DeviceSession(w, httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body)))
+	if w.Code != http.StatusServiceUnavailable || s.sessions != 0 {
+		t.Fatalf("status = %d, sessions = %d: %s", w.Code, s.sessions, w.Body.String())
 	}
 }
 
