@@ -170,10 +170,10 @@ class _PrivacyPageState extends State<PrivacyPage> {
     if (web == null) return;
     setState(() => _error = null);
     // A password account re-enters its password; otherwise the provider
-    // redirect (WorkOS, else OIDC) gives the fresh sign-in.
+    // redirect (WorkOS, else the linked OIDC provider) gives the fresh sign-in.
     if (widget.api.passwordAuth &&
         ((web.user?.hasPassword ?? false) ||
-            (!widget.api.workos && widget.api.oidcName == null))) {
+            (!widget.api.workos && !(web.user?.oidcLinked ?? false)))) {
       final ok = await showDialog<bool>(
         context: context,
         builder: (_) => _PasswordReentryDialog(
