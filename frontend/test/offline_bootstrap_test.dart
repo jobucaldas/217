@@ -3680,6 +3680,427 @@ void main() {
     expect(upsertEntryCalls, 1);
     expect(await local.pendingWrites('u-owner'), isEmpty);
   });
+
+  test(
+      'delayed profile, role, and stage 200 responses cannot undo a newer '
+      '403 consent required or clear its fallback marker', () async {
+    FlutterSecureStorage.setMockInitialValues({'session_token': 'tok'});
+    final local = _FailingSessionWriteStore();
+    await local.writeDoc(localGlobalUser, 'last_user', 'u-owner');
+    await local.writeDoc(
+      'u-owner',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-owner',
+          'email': 'owner@example.com',
+          'role': 'owner',
+        },
+        'share': {'status': 'none'},
+        'consent': {'version': 1, 'required': false},
+      }),
+    );
+    await local.writeDoc('u-owner', 'calendar', 'own');
+    await local.replaceMonth('u-owner', 2026, 11, const [
+      Entry(date: '2026-11-15', taken: true, notes: 'owner private note'),
+    ]);
+
+    final mutationGate = Completer<void>();
+    var reached = 0;
+    final allReached = Completer<void>();
+
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: local,
+      httpClient: MockClient((request) async {
+        if (request.url.path == '/api/account/profile' ||
+            request.url.path == '/api/account/role' ||
+            request.url.path == '/api/account/stage') {
+          reached++;
+          if (reached == 3 && !allReached.isCompleted) allReached.complete();
+          await mutationGate.future;
+          // Stale 200 generated before consent was withdrawn.
+          return http.Response(
+            jsonEncode({
+              'user': {
+                'id': 'u-owner',
+                'email': 'owner@example.com',
+                'role': 'owner',
+                'display_name': 'Stale Name',
+                'stage': 'regular',
+              },
+              'share': {'status': 'none'},
+              'consent': {'version': 1, 'required': false},
+            }),
+            200,
+          );
+        }
+        if (request.url.path == '/api/entries') {
+          return http.Response(
+            '{"error":"consent required","consent_version":2}',
+            403,
+          );
+        }
+        return http.Response('{}', 200);
+      }),
+    );
+
+    expect((await api.cachedSession())?.consentRequired, isFalse);
+
+    // Start profile, role, and stage updates before consent is withdrawn.
+    final fProfile = api.updateProfile(displayName: 'Stale Name');
+    final fRole = api.setRole('owner');
+    final fStage = api.setStage('regular');
+    final expects = [
+      expectLater(fProfile, throwsA(isA<StaleAuthScopeException>())),
+      expectLater(fRole, throwsA(isA<StaleAuthScopeException>())),
+      expectLater(fStage, throwsA(isA<StaleAuthScopeException>())),
+    ];
+    await allReached.future;
+
+    // Force fallback-marker persistence on the 403, then heal disk writes
+    // before the delayed 200 mutations return so they would have overwritten
+    // both the session doc and the fallback marker if unguarded.
+    local.failSessionWrite = true;
+    await expectLater(
+      api.listEntries(2026, 11),
+      throwsA(isA<ApiException>()
+          .having((e) => e.message, 'message', 'consent required')),
+    );
+    local.failSessionWrite = false;
+
+    mutationGate.complete();
+    await Future.wait(expects);
+
+    expect(await api.cachedMonth(2026, 11), isNull);
+    final restarted = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: local,
+      httpClient: MockClient((_) async => http.Response('unavailable', 503)),
+    );
+    final restartedSession = await restarted.cachedSession();
+    expect(restartedSession?.consentRequired, isTrue);
+    expect(restartedSession?.consentVersion, 2);
+    expect(await restarted.cachedMonth(2026, 11), isNull);
+  });
+
+  testWidgets(
+      'confirmed session consentRequired still blocks calendar and persists '
+      'fallback marker when local session write fails', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(412, 915);
+    addTearDown(tester.view.reset);
+
+    FlutterSecureStorage.setMockInitialValues({'session_token': 'tok'});
+    final local = _FailingSessionWriteStore();
+    await local.writeDoc(localGlobalUser, 'last_user', 'u-owner');
+    await local.writeDoc(
+      'u-owner',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-owner',
+          'email': 'owner@example.com',
+          'role': 'owner',
+        },
+        'share': {'status': 'none'},
+        'consent': {'version': 1, 'required': false},
+      }),
+    );
+    await local.writeDoc('u-owner', 'calendar', 'own');
+    await local.replaceMonth('u-owner', 2026, 11, const [
+      Entry(date: '2026-11-15', taken: true, notes: 'owner private note'),
+    ]);
+    await local.replaceMonth('u-owner', 2026, 10, const []);
+    await local.replaceMonth('u-owner', 2026, 12, const []);
+    local.failSessionWrite = true;
+
+    final sessionGate = Completer<void>();
+
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: local,
+      httpClient: MockClient((request) async {
+        if (request.url.path == '/api/auth/config') {
+          return http.Response(
+            jsonEncode({'authkit': true, 'privacy_contact': ''}),
+            200,
+          );
+        }
+        if (request.url.path == '/api/auth/session') {
+          await sessionGate.future;
+          return http.Response(
+            jsonEncode({
+              'user': {
+                'id': 'u-owner',
+                'email': 'owner@example.com',
+                'role': 'owner',
+              },
+              'share': {'status': 'none'},
+              'consent': {'version': 2, 'required': true},
+            }),
+            200,
+          );
+        }
+        return http.Response('unavailable', 503);
+      }),
+    );
+
+    await tester.pumpWidget(App217(
+      config: api.config,
+      api: api,
+      clock: () => DateTime(2026, 11, 15, 10, 0),
+    ));
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.byType(CalendarScreen), findsOneWidget);
+    expect(find.text('owner private note'), findsWidgets);
+
+    // Server confirms consentRequired: true while session-doc persistence fails.
+    sessionGate.complete();
+    await tester.pumpAndSettle();
+
+    expect(find.byType(ConsentScreen), findsOneWidget);
+    expect(find.byType(CalendarScreen), findsNothing);
+    expect(find.text('owner private note'), findsNothing);
+    expect(await api.cachedMonth(2026, 11), isNull);
+
+    // Fresh offline restart also observes the secure-storage fallback marker.
+    final restarted = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: local,
+      httpClient: MockClient((_) async => http.Response('unavailable', 503)),
+    );
+    final restartedSession = await restarted.cachedSession();
+    expect(restartedSession?.consentRequired, isTrue);
+    expect(restartedSession?.consentVersion, 2);
+    expect(await restarted.cachedMonth(2026, 11), isNull);
+  });
+
+  test(
+      'unreadable consent_blocked_user fallback marker fails closed and '
+      'refuses to adopt a cached consented session', () async {
+    final prevPlatform = FlutterSecureStoragePlatform.instance;
+    final storage = _FailingKeyStorage(
+      {'session_token': 'tok'},
+      failReadKeys: {'consent_blocked_user'},
+    );
+    FlutterSecureStoragePlatform.instance = storage;
+    addTearDown(() => FlutterSecureStoragePlatform.instance = prevPlatform);
+
+    final local = MemoryLocalStore();
+    await local.writeDoc(localGlobalUser, 'last_user', 'u-owner');
+    await local.writeDoc(
+      'u-owner',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-owner',
+          'email': 'owner@example.com',
+          'role': 'owner',
+        },
+        'share': {'status': 'none'},
+        'consent': {'version': 1, 'required': false},
+      }),
+    );
+    await local.writeDoc('u-owner', 'calendar', 'own');
+    await local.replaceMonth('u-owner', 2026, 11, const [
+      Entry(date: '2026-11-15', taken: true, notes: 'owner private note'),
+    ]);
+
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: local,
+      httpClient: MockClient((_) async => http.Response('unavailable', 503)),
+    );
+
+    // Must not adopt a cached snapshot that claims consent when the fallback
+    // denial marker cannot be read.
+    expect(await api.cachedSession(), isNull);
+    expect(await api.cachedMonth(2026, 11), isNull);
+    final offlineSession = await api.currentSession();
+    expect(offlineSession.user, isNull);
+    expect(await api.cachedMonth(2026, 11), isNull);
+  });
+
+  test(
+      'in-flight outbox edit receiving pre-acceptance 403 retries immediately '
+      'after acceptConsent calls syncPending', () async {
+    FlutterSecureStorage.setMockInitialValues({'session_token': 'tok'});
+    final local = MemoryLocalStore();
+    await local.writeDoc(localGlobalUser, 'last_user', 'u-owner');
+    await local.writeDoc(
+      'u-owner',
+      'session',
+      jsonEncode({
+        'user': {
+          'id': 'u-owner',
+          'email': 'owner@example.com',
+          'role': 'owner',
+        },
+        'share': {'status': 'none'},
+        'consent': {'version': 1, 'required': false},
+      }),
+    );
+    await local.writeDoc('u-owner', 'calendar', 'own');
+    await local.enqueue(
+      'u-owner',
+      const PendingWrite(
+        date: '2026-11-15',
+        entry: Entry(date: '2026-11-15', taken: true, notes: 'queued note'),
+      ),
+    );
+
+    final firstUpsertReached = Completer<void>();
+    final firstUpsertGate = Completer<void>();
+    var upsertCalls = 0;
+
+    final api = ApiClient(
+      AppConfig(
+        apiBaseUrl: 'https://api.example',
+        workosClientId: 'client',
+        redirectUri: 'com.caldasstudios.app217://auth/callback',
+      ),
+      localStore: local,
+      httpClient: MockClient((request) async {
+        if (request.url.path == '/api/entries/2026-11-15' &&
+            request.method == 'POST') {
+          upsertCalls++;
+          if (upsertCalls == 1) {
+            if (!firstUpsertReached.isCompleted) firstUpsertReached.complete();
+            await firstUpsertGate.future;
+            return http.Response(
+              '{"error":"consent required","consent_version":2}',
+              403,
+            );
+          }
+          return http.Response(
+            jsonEncode({
+              'date': '2026-11-15',
+              'taken': true,
+              'notes': 'queued note',
+              'period': false,
+            }),
+            200,
+          );
+        }
+        if (request.url.path == '/api/account/consent' &&
+            request.method == 'PUT') {
+          return http.Response(
+            jsonEncode({
+              'user': {
+                'id': 'u-owner',
+                'email': 'owner@example.com',
+                'role': 'owner',
+              },
+              'share': {'status': 'none'},
+              'consent': {'version': 2, 'required': false},
+            }),
+            200,
+          );
+        }
+        return http.Response('{}', 200);
+      }),
+    );
+
+    expect((await api.cachedSession())?.consentRequired, isFalse);
+
+    // Start draining the queued edit; pause request #1 in flight.
+    final syncFuture = api.syncPending();
+    await firstUpsertReached.future;
+    expect(upsertCalls, 1);
+
+    // Accept consent while outbox request #1 is still in flight. This bumps
+    // _consentRevision and calls syncPending(), setting _syncAgain = true.
+    final accepted = await api.acceptConsent(2);
+    expect(accepted.consentRequired, isFalse);
+
+    // Release request #1's pre-acceptance 403. _drainQueue must honor
+    // _syncAgain and immediately send request #2 to flush the edit.
+    firstUpsertGate.complete();
+    await syncFuture;
+
+    expect(upsertCalls, 2);
+    expect(await local.pendingWrites('u-owner'), isEmpty);
+    expect(api.pendingWrites.value, 0);
+  });
+}
+
+class _FailingKeyStorage extends FlutterSecureStoragePlatform {
+  _FailingKeyStorage(
+    Map<String, String> initial, {
+    this.failReadKeys = const {},
+  }) : _values = Map.of(initial);
+
+  final Map<String, String> _values;
+  final Set<String> failReadKeys;
+
+  @override
+  Future<String?> read({
+    required String key,
+    required Map<String, String> options,
+  }) async {
+    if (failReadKeys.contains(key)) {
+      throw StateError('storage read failed for $key');
+    }
+    return _values[key];
+  }
+
+  @override
+  Future<void> write({
+    required String key,
+    required String value,
+    required Map<String, String> options,
+  }) async {
+    _values[key] = value;
+  }
+
+  @override
+  Future<bool> containsKey({
+    required String key,
+    required Map<String, String> options,
+  }) async =>
+      _values.containsKey(key);
+
+  @override
+  Future<void> delete({
+    required String key,
+    required Map<String, String> options,
+  }) async {
+    _values.remove(key);
+  }
+
+  @override
+  Future<Map<String, String>> readAll({
+    required Map<String, String> options,
+  }) async =>
+      Map.of(_values);
+
+  @override
+  Future<void> deleteAll({required Map<String, String> options}) async {
+    _values.clear();
+  }
 }
 
 class _FailingSessionWriteStore extends MemoryLocalStore {
