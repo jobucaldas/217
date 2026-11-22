@@ -183,9 +183,18 @@ func (w *wrapped) DeleteSession(sessionID string) error {
 	return w.Store.DeleteSession(sessionID)
 }
 
-// A device key can back other sessions, which only the store knows.
+// A device key can back other sessions, all of the same user: drop that
+// user's, or every session when the user cannot be told.
 func (w *wrapped) DeleteSessionAndDevice(sessionID string) error {
-	defer w.hub.Flush()
+	user, _, err := w.Store.GetSessionPrincipal(sessionID)
+	known := err == nil && user != nil
+	defer func() {
+		if known {
+			w.drop(true, user.ID)
+		} else {
+			w.drop(false)
+		}
+	}()
 	return w.Store.DeleteSessionAndDevice(sessionID)
 }
 

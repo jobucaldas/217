@@ -297,6 +297,25 @@ func TestInvalidateLeavesOtherUsersCached(t *testing.T) {
 	}
 }
 
+func TestLogoutInvalidatesOnlyThatUser(t *testing.T) {
+	f := newFixture(t)
+	_, other := addUser(t, f, "other@example.com", model.RoleOwner)
+	for _, token := range []string{f.token, other} {
+		if _, err := f.hub.Lookup(token); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.s.DeleteSessionAndDevice(f.token); err != nil {
+		t.Fatal(err)
+	}
+	if cached(f, f.token) {
+		t.Fatal("logged-out session still cached")
+	}
+	if !cached(f, other) {
+		t.Fatal("logout dropped another user's session")
+	}
+}
+
 func TestLoadRacingUserInvalidationIsDiscarded(t *testing.T) {
 	f := newFixture(t)
 	other, _ := addUser(t, f, "other@example.com", model.RoleOwner)
